@@ -1,8 +1,9 @@
 {
-  "revision": "f147359d65416d42a73278ca512f4a814bc2409a919086b50f7c621756eade85",
+  "revision": "a698b9e0d7f227d8247a51564dfffa0d099260820f7eba2a12579131b05aa9ae",
   "outcome": "implemented",
-  "reason": "Task-scoped domyjob rooms carry delegate status, blockers, questions, and resource claims with explicit ownership and expiry across managed clients, while preserving task authorization and native resource locking.",
+  "reason": "Agent hooks lint supported file mutations and script invocations immediately, while project commands and task-scoped coordination keep their existing authority boundaries.",
   "evidence": [
+    "crates/dotfiles/tests/lint_hook.rs",
     "home/dot_agents/skills/delegation/SKILL.md",
     "crates/dotfiles/src/setup.rs",
     "crates/dotfiles/tests/chat.rs",

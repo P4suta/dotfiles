@@ -101,6 +101,7 @@
 | [2026-10-22 Assurance follows change provenance](assurance-follows-change-provenance.md) | proposed |  |
 | [2026-10-22 Decide PR independence from merge results](decide-pr-independence-from-merge-results.md) | proposed |  |
 | [2026-10-22 First push requires an empty remote advertisement](first-push-requires-an-empty-remote-advertisement.md) | accepted |  |
+| [2026-10-22 Lint agent writes and script invocations through one runtime](lint-agent-writes-and-script-invocations.md) | proposed |  |
 | [2026-10-22 Run heavy verification at the release gate](run-heavy-verification-at-the-release-gate.md) | accepted |  |
 | [2026-10-22 Scope a legacy bypass to one script invocation](script-scoped-legacy-bypass.md) | accepted |  |
 | [2026-10-22 Make one stack the unit of open work and merge it through a merge queue](stack-first-pull-requests-through-a-merge-queue.md) | accepted |  |

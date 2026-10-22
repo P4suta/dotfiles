@@ -16,6 +16,7 @@ pub const BYPASS: &str = "DOTFILES_LEGACY_BYPASS";
 
 /// The largest script the hook reads to inspect the commands it runs, 1 MiB.
 const SCRIPT_LIMIT: u64 = 1024 * 1024;
+const SCRIPT_PREFIX_BYTES: u64 = 4096;
 
 /// How deep the hook follows scripts that a command runs.
 pub(crate) const DEPTH: usize = 4;
@@ -88,6 +89,32 @@ pub(crate) fn command_words(words: &[String]) -> (&[String], Option<&str>) {
             {
                 tail
             }
+            [word, tail @ ..] if program(word) == "xargs" => {
+                let mut arguments = tail;
+                loop {
+                    arguments = match arguments {
+                        [flag, _, after @ ..]
+                            if matches!(
+                                flag.as_str(),
+                                "-n" | "-P"
+                                    | "-I"
+                                    | "-L"
+                                    | "-s"
+                                    | "-d"
+                                    | "--max-args"
+                                    | "--max-procs"
+                                    | "--replace"
+                                    | "--delimiter"
+                            ) =>
+                        {
+                            after
+                        }
+                        [flag, after @ ..] if flag.starts_with('-') => after,
+                        _ => break,
+                    };
+                }
+                arguments
+            }
             [word, verb, tail @ ..]
                 if program(word) == "mise" && matches!(verb.as_str(), "x" | "exec") =>
             {
@@ -102,7 +129,12 @@ pub(crate) fn command_words(words: &[String]) -> (&[String], Option<&str>) {
 }
 
 /// The script file a command runs, such as `bash build.sh`, `./build.sh`, or `. env.sh`.
-fn script_path<'a>(name: &str, first: &'a str, arguments: &'a [String]) -> Option<&'a str> {
+pub(crate) fn script_path<'a>(
+    name: &str,
+    first: &'a str,
+    arguments: &'a [String],
+    directory: Option<&Path>,
+) -> Option<&'a str> {
     if SHELLS.contains(&name) {
         let inline = arguments.iter().any(|argument| {
             argument.starts_with('-') && !argument.starts_with("--") && argument.contains('c')
@@ -118,10 +150,58 @@ fn script_path<'a>(name: &str, first: &'a str, arguments: &'a [String]) -> Optio
             .find(|argument| !argument.starts_with('-'))
             .map(String::as_str);
     }
-    let shell_file = Path::new(first)
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("sh"));
-    (first.contains('/') && shell_file).then_some(first)
+    let shell_file = Path::new(first).extension().is_some_and(|extension| {
+        ["sh", "bash", "zsh"]
+            .iter()
+            .any(|name| extension.eq_ignore_ascii_case(name))
+    });
+    let shebang = if first.contains('/') && Path::new(first).extension().is_none() {
+        use std::io::Read;
+        let path =
+            directory.map_or_else(|| Path::new(first).to_path_buf(), |root| root.join(first));
+        let mut prefix = Vec::new();
+        if let Ok(file) = std::fs::File::open(path)
+            && file
+                .take(SCRIPT_PREFIX_BYTES)
+                .read_to_end(&mut prefix)
+                .is_err()
+        {
+            return Some(first);
+        }
+        let text = String::from_utf8_lossy(&prefix);
+        matches!(
+            crate::lint_hook_rules::classify(first, text.lines().next().unwrap_or_default()),
+            crate::lint_hook_rules::FileType::Shell | crate::lint_hook_rules::FileType::Zsh
+        )
+    } else {
+        false
+    };
+    (first.contains('/') && (shell_file || shebang)).then_some(first)
+}
+
+pub(crate) fn assigned(
+    words: &[String],
+    variables: &mut std::collections::BTreeMap<String, String>,
+) {
+    for word in words.iter().skip_while(|word| word.as_str() == "export") {
+        if !is_assignment(word) {
+            break;
+        }
+        if let Some((name, value)) = word.split_once('=') {
+            let facts: Vec<_> = variables
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect();
+            match crate::lint_hook_rules::resolve_script(value, &facts) {
+                crate::lint_hook_rules::ScriptPath::Literal(value) => {
+                    variables.insert(name.to_owned(), value);
+                }
+                crate::lint_hook_rules::ScriptPath::Unresolved => {
+                    variables.remove(name);
+                }
+            }
+        }
+    }
 }
 
 fn excepted(table: &Modern, path: &Path, directory: Option<&Path>) -> bool {
@@ -285,14 +365,34 @@ fn shell_word(text: &str) -> Option<(&str, &str)> {
 fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize) -> Findings {
     let nested = depth < DEPTH;
     let mut findings = Findings::default();
+    let mut variables = std::collections::BTreeMap::new();
     for words in segments(command) {
+        assigned(&words, &mut variables);
         let (command_words, bypass) = command_words(&words);
         let Some((first, rest)) = command_words.split_first() else {
             continue;
         };
         let name = program(first);
         let name = name.as_str();
-        if let Some(path) = script_path(name, first, rest) {
+        let path = script_path(name, first, rest, directory);
+        if (SHELLS.contains(&name) || path.is_some())
+            && dynamic_xargs_script(&words, command_words, path)
+        {
+            findings.refusals.push("Refused: xargs supplies an unresolved script path.\nNext action: use a literal path in the shell's script argument before invoking xargs.".to_owned());
+            continue;
+        }
+        if let Some(path) = path {
+            let facts: Vec<_> = variables
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect();
+            let crate::lint_hook_rules::ScriptPath::Literal(resolved) =
+                crate::lint_hook_rules::resolve_script(path, &facts)
+            else {
+                findings.refusals.push(format!("Refused: cannot resolve script path {path}.\nNext action: use a literal path, or assign its variables to literal paths in this command."));
+                continue;
+            };
+            let path = resolved.as_str();
             if let Some(value) =
                 bypass.filter(|value| legacy_rules::script_bypass_names(value, path))
             {
@@ -345,6 +445,34 @@ fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize
         }
     }
     findings
+}
+
+fn dynamic_xargs_script(words: &[String], command: &[String], path: Option<&str>) -> bool {
+    use crate::lint_hook_rules::{ScriptArgument, ScriptInput, script_argument};
+    let wrappers: Vec<_> = words
+        .iter()
+        .take(words.len().saturating_sub(command.len()))
+        .collect();
+    let xargs = wrappers.iter().any(|word| program(word) == "xargs");
+    let replacement = wrappers.iter().enumerate().find_map(|(index, word)| {
+        if *word == "-I" {
+            return wrappers.get(index + 1).map(|word| word.as_str());
+        }
+        word.strip_prefix("-I").filter(|value| !value.is_empty())
+    });
+    let replaced = replacement.is_some_and(|marker| path.is_some_and(|path| path.contains(marker)));
+    let inline = command
+        .iter()
+        .skip(1)
+        .any(|word| word.starts_with('-') && !word.starts_with("--") && word.contains('c'));
+    let input = if path.is_none() {
+        ScriptInput::Missing
+    } else if replaced {
+        ScriptInput::Replaced
+    } else {
+        ScriptInput::Literal
+    };
+    script_argument(xargs, input, inline) == ScriptArgument::NeedsLiteral
 }
 
 #[cfg(test)]

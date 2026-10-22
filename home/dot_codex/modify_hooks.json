@@ -26,6 +26,9 @@
 {{- $_ := set $hooks "PreToolUse" (concat $pre (list $own_pre)) -}}
 {{- $post := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PostToolUse" (list) $hooks) "suffixes" (list (printf " %s" $timed))) | fromJson -}}
 {{- $_ := set $hooks "PostToolUse" (concat $post (list (dict "matcher" $shells "hooks" (list $timing)))) -}}
+{{- $lint := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "lint-hook" "trace" true) | fromJson -}}
+{{- $post := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PostToolUse" (list) $hooks) "suffixes" (list " lint-hook")) | fromJson -}}
+{{- $_ := set $hooks "PostToolUse" (concat $post (list (dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list $lint)))) -}}
 {{- $edit := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "issue-guard" "trace" true) | fromJson -}}
 {{- $issue := dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list $edit) -}}
 {{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list $issue)) -}}

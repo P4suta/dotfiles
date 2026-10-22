@@ -18,6 +18,15 @@ common = [
   "golangci-lint",
   "cargo:cargo-semver-checks",
   "github:github/gh-stack",
+  "shellcheck",
+  "shfmt",
+  "ruff",
+  "biome",
+  "actionlint",
+  "zizmor",
+  "taplo",
+  "hadolint",
+  "just",
 ]
 
 [platforms.linux.mise]

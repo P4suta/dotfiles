@@ -188,6 +188,8 @@ reason = "self-describing"
 why = "Each is a single-purpose command whose `--help` covers every use, and its misuse costs nothing that needs judgment beyond the project's own gates."
 tools = [
   "actionlint",
+  "biome",
+  "ruff",
   "air",
   "asciinema",
   "ast-grep",

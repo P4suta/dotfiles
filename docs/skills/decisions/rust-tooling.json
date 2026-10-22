@@ -1,8 +1,10 @@
 {
-  "revision": "1bdb81b72101db03b54625b38a4635f742e183f2da9ddc7b27f65668e824dae9",
-  "outcome": "keep",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "revision": "33efdc4637d3a74b519dc419a4b3ebb6300dd0651968c4611a482eb0507af60a",
+  "outcome": "implemented",
+  "reason": "The Rust runtime owns immediate linting of agent output and script invocations, including actionable missing-tool refusals, without adding a second shell implementation.",
   "evidence": [
+    "crates/dotfiles/src/lint_hook.rs",
+    "crates/dotfiles/tests/lint_hook.rs",
     "home/dot_agents/skills/rust-tooling/SKILL.md"
   ],
   "revisit": null

@@ -1,8 +1,9 @@
 {
-  "revision": "18b5cb86020e666962877c7891865d99f57655c09e590c2b27cae29d5c4863e7",
+  "revision": "2579d73cd71e8b187237fa9bad7e19147bafcfc59f6595e146992e74d8016d43",
   "outcome": "implemented",
-  "reason": "Keep effective hook diagnosis and staged scopes separate from gate implementations, and keep pre-push hooks to the fast gate on the current host.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Agent mutation hooks add immediate file linting with repository configuration and strict fallbacks, while staged and pre-push gates retain their existing scope.",
   "evidence": [
+    "crates/dotfiles/tests/lint_hook.rs",
     "home/dot_agents/skills/lefthook/SKILL.md",
     "docs/adr/run-heavy-verification-at-the-release-gate.md",
     "home/dot_agents/skills/lefthook/tools.toml",

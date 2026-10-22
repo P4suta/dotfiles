@@ -39,6 +39,9 @@ It also checks the final reply's prose in the owner's language, with at most one
 Both events keep every group another installer added and replace only these.
 Unrelated handlers remain in their existing groups.
 */ -}}
+{{- $lint := dict "type" "command" "command" (printf "%s lint-hook" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) "onFailure" "block" -}}
+{{- $post := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PostToolUse" (list) $hooks) "suffixes" (list " lint-hook")) | fromJson -}}
+{{- $_ := set $hooks "PostToolUse" (concat $post (list (dict "matcher" "Edit|Write|MultiEdit|apply_patch" "hooks" (list $lint)))) -}}
 {{- $session := list -}}
 {{- if eq .profile "windows" -}}
 {{-   $session = append $session (dict "type" "command" "command" (printf "%s health --session" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool)))) -}}

@@ -5,7 +5,7 @@ import { isAbsolute, join } from "node:path";
 type BeforeTool = NonNullable<Hooks["tool.execute.before"]>;
 
 /** How long the pre-execution hook may run before the plugin stops waiting on it. */
-const HOOK_TIMEOUT_MS = 10000;
+const HOOK_TIMEOUT_MS = 120000;
 
 /**
  * Refuses a malformed or file-writing shell command before it runs, through the

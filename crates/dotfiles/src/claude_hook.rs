@@ -471,6 +471,9 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
     for message in legacy.refusals {
         findings.push(blocked(LEGACY, GateRefusal, message));
     }
+    for message in crate::lint_hook::scripts(command, event["cwd"].as_str().map(Path::new)) {
+        findings.push(blocked("hook.lint", GateRefusal, message));
+    }
     for message in legacy.unavailable {
         findings.push(blocked(
             INSPECTION,

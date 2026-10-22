@@ -19,6 +19,7 @@ Call the same mise, just, or Rust xtask commands that the pull-request CI gate u
 Keep proofs, Miri, fuzzing, mutation, stress repeats, and other hosts out of hooks, because `ci-budget` places them at the release gate.
 Match file scopes exactly, preserve filenames with spaces, and confine formatter changes to the intended staged content.
 Parallelize only independent checks, and propagate every relevant failure.
+The agent write hooks run `dotfiles lint-hook` on changed paths with repository linter configuration or strict defaults, so fix their findings before continuing.
 Keep credential-consuming and release actions out of commit and push hooks.
 
 Fix the code or the broken environment instead of using `--no-verify`, skip variables, or a weaker CI rule.

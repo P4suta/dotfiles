@@ -18,6 +18,15 @@ windows-x64 = "2337f9fdb13ba51d3bf5831cacec9c59e70fec9630e9ad30f65975eb6b83b162"
 
 # The versions of the shared tools on every profile, unless a profile's own `tool_versions` names another.
 [shared_tools.versions]
+shellcheck = "0.11.0"
+shfmt = "3.14.1"
+ruff = "0.17.1"
+biome = "2.6.2"
+actionlint = "1.7.12"
+zizmor = "1.31.1"
+taplo = "0.10.0"
+hadolint = "2.15.1"
+just = "1.59.0"
 java = "temurin-25"
 rust = "stable"
 # renovate: datasource=github-releases depName=github/gh-stack

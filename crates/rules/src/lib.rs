@@ -55,6 +55,7 @@ pub mod input_rules;
 pub mod instruction_rules;
 pub mod issue_guard_rules;
 pub mod legacy_rules;
+pub mod lint_hook_rules;
 pub mod lint_rules;
 pub mod local_state_rules;
 pub mod next_action_rules;
