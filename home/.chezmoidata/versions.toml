@@ -20,6 +20,8 @@ windows-x64 = "2337f9fdb13ba51d3bf5831cacec9c59e70fec9630e9ad30f65975eb6b83b162"
 [shared_tools.versions]
 java = "temurin-25"
 rust = "stable"
+# renovate: datasource=github-releases depName=github/gh-stack
+"github:github/gh-stack" = "v0.2.1"
 
 [platforms.linux.tool_versions]
 

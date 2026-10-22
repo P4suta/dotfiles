@@ -3,9 +3,11 @@
 mod context;
 mod evidence;
 mod local;
+mod merge;
 mod review_policy;
 pub use evidence::store_assessment;
 pub use local::Action as LocalAction;
+use merge::{await_result as await_merge, submit as submit_merge};
 
 /// Validate the owner-local issue contexts selected by the actual local change.
 ///
@@ -53,6 +55,7 @@ pub fn current_review_route(
 }
 
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
+pub use rules::pr_merge_rules;
 pub use rules::{pr_ready_rules, pr_rules, wip_rules};
 
 use crate::pr_ready_rules::{Action as Move, Report, Settlement, State, Workflow};
@@ -463,6 +466,11 @@ struct RuleParameters {
 #[derive(Deserialize)]
 struct RequiredCheck {
     context: String,
+}
+
+struct BranchRequirements {
+    checks: Vec<String>,
+    queue: bool,
 }
 
 impl ReportedCheck {
@@ -1313,15 +1321,24 @@ impl Github {
 
     /// The status checks that the rulesets of `base` require, by the name each check reports.
     fn required_checks(&self, target: &Target, base: &str) -> Result<Vec<String>> {
-        let rules: Vec<BranchRule> =
-            self.read(&format!("repos/{}/rules/branches/{base}", target.repo))?;
-        Ok(rules
+        Ok(self.branch_requirements(target, base)?.checks)
+    }
+
+    fn branch_requirements(&self, target: &Target, base: &str) -> Result<BranchRequirements> {
+        let rules: Vec<BranchRule> = self.read(&format!(
+            "repos/{}/rules/branches/{}",
+            target.repo,
+            review_policy::path_segment(base)?
+        ))?;
+        let queue = rules.iter().any(|rule| rule.r#type == "merge_queue");
+        let checks = rules
             .into_iter()
             .filter(|rule| rule.r#type == "required_status_checks")
             .filter_map(|rule| rule.parameters)
             .flat_map(|parameters| parameters.required_status_checks)
             .map(|check| check.context)
-            .collect())
+            .collect();
+        Ok(BranchRequirements { checks, queue })
     }
 
     /// Refuses a new PR while the authenticated user already has as many open PRs as the work-in-progress limit of the repository permits.
@@ -1396,6 +1413,15 @@ impl Github {
         response: &str,
         resource: &str,
     ) -> Result<T> {
+        self.response_with_status(response, resource, &["200"])
+    }
+
+    fn response_with_status<T: serde::de::DeserializeOwned>(
+        &self,
+        response: &str,
+        resource: &str,
+        statuses: &[&str],
+    ) -> Result<T> {
         let response = response.replace("\r\n", "\n");
         let (headers, body) = response
             .split_once("\n\n")
@@ -1405,7 +1431,10 @@ impl Github {
                 .lines()
                 .next()
                 .is_some_and(|line| line.starts_with("HTTP/")
-                    && line.split_whitespace().nth(1) == Some("200")),
+                    && line
+                        .split_whitespace()
+                        .nth(1)
+                        .is_some_and(|status| statuses.contains(&status))),
             "unexpected GitHub response status"
         );
         let header = |name: &str| -> Result<&str> {
@@ -2389,7 +2418,9 @@ fn merge_state(
     pr: u64,
     view: &MergeView,
     stacked: bool,
-) -> Result<MergeState> {
+    requirements: &BranchRequirements,
+    carry: Option<&review_policy::Checked>,
+) -> Result<(MergeState, Option<review_policy::Checked>)> {
     let lifecycle = match (view.state.as_str(), view.is_draft) {
         ("MERGED", _) => Lifecycle::Merged,
         ("CLOSED", _) => Lifecycle::Closed,
@@ -2405,10 +2436,23 @@ fn merge_state(
     } else {
         false
     };
-    // GitHub itself holds a merge to the required checks, so the merge state reads the rollup alone.
-    let (total, unfinished, failed, _) = tally(&view.status_check_rollup, &[]);
+    let (total, unfinished, failed, missing) =
+        tally(&view.status_check_rollup, &requirements.checks);
+    let checks = head_checks(total, unfinished.saturating_add(missing), failed);
     let mut exclusion = review_exclusion(&target.repo, pr, &view.body)?;
+    let mut assessment = None;
     if matches!(lifecycle, Lifecycle::Draft | Lifecycle::Ready) {
+        review_policy::fetch_pr(
+            &std::env::current_dir()?,
+            target,
+            view.base_ref_oid
+                .as_deref()
+                .context("actual merge base commit missing")?,
+            &view.head_ref_oid,
+        )?;
+        if let Some(prior) = carry {
+            review_policy::carry_forward(github, target, view, prior)?;
+        }
         let signer = review_policy::assessment_signer(github, target, &view.author, &view.source)?;
         let reviewed = review_policy::check(
             github,
@@ -2424,22 +2468,29 @@ fn merge_state(
         review_policy::validate_live_source(&reviewed, &view.source)?;
         review_policy::labels(&reviewed, &view.labels)?;
         if lifecycle == Lifecycle::Ready
-            && !behind
+            && (stacked || requirements.queue || !behind)
             && view.mergeable != "CONFLICTING"
-            && head_checks(total, unfinished, failed) == rules::pr_rules::HeadChecks::Success
+            && checks == rules::pr_rules::HeadChecks::Success
         {
             review_policy::completion(&reviewed, target, github, pr)?;
         }
         exclusion = Exclusion::Owner;
+        assessment = Some(reviewed);
     }
-    Ok(MergeState {
-        lifecycle,
-        conflict: view.mergeable == "CONFLICTING",
-        behind,
-        checks: head_checks(total, unfinished, failed),
-        clean: stacked || matches!(view.merge_state_status.as_str(), "CLEAN" | "HAS_HOOKS"),
-        exclusion,
-    })
+    Ok((
+        MergeState {
+            lifecycle,
+            conflict: view.mergeable == "CONFLICTING",
+            behind: pr_merge_rules::base_update(behind, stacked, requirements.queue)
+                != pr_merge_rules::BaseUpdate::Current,
+            checks,
+            clean: stacked
+                || requirements.queue
+                || matches!(view.merge_state_status.as_str(), "CLEAN" | "HAS_HOOKS"),
+            exclusion,
+        },
+        assessment,
+    ))
 }
 
 /// The structured refusal for a merge that stops at `pr`.
@@ -2498,8 +2549,14 @@ fn wait(target: &Target, pr: u64, polling: Polling, started: Instant) -> Result<
             .evidence(format!("waited {} seconds", started.elapsed().as_secs()))
         },
     )?;
-    std::thread::sleep(Duration::from_secs(polling.interval));
+    sleep_interval(polling, started);
     Ok(())
+}
+
+fn sleep_interval(polling: Polling, started: Instant) {
+    let remaining = Duration::from_secs(polling.timeout.saturating_mul(SECONDS_PER_MINUTE))
+        .saturating_sub(started.elapsed());
+    std::thread::sleep(Duration::from_secs(polling.interval).min(remaining));
 }
 
 /// Excludes the review for the owner's pause, so the draft becomes ready during the pause.
@@ -2544,24 +2601,48 @@ fn merge_independent(
     rerun: &str,
 ) -> Result<()> {
     let started = Instant::now();
+    let mut carry = None;
+    let mut updated_head = None;
     loop {
         let view = merge_view(target, pr)?;
-        match merge_step(merge_state(github, target, pr, &view, false)?, false, false) {
+        let requirements = github.branch_requirements(target, &view.base_ref_name)?;
+        let (state, assessment) = merge_state(
+            github,
+            target,
+            pr,
+            &view,
+            false,
+            &requirements,
+            carry.as_ref(),
+        )?;
+        if updated_head
+            .as_deref()
+            .is_some_and(|head| head != view.head_ref_oid)
+        {
+            carry = None;
+            updated_head = None;
+        }
+        match merge_step(state, false, false) {
             Step::Done => {
                 println!("#{pr} merged at {}", view.head_ref_oid);
                 return Ok(());
             }
             Step::Update => {
+                if carry.is_some() {
+                    wait(target, pr, polling, started)?;
+                    continue;
+                }
                 let mut args = arguments("update-branch", &target.repo);
                 args.push(pr.to_string().into());
                 print!("{}", gh(&args)?);
+                carry = assessment;
+                updated_head = Some(view.head_ref_oid);
                 wait(target, pr, polling, started)?;
             }
             Step::Restack => bail!("an independent PR is never restacked"),
             Step::Wait => wait(target, pr, polling, started)?,
             Step::Exclude => add_pause_lines(target, pr, &view)?,
             Step::Ready => {
-                let required = github.required_checks(target, &view.base_ref_name)?;
                 make_ready(
                     github,
                     &ready_target(target, &view),
@@ -2569,12 +2650,16 @@ fn merge_independent(
                     view.title,
                     view.body,
                     true,
-                    checks(&view.status_check_rollup, &required),
+                    checks(&view.status_check_rollup, &requirements.checks),
                     &view.head_ref_oid,
                     rerun,
                 )?;
             }
             Step::Merge => {
+                let heads = [(pr, view.head_ref_oid.clone())];
+                if requirements.queue {
+                    return submit_merge(github, target, pr, &heads, true, polling, started);
+                }
                 let mut args = arguments("merge", &target.repo);
                 args.extend(
                     [
@@ -2586,7 +2671,7 @@ fn merge_independent(
                     .map(OsString::from),
                 );
                 print!("{}", gh(&args)?);
-                wait(target, pr, polling, started)?;
+                return await_merge(github, target, &heads, false, polling, started);
             }
             Step::Stop(stop) => return Err(stop_refusal(target, pr, stop, false, &view).into()),
         }
@@ -2691,7 +2776,7 @@ fn require_checkout_origin(target: &Target, url: &str) -> Result<()> {
 
 /// Runs the pinned gh-stack on the target repository and takes the lease when it rewrites or pushes branches.
 fn gh_stack(target: &Target, lease: Option<&Lease>, args: &[&str]) -> Result<()> {
-    let mut process = Tool::GhStack.command();
+    let mut process = tool::owner_gh_stack()?;
     process
         .args(args)
         .env("GH_HOST", "github.com")
@@ -2704,7 +2789,7 @@ fn gh_stack(target: &Target, lease: Option<&Lease>, args: &[&str]) -> Result<()>
     }
     let status = process
         .status()
-        .context("start the pinned gh-stack; run `mise install` in the repository")?;
+        .context("start owner-provisioned gh-stack; apply the shared mise tools")?;
     let rebase = || command(&["pr-workflow", "stack", "rebase", "--repo", &target.repo]);
     match status.code() {
         Some(0) => Ok(()),
@@ -2854,6 +2939,7 @@ fn merge_stack(
     rerun: &str,
 ) -> Result<()> {
     let started = Instant::now();
+    let mut carry = BTreeMap::new();
     'restart: loop {
         let open = open_prs(target)?;
         let Some(top_head) = open
@@ -2868,17 +2954,44 @@ fn merge_stack(
             }
             return Err(stop_refusal(target, top, Stop::Closed, true, &view).into());
         };
-        let (numbers, _) = chain(&open, &top_head);
-        let mut verified = Vec::new();
+        let (numbers, trunk) = chain(&open, &top_head);
+        let requirements = github.branch_requirements(target, &trunk)?;
+        let mut observed = Vec::new();
+        let mut assessments = BTreeMap::new();
         for &pr in &numbers {
             let view = merge_view(target, pr)?;
-            match merge_step(merge_state(github, target, pr, &view, true)?, true, false) {
+            let (state, assessment) = merge_state(
+                github,
+                target,
+                pr,
+                &view,
+                true,
+                &requirements,
+                carry.get(&pr),
+            )?;
+            if let Some(assessment) = assessment {
+                assessments.insert(pr, assessment);
+            }
+            observed.push((pr, view, merge_step(state, true, false)));
+        }
+        if observed.iter().any(|(_, _, step)| *step == Step::Restack) {
+            for (pr, view, step) in &observed {
+                if let Step::Stop(stop) = step {
+                    return Err(stop_refusal(target, *pr, *stop, true, view).into());
+                }
+            }
+            sync_stack(target)?;
+            carry = assessments;
+            wait(target, top, polling, started)?;
+            continue;
+        }
+        carry.clear();
+        let mut verified = Vec::new();
+        for (pr, view, step) in observed {
+            match step {
                 Step::Merge => verified.push((pr, view.head_ref_oid)),
                 Step::Done => {}
-                Step::Restack => {
-                    sync_stack(target)?;
-                    continue 'restart;
-                }
+                Step::Restack => bail!("the stack must be restacked before its members can merge"),
                 Step::Wait => {
                     wait(target, pr, polling, started)?;
                     continue 'restart;
@@ -2888,7 +3001,6 @@ fn merge_stack(
                     continue 'restart;
                 }
                 Step::Ready => {
-                    let required = github.required_checks(target, &view.base_ref_name)?;
                     make_ready(
                         github,
                         &ready_target(target, &view),
@@ -2896,7 +3008,7 @@ fn merge_stack(
                         view.title,
                         view.body,
                         true,
-                        checks(&view.status_check_rollup, &required),
+                        checks(&view.status_check_rollup, &requirements.checks),
                         &view.head_ref_oid,
                         rerun,
                     )?;
@@ -2910,27 +3022,15 @@ fn merge_stack(
             println!("#{top} and the PRs below it are merged");
             return Ok(());
         }
-        gh_stack(
+        return submit_merge(
+            github,
             target,
-            None,
-            &["merge", &top.to_string(), "--yes", "--squash"],
-        )?;
-        for (pr, oid) in verified {
-            let view = merge_view(target, pr)?;
-            require(view.state == "MERGED" && view.head_ref_oid == oid, || {
-                Refusal::new(
-                    "pr.merge",
-                    "a PR of the stack did not merge at the head whose checks were verified",
-                    command(&["gh", "pr", "view", &pr.to_string(), "--repo", &target.repo]),
-                )
-                .evidence(format!(
-                    "#{pr}: state {}, head {}, verified {oid}",
-                    view.state, view.head_ref_oid
-                ))
-            })?;
-            println!("#{pr} merged at {oid}");
-        }
-        return Ok(());
+            top,
+            &verified,
+            requirements.queue,
+            polling,
+            started,
+        );
     }
 }
 
