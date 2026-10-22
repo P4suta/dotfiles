@@ -3250,7 +3250,7 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     fn freshness_report_decisions_and_their_counterexamples_verify_against_production() -> Result<()>
     {
-        const EXPECTED: (usize, usize) = (4, 9);
+        const EXPECTED: (usize, usize) = (5, 11);
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         crate::phase_evidence::run(
             root,

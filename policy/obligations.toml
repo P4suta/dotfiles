@@ -567,6 +567,14 @@ source = "crates/rules/src/freshness_rules.rs"
 probes = '''
 use production::{Facts, Verdict, verdict};
 #[kani::proof]
+fn reject_treating_an_inherited_dependency_as_new() {
+    assert!(production::introduced(true, false));
+}
+#[kani::proof]
+fn reject_ignoring_a_dependency_changed_in_both_sources() {
+    assert!(!production::introduced(true, true));
+}
+#[kani::proof]
 fn reject_accepting_unavailable_required_evidence() {
     assert!(verdict(Facts { needed: production::Need::Required, evidence: false, breaking: false, touched: false }) == Verdict::Admit);
 }
