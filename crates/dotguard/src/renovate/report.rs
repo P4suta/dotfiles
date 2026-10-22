@@ -219,7 +219,7 @@ fn parse_inner(
             },
             updates: !dependency.updates.is_empty(),
             warnings: !dependency.warnings.is_empty(),
-            covered: covered(&records, record),
+            covered: covered(&records, record, found),
         };
         match lookup_evidence(facts) {
             LookupEvidence::Missing => {
@@ -410,7 +410,7 @@ fn lookup_failure(dependency: &Dependency) -> &'static str {
     }
 }
 
-fn covered(records: &[Record], record: &Record) -> bool {
+fn covered(records: &[Record], record: &Record, found: Option<&super::Found>) -> bool {
     let dependency = &record.dependency;
     if !dependency.updates.is_empty() || !dependency.warnings.is_empty() {
         return false;
@@ -435,7 +435,7 @@ fn covered(records: &[Record], record: &Record) -> bool {
             .current_value
             .as_deref()
             .is_some_and(matrix_input);
-    hosted || matrix || covered_backend(records, record) || covered_ci_alias(records, record)
+    hosted || matrix || covered_backend(records, record, found) || covered_ci_alias(records, record)
 }
 
 fn matrix_input(value: &str) -> bool {
@@ -485,7 +485,7 @@ fn counterpart<'a>(records: &'a [Record], file: &str, name: &str) -> Option<&'a 
     .then_some(found)
 }
 
-fn covered_backend(records: &[Record], record: &Record) -> bool {
+fn covered_backend(records: &[Record], record: &Record, found: Option<&super::Found>) -> bool {
     let dependency = &record.dependency;
     if record.manager != "mise"
         || dependency.skip_reason.as_deref() != Some("unsupported-datasource")
@@ -503,11 +503,11 @@ fn covered_backend(records: &[Record], record: &Record) -> bool {
     let Some(verified) = counterpart(records, &record.file, &dependency.dep_name) else {
         return false;
     };
-    dependency
-        .locked_version
-        .as_deref()
-        .is_some_and(|version| !version.is_empty())
-        && verified.current_value == dependency.locked_version
+    let matching_pin = match dependency.locked_version.as_deref() {
+        Some(version) => !version.is_empty() && verified.current_value.as_deref() == Some(version),
+        None => super::mise::covers(found, record, verified),
+    };
+    matching_pin
         && verified.datasource.as_deref() == Some(provider.0)
         && verified.package_name.as_deref() == Some(provider.1)
 }
