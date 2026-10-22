@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-10-22
 ---
 # Make one stack the unit of open work and merge it through a merge queue
