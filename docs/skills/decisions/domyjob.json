@@ -1,10 +1,11 @@
 {
-  "revision": "58e9eb820dd1218d358b486b4e7dc49014db9653543e820068742ee716135142",
+  "revision": "bbc7077eb36836309aa77492018be4e6ed5a4e4ba9cba3d950707fc518099672",
   "outcome": "implemented",
-  "reason": "Keep remote execution an owner-side convenience without making its transport or state a project verification prerequisite.",
+  "reason": "Keep remote execution an owner-side convenience and diagnose its credential context before requesting authentication changes.",
   "evidence": [
     "home/dot_agents/skills/domyjob/SKILL.md",
     "home/dot_agents/skills/domyjob/tools.toml",
+    "home/dot_agents/skills/multi-machine/references/credential-context.md",
     "xtask/tests/tool_inventory.rs"
   ],
   "revisit": null
