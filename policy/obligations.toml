@@ -80,6 +80,18 @@ fn reject_retirement_before_consumer_verification() {
 fn reject_removing_a_used_config() {
     assert!(decide(Mode::Apply, Change::RemoveUnused, Evidence { unused: false, ..ready() }) == Verdict::Allowed);
 }
+#[kani::proof]
+fn reject_shared_inventory_without_a_complete_state() {
+    assert!(production::config_inventory_matches(production::ConfigInventory::Shared {
+        canonical: false, combined: false
+    }));
+}
+#[kani::proof]
+fn reject_distinct_inventory_with_legacy_drift() {
+    assert!(production::config_inventory_matches(production::ConfigInventory::Distinct {
+        legacy: false, canonical: true
+    }));
+}
 '''
 
 [[obligation]]

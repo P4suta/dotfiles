@@ -114,6 +114,7 @@ fn organization_proves_mutation_and_retirement_guards_and_rejects_false_claims()
         &source,
         directory.path(),
         &[
+            "proofs::config_inventories_require_complete_declared_states",
             "proofs::changes_require_explicit_apply_and_verified_scope",
             "proofs::consumer_retirement_needs_live_cutover_evidence",
             "proofs::preparation_and_cleanup_require_their_own_evidence",
@@ -146,6 +147,8 @@ fn organization_proves_mutation_and_retirement_guards_and_rejects_false_claims()
             "reject_read_only_organization_writing",
             "reject_retirement_before_consumer_verification",
             "reject_removing_a_used_config",
+            "reject_shared_inventory_without_a_complete_state",
+            "reject_distinct_inventory_with_legacy_drift",
         ],
         true,
         &flags,
