@@ -312,7 +312,7 @@
     {"mode":"0755","path":".config/gh","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/gh/config.yml","sha256":"08646e5c48489749a1cc9b9df298c850a2d86da6a47de07b74f2520f926b513f","type":"file"},
     {"mode":"0755","path":".config/ghostty","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".config/ghostty/config","sha256":"676ce7cb7ec791daeea8fdbf15d2dee12e800cef91d565602a004fa8aa097617","type":"file"},
+    {"mode":"0644","path":".config/ghostty/config","sha256":"e00835113960a26746376d9f904cccc926d26999bb0c233d9ce65fc96254c5d7","type":"file"},
     {"mode":"0755","path":".config/git","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/git/attributes","sha256":"c9066b7104dba3adf0a04fbbf208bc812467fb6a5ba922efb92706b594c0f7e3","type":"file"},
     {"mode":"0644","path":".config/git/config","sha256":"c6da6aa26a92825300eae9ed3f6c6534605ba6b66713b3bd09b293b75b3ac042","type":"file"},
