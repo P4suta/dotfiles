@@ -34,7 +34,7 @@
 | [2026-10-07 Refuse generic anti-patterns through one catalog of checks](generic-anti-pattern-catalog.md) | accepted |  |
 | [2026-10-07 Keep every decision in one pure core crate behind its adapters](pure-decision-core-behind-adapters.md) | accepted |  |
 | [2026-10-07 Replay the whole reachable state graph of each finite Quint model](state-graph-replay-of-finite-quint-models.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
-| [2026-10-07 Require verification in proportion to code shape on every repository](verification-proportional-to-code-shape.md) | amended | [2026-10-20](keep-the-assure-owner-map-out-of-projects.md) |
+| [2026-10-07 Require verification in proportion to code shape on every repository](verification-proportional-to-code-shape.md) | amended | [2026-10-20](keep-the-assure-owner-map-out-of-projects.md), [2026-10-22](assurance-follows-change-provenance.md) |
 | [2026-10-08 Drop Aeneas extraction for the plan and ordering cores and try Verus next](aeneas-extraction-pilot.md) | accepted |  |
 | [2026-10-08 Record rule failures at their execution boundaries](automatic-rule-failure-observations.md) | proposed |  |
 | [2026-10-08 Keep bounded harnesses instead of Kani loop contracts for the Git argument scan](bounded-harness-over-kani-loop-contracts.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
@@ -98,4 +98,5 @@
 | [2026-10-21 Deliver purpose-scoped credentials through workload identities](purpose-scoped-doppler-workload-identities.md) | accepted |  |
 | [2026-10-21 Run unbounded verifiers in limited containers](run-unbounded-verifiers-in-limited-containers.md) | proposed |  |
 | [2026-10-21 Sign through the password manager agent](sign-through-the-password-manager-agent.md) | accepted |  |
+| [2026-10-22 Assurance follows change provenance](assurance-follows-change-provenance.md) | proposed |  |
 | [2026-10-22 Decide PR independence from merge results](decide-pr-independence-from-merge-results.md) | proposed |  |

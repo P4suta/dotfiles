@@ -1072,15 +1072,16 @@ impl<'a> Fixture<'a> {
                 } else {
                     "dotfiles"
                 };
-                let tool = self.destination.join(".local/bin").join(executable);
+                let tool = self.destination.join(".local").join("bin").join(executable);
                 let canonical = rules::notify_chain_rules::normalize(
                     rules::notify_chain_rules::Command(notify.clone()),
                     &tool.to_string_lossy(),
                 );
                 ensure!(
                     notify == canonical.0,
-                    "{} profile has a noncanonical Codex notify chain",
-                    profile.name()
+                    "{} profile has a noncanonical Codex notify chain: actual={notify:?}; expected={:?}",
+                    profile.name(),
+                    canonical.0
                 );
             }
             ensure!(

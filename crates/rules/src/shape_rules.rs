@@ -395,8 +395,6 @@ pub enum Verdict {
     Touched,
     /// The change weakens a budget.
     Lowered,
-    /// The repository has gaps and the PR closes none.
-    Stalled,
 }
 
 impl Verdict {
@@ -419,7 +417,6 @@ pub const fn verdict(point: Point, change: Change) -> Verdict {
         }
         Point::Stop if change.touched > 0 => Verdict::Touched,
         Point::Ready if change.lowered > 0 => Verdict::Lowered,
-        Point::Ready if change.before > 0 && change.closed == 0 => Verdict::Stalled,
         _ => Verdict::Admit,
     }
 }
@@ -447,7 +444,7 @@ mod proofs {
         Some(Exemption::Exempt(Reason::Disproportionate)),
     ];
 
-    /// Only the gaps a change adds refuse a commit or a push, a session start never refuses, and a PR in a repository with gaps must close one.
+    /// Old gaps never refuse publication, while new gaps and weakened budgets do.
     /// A revert passes every point but the end of a turn.
     pub fn spec_verdict(point: Point, change: Change) {
         let result = verdict(point, change);
@@ -472,15 +469,12 @@ mod proofs {
             result == Verdict::Lowered,
             point == Point::Ready && !waived && change.added == 0 && change.lowered > 0
         );
-        assert_eq!(
-            result == Verdict::Stalled,
-            point == Point::Ready
-                && !waived
-                && change.added == 0
-                && change.lowered == 0
-                && change.before > 0
-                && change.closed == 0
-        );
+        if point == Point::Ready {
+            assert_eq!(
+                result.refuses(),
+                !waived && (change.added > 0 || change.lowered > 0)
+            );
+        }
         assert_eq!(
             result.refuses(),
             !matches!(result, Verdict::Admit | Verdict::Report)
@@ -693,7 +687,7 @@ mod proofs {
 
     #[cfg(kani)]
     #[kani::proof]
-    fn a_commit_or_push_refuses_only_an_added_gap_and_ready_requires_progress() {
+    fn publication_refuses_new_gaps_and_ready_also_refuses_weakened_budgets() {
         let point = POINTS[usize::from(kani::any::<u8>() % 5)];
         let change = Change {
             added: kani::any(),
@@ -706,7 +700,12 @@ mod proofs {
         };
         spec_verdict(point, change);
         let result = verdict(point, change);
-        kani::cover!(result == Verdict::Stalled);
+        kani::cover!(
+            point == Point::Ready
+                && change.before > 0
+                && change.closed == 0
+                && result == Verdict::Admit
+        );
         kani::cover!(result == Verdict::Touched);
         kani::cover!(point == Point::Commit && change.before > 0 && result == Verdict::Admit);
         kani::cover!(point == Point::Push && change.added > 0 && result == Verdict::Admit);
@@ -951,7 +950,7 @@ mod tests {
         an_exemption_stands_alone_and_a_malformed_one_is_a_gap();
         fresh_counts_the_entries_the_other_side_lacks();
         a_budget_weakens_when_it_moves_the_wrong_way_or_disappears();
-        old_gaps_never_refuse_a_commit_or_push_but_ready_requires_closing_one();
+        old_gaps_do_not_refuse_publication_and_new_gaps_still_do();
         reasons_are_the_closed_set_and_a_key_must_end_at_the_colon();
     }
 
@@ -1117,7 +1116,7 @@ mod tests {
         assert!(lowered(Bound::Ceiling, 0, None));
     }
 
-    fn old_gaps_never_refuse_a_commit_or_push_but_ready_requires_closing_one() {
+    fn old_gaps_do_not_refuse_publication_and_new_gaps_still_do() {
         let old = Change {
             before: 4,
             after: 4,
@@ -1128,7 +1127,7 @@ mod tests {
         assert_eq!(verdict(Point::Push, old), Verdict::Admit);
         assert_eq!(verdict(Point::Start, old), Verdict::Report);
         assert_eq!(verdict(Point::Stop, old), Verdict::Touched);
-        assert_eq!(verdict(Point::Ready, old), Verdict::Stalled);
+        assert_eq!(verdict(Point::Ready, old), Verdict::Admit);
         let progress = Change {
             closed: 1,
             after: 3,
@@ -1160,7 +1159,7 @@ mod tests {
             assert_eq!(verdict(point, revert), Verdict::Admit);
         }
         assert_eq!(verdict(Point::Stop, revert), Verdict::Added);
-        assert!(Verdict::Stalled.refuses());
+        assert!(Verdict::Added.refuses());
         assert!(!Verdict::Report.refuses());
     }
 

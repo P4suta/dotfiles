@@ -24,9 +24,10 @@ const CHECKED_ADD_OVERFLOW: &str = "attempt to add with overflow";
 pub const KANI_BATCH_SIZE: usize = 16;
 const KANI_BATCH_TEST: &str =
     "a_kani_batch_verifies_every_harness_and_rejects_every_counterexample";
-const KANI_SUBJECT_TESTS: [&str; 2] = [
+const KANI_SUBJECT_TESTS: [&str; 3] = [
     "skill_proofs::tests::notify_chain_decisions_and_their_counterexamples_verify_against_production",
     "skill_proofs::tests::freshness_report_decisions_and_their_counterexamples_verify_against_production",
+    "skill_proofs::tests::shape_decisions_and_their_counterexamples_verify_against_production",
 ];
 const MUTATION_CAMPAIGN_CASES: usize = 2;
 
@@ -3291,6 +3292,53 @@ mod tests {
             },
         )
     }
+    #[test]
+    #[ignore = "requires the installed pinned Kani"]
+    #[cfg(not(target_os = "windows"))]
+    fn shape_decisions_and_their_counterexamples_verify_against_production() -> Result<()> {
+        const EXPECTED: (usize, usize) = (10, 10);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        crate::phase_evidence::run(
+            root,
+            "shape subject regression",
+            EXPECTED.0 + EXPECTED.1,
+            || {
+                let manifest = obligations::manifest(root)?;
+                let source = "crates/rules/src/shape_rules.rs";
+                let probes = manifest
+                    .obligations
+                    .iter()
+                    .find_map(|obligation| match obligation {
+                        Obligation::Kani {
+                            source: candidate,
+                            probes,
+                            ..
+                        } if candidate == source => Some(probes),
+                        _ => None,
+                    })
+                    .context("shape decisions have a registered proof obligation")?;
+                kani_environment_version(root)?;
+                verify_kani_driver(root)?;
+                let verifier_hash =
+                    crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+                let engine_hash = crate::phase_evidence::engine_digest(root)?;
+                let result = verify_rules(
+                    root,
+                    source,
+                    probes,
+                    &flags(&manifest, source),
+                    &verifier_hash,
+                    &engine_hash,
+                )?;
+                ensure!(
+                    result == EXPECTED,
+                    "shape proof inventory differs: {result:?}"
+                );
+                Ok(())
+            },
+        )
+    }
+
     #[test]
     #[ignore = "requires the installed pinned Kani"]
     #[cfg(not(target_os = "windows"))]
