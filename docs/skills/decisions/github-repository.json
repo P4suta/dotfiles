@@ -1,7 +1,7 @@
 {
-  "revision": "e9786e272a1e4875367558b55bc94f2b4d381d282f2c4f3493f2f9e934345d1f",
+  "revision": "d87ff6b6db775961746a9ba706505967dc7527faeb8f904a9e0a42b8ac955335",
   "outcome": "implemented",
-  "reason": "Require a squash merge queue only after every required-check workflow supports merge_group, preserve complete live rulesets through verified updates, disable strict branch freshness with the queue, and enumerate the standalone decision's complete input domain.",
+  "reason": "Gate queue updates and findings on audited organization ownership, preserve personal strict checks and legacy snapshots, and enumerate all sixteen queue decisions with audit and plan regressions.",
   "evidence": [
     "home/dot_agents/skills/github-repository/SKILL.md",
     "home/dot_agents/skills/github-repository/assets/baseline.json",
@@ -11,6 +11,7 @@
     "home/dot_agents/skills/github-repository/scripts/repo-settings/src/lib.rs",
     "home/dot_agents/skills/github-repository/scripts/repo-settings/tests/governance.rs",
     "docs/adr/stack-first-pull-requests-through-a-merge-queue.md",
+    "docs/adr/limit-merge-queues-to-organization-repositories.md",
     "policy/github.toml"
   ],
   "revisit": null

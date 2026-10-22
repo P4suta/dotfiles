@@ -105,3 +105,4 @@
 | [2026-10-22 Run heavy verification at the release gate](run-heavy-verification-at-the-release-gate.md) | accepted |  |
 | [2026-10-22 Scope a legacy bypass to one script invocation](script-scoped-legacy-bypass.md) | accepted |  |
 | [2026-10-22 Make one stack the unit of open work and merge it through a merge queue](stack-first-pull-requests-through-a-merge-queue.md) | accepted |  |
+| [2026-10-23 Limit merge queues to organization-owned repositories](limit-merge-queues-to-organization-repositories.md) | accepted |  |

@@ -104,12 +104,21 @@ impl Profile {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum OwnerType {
+    #[default]
+    User,
+    Organization,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Repository {
     pub id: u64,
     pub full_name: String,
     pub owner_id: u64,
+    #[serde(default)]
+    pub owner_type: OwnerType,
     pub default_branch: String,
     pub archived: bool,
     pub fork: bool,
@@ -820,6 +829,8 @@ pub fn audit(api: &impl Api, name: &str) -> Result<State> {
         id: number(&raw, "id")?,
         full_name,
         owner_id: number(&raw["owner"], "id")?,
+        owner_type: serde_json::from_value(raw["owner"]["type"].clone())
+            .context("invalid repository owner type")?,
         default_branch: string(&raw, "default_branch")?,
         archived: raw["archived"]
             .as_bool()
