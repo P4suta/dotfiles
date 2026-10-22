@@ -14,7 +14,10 @@ Assess every implementation change and complete the evidence for its affected co
 Prove deterministic properties with a machine-checked proof wherever a suitable verifier covers them: bounds, arithmetic, representation invariants, pure decisions, state transitions, automation, and failure handling.
 Scale the obligations to the changed behavior and the dependencies it needs.
 Documentation edits need factual checks, never an artificial theorem.
-Never declare an implementation complete while an assessed obligation or its link to production lacks evidence.
+Write the harnesses, models, and fuzz targets with the change, and run the affected ones on demand when their answer guides the work.
+The release gate in `ci-budget` runs the full inventory and supplies the required verdict, so commits, pushes, and pull requests never wait for a proof campaign.
+Never declare an implementation complete while an assessed obligation lacks its harness, model, or checked alternative, or a release verified while one lacks a passing result.
+Report a proof that hasn't run as unrun, never as passed.
 
 A verdict the project relies on must be the same on any contributor's machine with the project's pinned tools.
 Bound verification by unwinding, input size, fixed run counts, and fixed seeds, never by wall-clock time or machine speed.
@@ -60,7 +63,7 @@ Treat skipped harnesses and solver failures as missing evidence.
 
 Bind results to the exact source, assumptions, verifier configuration, and target semantics, and reject stale receipts.
 Isolate generated proof models and compiler outputs per checkout and run.
-Add the assessed requirements to the authoritative project check, with expected proof names, checked alternatives, and completeness checks, and use `ci-budget` to select checks by the changed contract.
+Add the assessed requirements to the project's release check, with expected proof names, checked alternatives, and completeness checks.
 Prove that the gate rejects a false claim or a broken implementation with the expected failure, not any tool error.
 Keep integration tests and real boundary checks for properties outside the verifier's semantics.
 Statistical claims need null comparisons.

@@ -1,7 +1,7 @@
 ---
 date: 2026-10-19
 status: amended
-changed_by: [optional-native-verification-before-publication.md, gate-pull-requests-that-skip-local-hooks.md]
+changed_by: [optional-native-verification-before-publication.md, gate-pull-requests-that-skip-local-hooks.md, run-heavy-verification-at-the-release-gate.md]
 ---
 # Make native verification authoritative and keep hosted CI lightweight
 

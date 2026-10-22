@@ -1,11 +1,12 @@
 # Lean hosted workflows
 
-The project's own check command stays the authority, and hosted CI runs the checks selected by affected contracts plus what only GitHub can observe.
+The project's own check command stays the authority, and hosted CI runs its fast gate plus what only GitHub can observe.
 A hosted run that checks nothing never gates a merge, because an automatic merge then trusts nothing.
 
 ## Every change
 
 - Run format, lint, type checks, and unit and integration tests on one pinned Linux runner.
+- Lint other supported targets by cross-compiling on that runner where the toolchain supports it.
 - Expose one required summary job, and keep every other job behind it.
 - Trigger on `pull_request` and `merge_group`, and never also on `push` for the same commits.
 - Cancel a superseded run of the same ref with `concurrency`.
@@ -14,20 +15,23 @@ A hosted run that checks nothing never gates a merge, because an automatic merge
 - Upload an artifact only when a person downloads it, and keep it seven days at most.
 - Pin actions by commit SHA and let Renovate move them.
 
-## Where heavy checks run
+## The release gate
 
-Use the project's pinned container or documented hosted runner for every selected check.
-Follow `formal-assurance` for exploration bounds and incomplete results.
+Heavy checks gate a release, never a commit, push, pull request, ready transition, or merge.
+Run them on the exact candidate commit in the candidate verification stage of `release-workflow`, and publish only after they pass.
+Use the project's pinned container or documented hosted runner for each one, and follow `formal-assurance` for exploration bounds and incomplete results.
 
-| Check | Selected change | On demand or release |
-| --- | --- | --- |
-| Fuzzing | Replay the committed corpus and explore affected input boundaries | Broader configured exploration with new crashes kept as seeds |
-| Mutation testing | Changed contracts and their dependencies | Full configured operator set |
-| Formal proofs | Changed contracts and their dependencies | Full proof inventory |
-| Benchmarks | Deterministic operation counts for affected algorithms | Timings as observations, never verdicts |
-| macOS and Windows | Affected platform behavior | Supported release targets |
+| Check | Release candidate |
+| --- | --- |
+| Formal proofs | Full proof inventory, model checks, and Miri |
+| Fuzzing | Committed corpus replay and configured exploration, with new crashes kept as seeds |
+| Mutation testing | Full configured operator set |
+| Stress repeats | Configured fixed-count repeats of concurrency and ordering scenarios |
+| Benchmarks | Deterministic operation counts, with timings as observations, never verdicts |
+| macOS and Windows | Every supported release target |
 
-Keep CI lean by selecting relevant checks and reusing exact-source evidence, never by requiring the owner's hosts.
+A developer may run one of these on demand through the same entrypoint when a change needs its answer, and that run gates nothing.
+Keep CI lean by reusing exact-source evidence, never by requiring the owner's hosts.
 
 ## Schedules
 

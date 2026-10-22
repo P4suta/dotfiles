@@ -35,7 +35,7 @@ Never suppress the boundary or weaken the property to get a passing result.
 
 ## Make adoption durable
 
-Wire required checks into the authoritative project command and fitting local hooks, and use `ci-budget` to select checks by the changed contract.
+Wire fast checks into the project command, local hooks, and pull-request CI, and heavy checks into the release gate, where `ci-budget` places them.
 Use `executable-policy` to verify that the actual gate rejects a representative defect.
 Apply the bounded-tool rule in `formal-assurance` through the project's bounded container entrypoint or `dotfiles bounded run`, and keep GitHub Actions native.
 Use `resource-coordination` for expensive campaigns, because adopting a tool grants no unbounded fuzz run or paid service.

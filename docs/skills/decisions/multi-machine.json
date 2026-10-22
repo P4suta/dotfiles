@@ -1,9 +1,10 @@
 {
-  "revision": "cdf752984d561fed565f776d43f39f9b9a17e3fc72946d11f74c99e22f24be92",
+  "revision": "5e32a06c04840a1f776eddab75855b76e1fa8be0f956b923d651d915188f6fda",
   "outcome": "implemented",
-  "reason": "Make owner hosts optional caches while project runners supply platform verdicts and synchronization conventions stay in owner configuration.",
+  "reason": "Keep owner hosts optional and distinguish background credential access from desktop authentication before requesting account changes.",
   "evidence": [
     "home/dot_agents/skills/multi-machine/SKILL.md",
+    "home/dot_agents/skills/multi-machine/references/credential-context.md",
     "crates/dotfiles/src/hosts.rs",
     "crates/rules/src/hosts_rules.rs",
     "crates/dotfiles/tests/hosts.rs",
