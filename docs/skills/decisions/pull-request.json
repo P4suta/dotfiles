@@ -1,8 +1,13 @@
 {
-  "revision": "56d93472723a395928c71783db6abedec8150377acb1679bf3954896fb8771c8",
+  "revision": "f276553c547023f1c97723a56c7535b9b58f3dad59acfa72dc9be50da1770aaf",
   "outcome": "implemented",
-  "reason": "PR creation derives independence from an in-memory merge of overlapping heads.\nShared commits and conflicts require a stack, Git execution failures stop creation, and no caller override bypasses the decision.",
+  "reason": "PR creation derives independence from an in-memory merge of overlapping heads.\nShared commits and conflicts require a stack, Git execution failures stop creation, and no caller override bypasses the decision.\nMerge commands fetch the verified heads, carry signed assessments only across unchanged diffs and identities, and wait for running checks.\nActive merge queue rules select queue admission, whose eventual result remains bound to the verified heads.\nEvery repository uses the owner's shared gh-stack installation at its pinned version.",
   "evidence": [
+    "crates/pr-workflow/src/merge.rs",
+    "crates/rules/src/pr_merge_rules.rs",
+    "crates/platform/src/tool.rs",
+    "home/.chezmoidata/tools.toml",
+    "home/.chezmoidata/versions.toml",
     "docs/adr/decide-pr-independence-from-merge-results.md",
     "policy/obligations.toml",
     "docs/adr/keep-workflow-evidence-local.md",

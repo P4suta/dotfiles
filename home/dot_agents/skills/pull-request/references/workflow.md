@@ -66,7 +66,8 @@ Local-file `check` never contacts GitHub and leaves the live issue prerequisite 
 
 ## Stacks and merging
 
-The repository pins `gh-stack` through mise.
+The owner's shared mise tools pin `gh-stack` on every profile.
+pr-workflow resolves that installation outside the target repository and verifies its version.
 The stack commands run it in a checkout whose `origin` matches the target.
 
 ```console
@@ -85,9 +86,13 @@ Git execution failures stop creation, and no flag overrides a conflict.
 `stack create` opens a draft on the parent's open PR and links the chain down to the trunk.
 `stack sync` and `stack rebase` hold the repository's stack lease, the only way dotguard admits a rebase or leased force push of a published branch besides an `ALLOW_FORCE` waiver.
 `merge` takes independent PRs in order.
-It updates a behind head by merge and waits for every head check.
+It fetches the head and base before checking evidence, updates a behind head by merge, and waits for every head check.
 It enforces the assessed review route, marks a draft ready, and merges the verified head with `--match-head-commit`.
 `stack merge` restacks instead of updating and merges the stack up to the PR together.
+When the trunk's active rulesets require a merge queue, both merge commands enqueue the verified heads and wait for every member to merge.
+Queue admission alone grants no merge completion.
+The structured result reports `merged`, `ejected`, `timed_out`, `head_changed`, or `closed`, and a stopped queue entry is never resubmitted automatically.
+The head bound to the merge request must match the verified head.
 Both stop with a structured refusal on a failed check, conflict, timeout, or missing evidence for the assessed CodeRabbit route.
 
 ## Importance assessment
@@ -108,7 +113,8 @@ Fork contributions also bind the verified source and destination repository iden
 Use the source owner's qualified head when publishing to an upstream repository.
 Preparation can assess local commits before their authorized push, while publication verifies the actual published source branch.
 It contains no private CLI output.
-Changing any part of that binding requires a new assessment.
+A base update or restack that preserves the exact diff and source identity carries the authenticated assessment to the new binding, signed again by the same trusted identity.
+Any changed diff still requires a fresh assessment.
 
 An ordinary bounded behavior change can use this input shape:
 

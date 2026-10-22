@@ -3,6 +3,13 @@ use std::io::Write;
 /// Records each gh-stack invocation with the repository it targets and whether it ran under the stack lease.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args == ["--version"] {
+        println!(
+            "gh stack version {}",
+            std::env::var("GH_STACK_FIXTURE_VERSION").unwrap_or_else(|_| "0.2.1".into())
+        );
+        return Ok(());
+    }
     let token = std::env::var("DOTGUARD_STACK").ok();
     let lease = std::env::var_os("GH_STACK_FIXTURE_LEASE")
         .and_then(|path| std::fs::read_to_string(path).ok());

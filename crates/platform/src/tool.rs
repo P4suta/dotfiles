@@ -362,7 +362,6 @@ impl Tool {
             Self::Typos => Provision::Pinned("typos"),
             Self::Yamllint => Provision::Pinned("yamllint"),
             Self::Chezmoi => Provision::Pinned("chezmoi"),
-            Self::GhStack => Provision::Pinned("github:github/gh-stack"),
             Self::Ocomment => Provision::Pinned(OCOMMENT_PIN),
             Self::Njutest => NJUTEST_PROVISION,
             Self::Gitleaks => Provision::Pinned("gitleaks"),
@@ -398,6 +397,7 @@ impl Tool {
             | Self::Whoami
             | Self::Wslpath => Provision::Host,
             Self::Atuin
+            | Self::GhStack
             | Self::Cabal
             | Self::Carapace
             | Self::Doppler
@@ -533,6 +533,56 @@ pub use crate::process::GIT_LOCAL_ENVIRONMENT;
 #[must_use]
 pub fn external(program: impl AsRef<std::ffi::OsStr>) -> Command {
     crate::process::command(program)
+}
+
+/// Resolves and checks the owner's shared gh-stack installation outside the target repository.
+///
+/// # Errors
+/// Returns an error for a missing installation or an unexpected executable version.
+pub fn owner_gh_stack() -> anyhow::Result<Command> {
+    use anyhow::{Context as _, ensure};
+    const KEY: &str = "github:github/gh-stack";
+    let versions = model::data::parse(
+        "versions.toml",
+        include_str!("../../../home/.chezmoidata/versions.toml"),
+    )
+    .map_err(anyhow::Error::msg)?;
+    let version = versions
+        .shared_tools
+        .and_then(|shared| shared.versions)
+        .and_then(|mut pins| pins.remove(KEY))
+        .context("owner gh-stack pin missing")?;
+    let home = crate::home::home().context("owner home missing for gh-stack")?;
+    let output = Tool::Mise
+        .command()
+        .current_dir(&home)
+        .args(["which", "--tool", &format!("{KEY}@{version}"), "gh-stack"])
+        .env("MISE_AUTO_INSTALL", "false")
+        .output()
+        .context("resolve owner-provisioned gh-stack; apply the shared mise tools")?;
+    ensure!(
+        output.status.success(),
+        "owner-provisioned gh-stack is unavailable; apply the shared mise tools: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let program = std::path::PathBuf::from(String::from_utf8(output.stdout)?.trim());
+    ensure!(
+        program.is_absolute() && program.is_file(),
+        "owner gh-stack resolution needs an installed absolute executable"
+    );
+    let output = external(&program).args(["--version"]).output()?;
+    let actual = String::from_utf8(output.stdout)?;
+    ensure!(
+        output.status.success()
+            && actual
+                .trim()
+                .strip_prefix("gh stack version ")
+                .is_some_and(|actual| actual.strip_prefix('v').unwrap_or(actual)
+                    == version.strip_prefix('v').unwrap_or(&version)),
+        "owner gh-stack version differs from {version}: {}",
+        actual.trim()
+    );
+    Ok(external(program))
 }
 
 #[cfg(test)]
