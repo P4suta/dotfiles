@@ -47,6 +47,8 @@ The workflow policy caps how many PRs one person may keep open.
 `create` refuses a new PR once that person reaches the cap, so add the work to the PR it names.
 `ready` refuses until every head check passes, so run it only when no scoped work remains.
 Open dependent work with `pr-workflow stack create`.
+The dependency check skips PRs opened by bots identified by an `app/` login prefix, a `[bot]` login suffix, or the `Bot` account type.
+It also skips stale PRs that already conflict with their own base and reports every skipped PR with its reason.
 `create` refuses shared commits and merges overlapping heads in memory using their merge base.
 A clean merge permits an independent PR.
 A conflict names the PR to stack on.

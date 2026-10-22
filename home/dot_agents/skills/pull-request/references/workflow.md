@@ -78,7 +78,10 @@ pr-workflow stack merge --repo OWNER/REPO --pr 18
 pr-workflow merge --repo OWNER/REPO --pr 17 --pr 19
 ```
 
-`create` refuses a head that shares commits with another open PR and names `stack create` on that PR.
+Before checking dependencies, `create` skips PRs opened by bots identified by an `app/` login prefix, a `[bot]` login suffix, or the `Bot` account type.
+It also skips stale PRs whose `mergeable` state is `CONFLICTING` with their own base.
+Every skipped PR appears in the output with its reason.
+For every remaining PR, `create` refuses a head that shares commits with it and names `stack create` on that PR.
 When paths overlap, it runs `git merge-tree --write-tree` on the two heads using their merge base without changing the worktree or index.
 A clean merge permits an independent PR.
 A conflict refuses creation and names the conflicting PR and `stack create`.

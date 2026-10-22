@@ -60,10 +60,10 @@ pub use rules::{pr_ready_rules, pr_rules, wip_rules};
 
 use crate::pr_ready_rules::{Action as Move, Report, Settlement, State, Workflow};
 use crate::pr_rules::{
-    Blocker, Checks, Dependency, Effect, Exclusion, Generation, IssueGate, Lifecycle, MergeState,
-    Operation, PathMerge, Step, Stop, api_quota_available, coderabbit_body_marker_allowed,
-    dependency, exclusion, head_checks, issue_gate, keeps_pause_exclusion, merge_step, plan,
-    requests_review, review_request_allowed,
+    Blocker, Checks, Dependency, DependencySkip, Effect, Exclusion, Generation, IssueGate,
+    Lifecycle, MergeState, Operation, PathMerge, Step, Stop, api_quota_available,
+    coderabbit_body_marker_allowed, dependency, dependency_skip, exclusion, head_checks,
+    issue_gate, keeps_pause_exclusion, merge_step, plan, requests_review, review_request_allowed,
 };
 use crate::refusal::{Refusal, command};
 use crate::tool::Tool;
@@ -738,8 +738,19 @@ struct OpenPr {
     number: u64,
     head_ref_name: String,
     base_ref_name: String,
+    author: Option<DependencyAuthor>,
+    mergeable: Option<String>,
     #[serde(default)]
     is_cross_repository: bool,
+}
+
+#[derive(Deserialize)]
+struct DependencyAuthor {
+    login: String,
+    #[serde(default)]
+    is_bot: bool,
+    #[serde(rename = "type")]
+    author_type: Option<String>,
 }
 
 /// One PR of a merge, read in one response so its checks belong to its head.
@@ -2373,7 +2384,7 @@ fn open_prs(target: &Target) -> Result<Vec<OpenPr>> {
             "--limit",
             "500",
             "--json",
-            "number,headRefName,baseRefName,isCrossRepository",
+            "number,headRefName,baseRefName,isCrossRepository,author,mergeable",
         ]
         .map(OsString::from),
     );
@@ -3055,6 +3066,30 @@ fn merge_heads(head: &str, other: &str) -> Result<PathMerge> {
     }
 }
 
+fn report_dependency_skip(pr: &OpenPr) -> bool {
+    let author = pr.author.as_ref();
+    let login = author.map_or("", |author| author.login.as_str());
+    let Some(skip) = dependency_skip(
+        login,
+        author.and_then(|author| author.author_type.as_deref()),
+        author.is_some_and(|author| author.is_bot),
+        pr.mergeable.as_deref(),
+    ) else {
+        return false;
+    };
+    let reason = match skip {
+        DependencySkip::Bot => format!("bot author {login}"),
+        DependencySkip::BaseConflict => {
+            format!(
+                "stale PR already conflicts with its base {}",
+                pr.base_ref_name
+            )
+        }
+    };
+    println!("skipped #{} ({}): {reason}", pr.number, pr.head_ref_name);
+    true
+}
+
 /// Refuses shared commits or conflicting heads and names the required stack.
 fn refuse_dependent(
     github: &Github,
@@ -3065,7 +3100,11 @@ fn refuse_dependent(
     body_file: &Path,
 ) -> Result<()> {
     let open = open_prs(target)?;
-    let others: Vec<&OpenPr> = open.iter().filter(|pr| pr.head_ref_name != head).collect();
+    let others: Vec<&OpenPr> = open
+        .iter()
+        .filter(|pr| pr.head_ref_name != head)
+        .filter(|pr| !report_dependency_skip(pr))
+        .collect();
     if others.is_empty() {
         return Ok(());
     }

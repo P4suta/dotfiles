@@ -4695,6 +4695,96 @@ fn create_among_open_prs(
         .output()?)
 }
 
+fn dependency_fixture() -> Result<(Fixture, PathBuf)> {
+    let fixture = Fixture::new(&format!("{BODY}\nCloses #23.\n"))?;
+    let checkout = branches(fixture.directory.path())?;
+    git(
+        &checkout,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/P4suta/project.git",
+        ],
+    )?;
+    Ok((fixture, checkout))
+}
+
+#[test]
+fn dependency_check_skips_conflicting_bot_release_prs_and_reports_why() -> Result<()> {
+    for author in [
+        serde_json::json!({"login":"app/p4suta-release-plz"}),
+        serde_json::json!({"login":"release-plz[bot]"}),
+        serde_json::json!({"login":"release-plz", "type":"Bot"}),
+        serde_json::json!({"login":"release-plz", "is_bot":true}),
+    ] {
+        let (fixture, checkout) = dependency_fixture()?;
+        let open = serde_json::json!([{
+            "number":5, "title":"Release", "headRefName":"a", "baseRefName":"main",
+            "author":author, "mergeable":"MERGEABLE"
+        }]);
+        let output = create_among_open_prs(&fixture, &checkout, "solo", &open.to_string())?;
+        assert!(
+            output.status.success(),
+            "{author}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("skipped #5 (a): bot author"));
+        let log = fixture.log()?;
+        assert!(log.contains("\ncreate\n"));
+        assert!(log.contains("number,headRefName,baseRefName,isCrossRepository,author,mergeable"));
+    }
+    Ok(())
+}
+
+#[test]
+fn dependency_check_skips_conflicting_stale_prs_and_reports_why() -> Result<()> {
+    let (fixture, checkout) = dependency_fixture()?;
+    let open = r#"[{"number":5,"headRefName":"a","baseRefName":"main","author":{"login":"contributor"},"mergeable":"CONFLICTING"}]"#;
+    let output = create_among_open_prs(&fixture, &checkout, "solo", open)?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("skipped #5 (a): stale PR already conflicts with its base main")
+    );
+    assert!(fixture.log()?.contains("\ncreate\n"));
+    Ok(())
+}
+
+#[test]
+fn dependency_check_refuses_conflicting_ordinary_prs() -> Result<()> {
+    for mergeable in ["MERGEABLE", "UNKNOWN"] {
+        let (fixture, checkout) = dependency_fixture()?;
+        let open = serde_json::json!([{
+            "number":5, "headRefName":"a", "baseRefName":"main",
+            "author":{"login":"contributor", "type":"User", "is_bot":false},
+            "mergeable":mergeable
+        }]);
+        let output = create_among_open_prs(&fixture, &checkout, "solo", &open.to_string())?;
+        let record = refusal(&output);
+        assert_eq!(record["rule"], "pr.dependency");
+        assert!(
+            record["cause"]
+                .as_str()
+                .unwrap()
+                .contains("conflicts with #5")
+        );
+        assert!(
+            record["next"]
+                .as_str()
+                .unwrap()
+                .ends_with("--head solo --base a")
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("skipped"));
+        assert!(!fixture.log()?.contains("\ncreate\n"));
+    }
+    Ok(())
+}
+
 #[test]
 fn overlapping_prs_require_a_clean_merge_without_changing_the_checkout() -> Result<()> {
     let closed = format!("{BODY}\nCloses #23.\n");
