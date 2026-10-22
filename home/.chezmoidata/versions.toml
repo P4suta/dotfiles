@@ -29,6 +29,8 @@ hadolint = "2.15.1"
 just = "1.59.0"
 java = "temurin-25"
 rust = "stable"
+# renovate: datasource=github-releases depName=github/gh-stack
+"github:github/gh-stack" = "v0.2.1"
 
 [platforms.linux.tool_versions]
 

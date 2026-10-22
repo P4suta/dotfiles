@@ -1562,6 +1562,36 @@ fn reject_the_old_command_that_marks_a_head_pushed_after_its_read() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/pr_merge_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_carrying_a_changed_diff() {
+    assert_eq!(production::assessment_change(false, false, true), production::AssessmentChange::Resign);
+}
+#[kani::proof]
+fn reject_a_different_trusted_identity() {
+    assert_eq!(production::assessment_change(false, true, false), production::AssessmentChange::Resign);
+}
+#[kani::proof]
+fn reject_updating_a_queue_bound_independent_head() {
+    assert_eq!(production::base_update(true, false, true), production::BaseUpdate::Merge);
+}
+#[kani::proof]
+fn reject_crediting_queue_admission_as_a_merge() {
+    assert_eq!(production::settlement(true, production::Lifecycle::Open, production::Queue::Present, false), production::Settlement::Merged);
+}
+#[kani::proof]
+fn reject_a_different_merged_head() {
+    assert_eq!(production::settlement(false, production::Lifecycle::Merged, production::Queue::Removed, false), production::Settlement::Merged);
+}
+#[kani::proof]
+fn reject_waiting_after_queue_ejection() {
+    assert_eq!(production::settlement(true, production::Lifecycle::Open, production::Queue::Removed, false), production::Settlement::Waiting);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/pr_rules.rs"
 probes = '''
 #[kani::proof]

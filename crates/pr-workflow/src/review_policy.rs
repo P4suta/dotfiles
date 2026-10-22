@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 mod git_fixture;
 
 const SCHEMA: u32 = 1;
+const GIT_OBJECT_LENGTHS: [usize; 2] = [40, 64];
 /// Starts the line that once carried a signed assessment in a PR body, which a published document now refuses.
 pub(super) const PACKET_PREFIX: &str = "<!-- pr-review-assessment:";
 const MAX_ASSESSMENT_BYTES: usize = 16 * 1024;
@@ -433,6 +434,96 @@ pub(super) fn check(
         head,
         signer,
     )
+}
+
+pub(super) fn fetch_pr(root: &Path, target: &Target, base: &str, head: &str) -> Result<()> {
+    ensure!(
+        [base, head]
+            .into_iter()
+            .all(|object| GIT_OBJECT_LENGTHS.contains(&object.len())
+                && object.bytes().all(|byte| byte.is_ascii_hexdigit())),
+        "PR head and base must be full Git object names"
+    );
+    git(
+        root,
+        &[
+            "fetch",
+            "--quiet",
+            &format!("{}/{}.git", super::GITHUB, target.repo),
+            base,
+            head,
+        ],
+    )?;
+    Ok(())
+}
+
+pub(super) fn carry_forward(
+    github: &Github,
+    target: &Target,
+    view: &super::MergeView,
+    prior: &Checked,
+) -> Result<()> {
+    use rules::pr_merge_rules::{AssessmentChange, assessment_change};
+    let current = capture_verified(
+        github,
+        &prior.root,
+        &target.repo,
+        view.base_ref_oid
+            .as_deref()
+            .context("updated PR base missing")?,
+        &view.head_ref_oid,
+    )?;
+    let signer = assessment_signer(github, target, &view.author, &view.source)?;
+    let decision = assessment_change(
+        current.binding == prior.binding,
+        current.binding.diff_sha256 == prior.binding.diff_sha256,
+        current.source.as_ref() == Some(&prior.source) && signer == prior.signer,
+    );
+    match decision {
+        AssessmentChange::Keep | AssessmentChange::Reassess => return Ok(()),
+        AssessmentChange::Resign => {}
+    }
+    let signers = context::signers_for_login(github, signer)?;
+    let old = capture_verified(
+        github,
+        &prior.root,
+        &target.repo,
+        &prior.binding.base,
+        &prior.binding.head,
+    )?;
+    let packet = evidence::object(&target.repo, &prior.object)?;
+    let mut statement = authenticate(&old, &packet, signers.path(), signer)?;
+    statement.binding = current.binding;
+    statement.source = current.source;
+    let signature = platform::signed_git::create(
+        &current.root,
+        &statement.binding.head,
+        &current.tree,
+        &serde_json::to_vec(&statement)?,
+    )?;
+    let packet = Packet {
+        object: signature.object,
+        raw: signature.raw,
+    };
+    let rebound = capture_verified(
+        github,
+        &prior.root,
+        &target.repo,
+        view.base_ref_oid
+            .as_deref()
+            .context("updated PR base missing")?,
+        &view.head_ref_oid,
+    )?;
+    authenticate(&rebound, &packet, signers.path(), signer)?;
+    evidence::store_assessment(
+        &platform::home::home().context("owner home missing")?,
+        &target.repo,
+        &statement.binding.head,
+        &statement.binding.diff_sha256,
+        &packet.object,
+        &packet.raw,
+    )?;
+    Ok(())
 }
 
 fn check_at(
@@ -1216,6 +1307,16 @@ pub(super) fn live_binding_at(
     body: &str,
     live: &super::LiveDocument,
 ) -> Result<Checked> {
+    fetch_pr(
+        root,
+        target,
+        live.base_ref_oid
+            .as_deref()
+            .context("actual PR base commit is missing")?,
+        live.head_ref_oid
+            .as_deref()
+            .context("actual PR head commit is missing")?,
+    )?;
     let signer = assessment_signer(github, target, &live.author, &live.source)?;
     let checked = check_at(
         root,

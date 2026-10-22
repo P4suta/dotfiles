@@ -17,8 +17,12 @@ fn gh_directory() -> &'static tempfile::TempDir {
     static DIRECTORY: OnceLock<tempfile::TempDir> = OnceLock::new();
     DIRECTORY.get_or_init(|| {
         let directory = tempfile::tempdir().unwrap();
-        for program in ["gh", "gh-stack", "git"] {
-            let source = if program == "git" { "gh" } else { program };
+        for program in ["gh", "gh-stack", "git", "mise"] {
+            let source = if matches!(program, "git" | "mise") {
+                "gh"
+            } else {
+                program
+            };
             let result = platform::process::command("rustc")
                 .args(["--edition", "2024"])
                 .arg(format!(
@@ -4234,6 +4238,311 @@ fn independent_prs_merge_in_order_through_update_checks_ready_and_the_verified_h
 }
 
 #[test]
+fn merge_carries_the_signed_assessment_after_an_update_only_when_the_diff_matches() -> Result<()> {
+    for changed in [false, true] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = fixture.personal_command("merge")?;
+        let old = &fixture.head;
+        let new = if changed {
+            fs::write(
+                fixture.directory.path().join("body.md"),
+                "A different change.\n",
+            )?;
+            git(fixture.directory.path(), &["add", "body.md"])?;
+            git(fixture.directory.path(), &["commit", "-qm", "changed diff"])?;
+            git(fixture.directory.path(), &["rev-parse", "HEAD"])?
+        } else {
+            fixture.sibling_head("updated head")?
+        };
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let output = command
+            .args(["--pr", "17", "--interval", "0"])
+            .env("GH_FIXTURE_BEHIND", old)
+            .env(
+                "GH_FIXTURE_VIEWS",
+                [
+                    read(17, old, false, &body, PASSING, "BEHIND"),
+                    read(17, &new, false, &body, PASSING, "CLEAN"),
+                    read(17, &new, false, &body, PASSING, "MERGED"),
+                ]
+                .join("\n"),
+            )
+            .output()?;
+        let log = fixture.log()?;
+        if changed {
+            assert!(!output.status.success());
+            assert!(!mutations(&log).contains(&"merge".into()));
+            assert!(String::from_utf8_lossy(&output.stderr).contains("diff"));
+        } else {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let directory = fixture
+                .directory
+                .path()
+                .join(".local/state/pr-workflow/assessments/p4suta__project");
+            let carried = fs::read_dir(directory)?
+                .filter_map(Result::ok)
+                .find(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(&format!("{new}-"))
+                })
+                .context("the updated head needs its own signed assessment")?;
+            let packet: serde_json::Value = serde_json::from_slice(&fs::read(carried.path())?)?;
+            let raw = packet["raw"].as_str().context("signed raw commit")?;
+            assert!(raw.contains(&format!("parent {new}\n")));
+            let statement: serde_json::Value =
+                serde_json::from_str(raw.split_once("\n\n").context("signed payload")?.1)?;
+            assert_eq!(statement["binding"]["head"], new);
+            assert_eq!(statement["signer"], "P4suta");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn merge_waits_for_running_and_missing_required_checks_before_ready() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+    let views = [
+        read(17, &fixture.head, true, &body, PASSING, "DRAFT"),
+        read(
+            17,
+            &fixture.head,
+            true,
+            &body,
+            r#"[{"name":"required","status":"IN_PROGRESS","conclusion":null}]"#,
+            "DRAFT",
+        ),
+        read(
+            17,
+            &fixture.head,
+            true,
+            &body,
+            r#"[{"name":"required","status":"COMPLETED","conclusion":"SUCCESS"}]"#,
+            "DRAFT",
+        ),
+        read(
+            17,
+            &fixture.head,
+            true,
+            &body,
+            r#"[{"name":"required","status":"COMPLETED","conclusion":"SUCCESS"}]"#,
+            "DRAFT",
+        ),
+        read(
+            17,
+            &fixture.head,
+            false,
+            &body,
+            r#"[{"name":"required","status":"COMPLETED","conclusion":"SUCCESS"}]"#,
+            "CLEAN",
+        ),
+        read(
+            17,
+            &fixture.head,
+            false,
+            &body,
+            r#"[{"name":"required","status":"COMPLETED","conclusion":"SUCCESS"}]"#,
+            "CLEAN",
+        ),
+        read(17, &fixture.head, false, &body, PASSING, "MERGED"),
+    ]
+    .join("\n");
+    let output = fixture.personal_command("merge")?
+        .args(["--pr", "17", "--interval", "0"])
+        .env("GH_FIXTURE_RULES", r#"[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"required"}]}}]"#)
+        .env("GH_FIXTURE_VIEWS", views).output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(mutations(&fixture.log()?), ["ready", "merge"]);
+    Ok(())
+}
+
+#[test]
+fn merge_fetches_the_updated_head_and_base_before_checking_signed_evidence() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let mut command = fixture.personal_command("merge")?;
+    let root = fixture.directory.path();
+    let remote = fixture.context_home.path().join("remote.git");
+    git(
+        fixture.context_home.path(),
+        &[
+            "init",
+            "--bare",
+            "--quiet",
+            remote.to_str().context("remote path")?,
+        ],
+    )?;
+    git(
+        root,
+        &[
+            "push",
+            "--quiet",
+            remote.to_str().context("remote path")?,
+            &format!("{}:refs/heads/main", fixture.base),
+            "HEAD:refs/heads/feature",
+        ],
+    )?;
+    git(
+        fixture.context_home.path(),
+        &[
+            "clone",
+            "--quiet",
+            "--branch",
+            "main",
+            remote.to_str().context("remote path")?,
+            "producer",
+        ],
+    )?;
+    let producer = fixture.context_home.path().join("producer");
+    git(&producer, &["config", "user.name", "Fixture"])?;
+    git(&producer, &["config", "user.email", "fixture@example.com"])?;
+    fs::write(producer.join("base.txt"), "Updated base.\n")?;
+    git(&producer, &["add", "base.txt"])?;
+    git(&producer, &["commit", "-qm", "base update"])?;
+    let base = git(&producer, &["rev-parse", "HEAD"])?;
+    git(&producer, &["checkout", "-qb", "feature", "origin/feature"])?;
+    git(&producer, &["merge", "--no-edit", "main"])?;
+    let head = git(&producer, &["rev-parse", "HEAD"])?;
+    git(&producer, &["push", "--quiet", "origin", "main", "feature"])?;
+    let absent = fixture_git::command("git", &root.join("gitconfig"))
+        .current_dir(root)
+        .args(["cat-file", "-e", &head])
+        .output()?;
+    assert!(!absent.status.success());
+    let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+    let output = command
+        .args(["--pr", "17", "--interval", "0"])
+        .env("PWF_FIXTURE_FETCH_CHECKOUT", root)
+        .env("PWF_FIXTURE_FETCH_BARE", &remote)
+        .env("GH_FIXTURE_BEHIND", &fixture.head)
+        .env(
+            "GH_FIXTURE_BASES",
+            format!("{}={}\n{head}={base}", fixture.head, fixture.base),
+        )
+        .env(
+            "GH_FIXTURE_VIEWS",
+            [
+                read(17, &fixture.head, false, &body, PASSING, "BEHIND"),
+                read(17, &head, false, &body, PASSING, "CLEAN"),
+                read(17, &head, false, &body, PASSING, "MERGED"),
+            ]
+            .join("\n"),
+        )
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        git(root, &["rev-parse", &format!("{head}^{{commit}}")])?,
+        head
+    );
+    assert_eq!(
+        git(root, &["rev-parse", &format!("{base}^{{commit}}")])?,
+        base
+    );
+    Ok(())
+}
+
+#[test]
+fn merge_queue_waits_without_updating_or_resubmitting_and_reports_each_outcome() -> Result<()> {
+    for outcome in ["merged", "ejected", "timed_out", "head_changed"] {
+        let fixture = Fixture::new(BODY)?;
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let other = fixture.sibling_head("unverified pushed head")?;
+        let queued = queue_read(17, &fixture.head, "OPEN", true);
+        let final_read = match outcome {
+            "merged" => queue_read(17, &fixture.head, "MERGED", false),
+            "ejected" => queue_read(17, &fixture.head, "OPEN", false),
+            "head_changed" => queue_read(17, &other, "OPEN", true),
+            _ => queued.clone(),
+        };
+        let output = fixture
+            .personal_command("merge")?
+            .args([
+                "--pr",
+                "17",
+                "--interval",
+                "0",
+                "--timeout",
+                if outcome == "timed_out" { "0" } else { "1" },
+            ])
+            .env("GH_FIXTURE_RULES", r#"[{"type":"merge_queue"}]"#)
+            .env("GH_FIXTURE_BEHIND", &fixture.head)
+            .env(
+                "GH_FIXTURE_VIEWS",
+                read(17, &fixture.head, false, &body, PASSING, "BEHIND"),
+            )
+            .env("GH_FIXTURE_QUEUE", [queued, final_read].join("\n"))
+            .output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            output.status.success(),
+            outcome == "merged",
+            "{outcome}: {stdout} {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            stdout.contains(&format!("\"outcome\":\"{outcome}\"")),
+            "{stdout}"
+        );
+        let log = fixture.log()?;
+        assert_eq!(log.matches("\n--method\nPUT\n").count(), 1, "{log}");
+        assert!(
+            log.contains(&format!("\"sha\":\"{}\"", fixture.head)),
+            "{log}"
+        );
+        assert!(log.contains("\"merge_action\":\"merge_queue\""), "{log}");
+        assert!(mutations(&log).is_empty(), "{log}");
+    }
+    Ok(())
+}
+
+fn queue_read(pr: u64, head: &str, state: &str, queued: bool) -> String {
+    format!(
+        "{pr}={}",
+        serde_json::json!({"data":{"repository":{"pullRequest":{
+            "state":state,"headRefOid":head,"mergeQueueEntry":if queued {serde_json::json!({"id":"entry"})} else {serde_json::Value::Null}
+        }}}})
+    )
+}
+
+#[test]
+fn merge_polls_a_pending_async_request_and_refuses_an_unbound_request() -> Result<()> {
+    for bound in [true, false] {
+        let fixture = Fixture::new(BODY)?;
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let output = fixture.personal_command("merge")?
+            .args(["--pr", "17", "--interval", "0"])
+            .env("GH_FIXTURE_RULES", r#"[{"type":"merge_queue"}]"#)
+            .env("GH_FIXTURE_VIEWS", read(17, &fixture.head, false, &body, PASSING, "BLOCKED"))
+            .env("GH_FIXTURE_ASYNC", serde_json::json!({"status":"pending","details":{"message":"pending","uuid":"request-1","merge_action":"merge_queue","expected_head_sha":if bound {fixture.head.as_str()} else {"unverified"}}}).to_string())
+            .env("GH_FIXTURE_ASYNC_HEADERS", "HTTP/2.0 202 Accepted\nX-Ratelimit-Remaining: 4990\nX-Ratelimit-Reset: 1800000000\nX-Ratelimit-Resource: core")
+            .env("GH_FIXTURE_QUEUE", queue_read(17, &fixture.head, "MERGED", false)).output()?;
+        assert_eq!(
+            output.status.success(),
+            bound,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let log = fixture.log()?;
+        assert_eq!(log.matches("\n--method\nPUT\n").count(), 1);
+        assert_eq!(log.contains("/merge-async/request-1"), bound);
+    }
+    Ok(())
+}
+
+#[test]
 fn a_merge_stops_with_a_structured_refusal_and_merges_nothing() -> Result<()> {
     let closed = format!("{BODY}\nCloses #23.\n");
     let excluded = format!("{closed}\n@coderabbitai ignore\n");
@@ -4765,6 +5074,35 @@ fn stack_sync_and_rebase_run_gh_stack_under_the_lease_and_release_it() -> Result
 }
 
 #[test]
+fn stack_resolves_the_owner_installation_and_refuses_an_unexpected_version() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+    fs::write(
+        checkout.join("mise.toml"),
+        "[tools]\n\"github:github/gh-stack\" = \"v0.0.1\"\n",
+    )?;
+    let output = fixture
+        .stack_command(&checkout, &lease, &["sync"])?
+        .env("GH_STACK_FIXTURE_VERSION", "0.0.1")
+        .output()?;
+    assert!(
+        !output.status.success(),
+        "a repository pin or PATH cannot choose gh-stack"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("version"));
+    assert_eq!(fixture.stack_log(), "");
+    let output = fixture
+        .stack_command(&checkout, &lease, &["sync"])?
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+#[test]
 fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<()> {
     let closed = format!("{BODY}\nCloses #23.\n");
     let excluded = format!("{closed}\n@coderabbitai ignore\n");
@@ -4791,6 +5129,7 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
         )
         .env("GH_FIXTURE_VIEWS", views)
         .env("GH_FIXTURE_BEHIND", &stale)
+        .env("GH_FIXTURE_ASYNC", r#"{"status":"merged","details":{"message":"merged"}}"#)
         .output()?;
     assert!(
         output.status.success(),
@@ -4800,8 +5139,7 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
     assert_eq!(
         fixture.stack_log(),
         "gh-stack checkout topic repo=P4suta/project leased=true notifier=1\n\
-         gh-stack sync repo=P4suta/project leased=true notifier=1\n\
-         gh-stack merge 17 --yes --squash repo=P4suta/project leased=false notifier=1\n"
+         gh-stack sync repo=P4suta/project leased=true notifier=1\n"
     );
     assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -4810,6 +5148,85 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
             && stdout.contains(&format!("#17 merged at {top}")),
         "{stdout}"
     );
+    Ok(())
+}
+
+#[test]
+fn stack_merge_queue_tracks_every_member_until_the_whole_stack_finishes() -> Result<()> {
+    for result in ["merged", "ejected", "head_changed", "timed_out"] {
+        let fixture = Fixture::new(BODY)?;
+        let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+        let parent = git(&checkout, &["rev-parse", "parent"])?;
+        let top = git(&checkout, &["rev-parse", "HEAD"])?;
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let parent_final = match result {
+            "ejected" => queue_read(5, &parent, "OPEN", false),
+            "head_changed" => queue_read(5, &top, "OPEN", true),
+            "timed_out" => queue_read(5, &parent, "OPEN", true),
+            _ => queue_read(5, &parent, "MERGED", false),
+        };
+        let output = fixture.stack_command(&checkout, &lease, &["merge", "--pr", "17", "--interval", "0", "--timeout", if result == "timed_out" {"0"} else {"1"}])?
+            .env("GH_FIXTURE_RULES", r#"[{"type":"merge_queue"}]"#)
+            .env("GH_FIXTURE_LIST", r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":17,"headRefName":"topic","baseRefName":"parent"}]"#)
+            .env("GH_FIXTURE_VIEWS", [read(5, &parent, false, &body, PASSING, "BLOCKED"), read(17, &top, false, &body, PASSING, "BLOCKED")].join("\n"))
+            .env("GH_FIXTURE_QUEUE", [queue_read(5, &parent, "OPEN", true), parent_final, queue_read(17, &top, "OPEN", true), queue_read(17, &top, "MERGED", false)].join("\n"))
+            .output()?;
+        assert_eq!(
+            output.status.success(),
+            result == "merged",
+            "{result}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(&format!("\"outcome\":\"{result}\"")),
+            "{stdout}"
+        );
+        let log = fixture.log()?;
+        assert!(log.contains(&format!("\"sha\":\"{top}\"")), "{log}");
+        assert_eq!(log.matches("\n--method\nPUT\n").count(), 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn stack_restack_carries_an_unchanged_diff_and_waits_for_the_updated_checks() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+    let mut command = fixture.stack_command(
+        &checkout,
+        &lease,
+        &["merge", "--pr", "17", "--interval", "0"],
+    )?;
+    let parent = git(&checkout, &["rev-parse", "parent"])?;
+    let old = git(&checkout, &["rev-parse", "HEAD"])?;
+    let tree = git(&checkout, &["rev-parse", "HEAD^{tree}"])?;
+    let new = git(
+        &checkout,
+        &["commit-tree", &tree, "-p", &parent, "-m", "restacked head"],
+    )?;
+    let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+    let output = command
+        .env("GH_FIXTURE_LIST", r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":17,"headRefName":"topic","baseRefName":"parent"}]"#)
+        .env("GH_FIXTURE_BEHIND", &old)
+        .env("GH_FIXTURE_ASYNC", r#"{"status":"merged","details":{"message":"merged"}}"#)
+        .env("GH_FIXTURE_VIEWS", [
+            read(5, &parent, false, &body, PASSING, "BLOCKED"),
+            read(5, &parent, false, &body, PASSING, "BLOCKED"),
+            read(5, &parent, false, &body, PASSING, "BLOCKED"),
+            read(5, &parent, false, &body, PASSING, "MERGED"),
+            read(17, &old, false, &body, PASSING, "BLOCKED"),
+            read(17, &new, false, &body, r#"[{"status":"IN_PROGRESS","conclusion":null}]"#, "BLOCKED"),
+            read(17, &new, false, &body, PASSING, "BLOCKED"),
+            read(17, &new, false, &body, PASSING, "MERGED"),
+        ].join("\n")).output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fixture.stack_log().matches("gh-stack sync ").count(), 1);
+    assert!(fixture.log()?.contains(&format!("\"sha\":\"{new}\"")));
     Ok(())
 }
 
