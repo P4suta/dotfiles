@@ -14,9 +14,15 @@ Use the existing Doppler workplace through its official CLI or API.
 
 Start from the consumer's current authentication method and required authority.
 Keep or replace an existing key only when an active consumer still needs it.
-Prefer the registry's own workload identity for publication and Doppler OIDC for credentials that still need a protected store.
+Prefer the registry's own workload identity when the actual package can use it and it fits the owner's selected operating model.
+Follow an owner's explicit choice of scoped token authentication when native identity remains unavailable.
+Use Doppler OIDC for delivery of credentials that still need a protected store, including a selected registry token.
 Treat expired, revoked, unused, and unverified credentials as distinct states.
 Never restore a retired token, generate a replacement, or add a fallback just to make a configuration look complete.
+For an owner-selected token path, keep one protected input, limit provider permissions and lifetime, and pass it only to its consuming step.
+Preparation alone needs no active publishing key.
+When the owner defers key setup, prepare the consumer and input instructions, then leave issuance, registration, and live credential checks for the pre-release gate.
+Keep authentication methods explicit and stop on failure instead of switching methods.
 Use [credential lifecycle](references/credential-lifecycle.md) when organizing projects, migrating accounts, retiring keys, or configuring signing and publication.
 
 ## Find the existing setup

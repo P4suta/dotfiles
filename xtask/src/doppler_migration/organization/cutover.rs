@@ -11,10 +11,10 @@ use yaml_rust2::{Yaml, YamlLoader};
 const GITHUB_OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
 const MAIN_BRANCH: &str = "main";
 const MANUAL_EVENT: &str = "workflow_dispatch";
-const SYNC_METADATA_FIELDS: [&str; 3] =
+pub(super) const SYNC_METADATA_FIELDS: [&str; 3] =
     ["DOPPLER_CONFIG", "DOPPLER_ENVIRONMENT", "DOPPLER_PROJECT"];
 
-fn main_revision(repository: &Repository) -> Result<String> {
+pub(super) fn main_revision(repository: &Repository) -> Result<String> {
     let actual = gh(&format!("repos/{}", repository.name))?;
     ensure!(
         actual.get("id").and_then(Value::as_u64) == Some(repository.id)
@@ -133,11 +133,18 @@ fn remaining_consumers(
     report: &Report,
     consumers: &[&Consumer],
 ) -> Result<()> {
+    check_unused_fields(repository, revision, &remaining_fields(report, consumers)?)
+}
+
+pub(super) fn check_unused_fields(
+    repository: &Repository,
+    revision: &str,
+    fields: &BTreeSet<String>,
+) -> Result<()> {
     let paths = git(
         &repository.directory,
         &["ls-tree", "-r", "--name-only", revision, "--", ".github"],
     )?;
-    let fields = remaining_fields(report, consumers)?;
     let mut sources = BTreeMap::new();
     for path in paths.lines().filter(|path| {
         (path.starts_with(".github/workflows/") || path.starts_with(".github/actions/"))
@@ -153,7 +160,8 @@ fn remaining_consumers(
         )?;
         sources.insert(path.to_owned(), source);
     }
-    check_workflow_sources(&sources, &fields)
+    ensure!(!sources.is_empty(), "workflow consumer inventory is empty");
+    check_workflow_sources(&sources, fields)
 }
 
 fn remaining_fields(report: &Report, consumers: &[&Consumer]) -> Result<BTreeSet<String>> {

@@ -1,7 +1,7 @@
 {
-  "revision": "53b34d28aac769829d53e0834de123c489faad5f37f7bceeb385392e079c82b2",
-  "outcome": "keep",
-  "reason": "Document Hex workload identity, package ownership, per-package token scope, and client compatibility.\nRetire superseded static keys while preserving the approved package and publication boundaries.",
+  "revision": "129a62e1c35a78429b7bc3810b81cf7a145ec992306f86b02b65a942092cbe3b",
+  "outcome": "implemented",
+  "reason": "Support an explicit package-scoped Hex token path when native identity remains unavailable or unsuitable.\nVerify production availability before directing the owner through identity registration.\nPreparation requires no live publishing credential, and delivery evidence grants no publication authority.",
   "evidence": [
     "home/dot_agents/skills/registry-publishing/SKILL.md",
     "docs/adr/purpose-scoped-doppler-workload-identities.md"
