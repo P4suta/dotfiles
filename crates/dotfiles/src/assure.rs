@@ -1459,6 +1459,7 @@ pub fn commit(root: &Path, catalog: &Catalog) -> Result<()> {
 
 /// The pre-push point: refuses a pushed commit that adds a gap to what the remote already holds.
 /// A new branch counts from the merge base with the upstream default commit advertised by Git.
+/// An empty remote counts from the empty tree after a successful advertisement of all refs.
 ///
 /// # Errors
 ///
@@ -1476,21 +1477,26 @@ pub fn push(root: &Path, catalog: &Catalog, remote: &str, input: &[u8]) -> Resul
         let base = if zero(theirs) {
             upstream_base(root, catalog, remote, local)?
         } else {
-            explicit_base(root, catalog, remote, theirs)?
+            Some(explicit_base(root, catalog, remote, theirs)?)
         };
-        let merges = git(
-            root,
-            &[
-                "rev-list",
-                "--merges",
-                "--max-count=1",
-                &format!("{base}..{local}"),
-            ],
-        )?;
+        let merges = match base.as_deref() {
+            Some(base) => git(
+                root,
+                &[
+                    "rev-list",
+                    "--merges",
+                    "--max-count=1",
+                    &format!("{base}..{local}"),
+                ],
+            )?,
+            None => Vec::new(),
+        };
         let inherited = if zero(theirs) || merges.is_empty() {
             Vec::new()
         } else {
-            vec![upstream_base(root, catalog, remote, local)?]
+            upstream_base(root, catalog, remote, local)?
+                .into_iter()
+                .collect()
         };
         enforce(
             catalog,
@@ -1498,7 +1504,7 @@ pub fn push(root: &Path, catalog: &Catalog, remote: &str, input: &[u8]) -> Resul
                 root,
                 catalog,
                 Point::Push,
-                &Tree::Commit(Some(base)),
+                &Tree::Commit(base),
                 &Tree::Commit(Some(local.to_owned())),
                 &inherited,
             )?,
@@ -1529,19 +1535,30 @@ fn explicit_base(root: &Path, catalog: &Catalog, remote: &str, base: &str) -> Re
     })
 }
 
-fn upstream_base(root: &Path, catalog: &Catalog, remote: &str, head: &str) -> Result<String> {
+fn upstream_base(
+    root: &Path,
+    catalog: &Catalog,
+    remote: &str,
+    head: &str,
+) -> Result<Option<String>> {
     let advertised = git(root, &["ls-remote", remote, "HEAD"])?;
+    if advertised.is_empty() && git(root, &["ls-remote", remote])?.is_empty() {
+        return Ok(None);
+    }
     let advertised = std::str::from_utf8(&advertised)?;
-    let Some(default) = advertised.split_whitespace().next() else {
+    let Some(default) = advertised
+        .strip_suffix("\tHEAD\n")
+        .filter(|commit| shape_rules::commit_id(commit.as_bytes()))
+    else {
         return Err(Refusal::new(
-            "assure.base", "the owner's local catalog cannot compare a new branch without an upstream default commit",
-            crate::refusal::command(&["git", "ls-remote", remote, "HEAD"]),
+            "assure.base", "the owner's local catalog cannot compare a populated remote without an upstream default commit",
+            crate::refusal::command(&["git", "ls-remote", remote]),
         ).evidence(format!("owner's local catalog version={} sha256={}; base=unavailable", catalog.version, catalog.sha256)).into());
     };
     let tip = explicit_base(root, catalog, remote, default)?;
     let base = git(root, &["merge-base", head, &tip])?;
     let base = std::str::from_utf8(&base)?.trim();
-    explicit_base(root, catalog, remote, base)
+    explicit_base(root, catalog, remote, base).map(Some)
 }
 
 /// The agent stop point over the uncommitted changes.
