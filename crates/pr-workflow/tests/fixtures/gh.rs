@@ -125,6 +125,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", states[reads.min(states.len() - 1)]);
             return Ok(());
         }
+        if variable == "GH_FIXTURE_BRANCH"
+            && let Ok(branches) = std::env::var("GH_FIXTURE_LINK_BRANCHES")
+        {
+            let branches = states::parse(&branches)?;
+            if let Some(states) = branches.get(&endpoint) {
+                let marker = format!("issue-link-branch {endpoint}");
+                let reads = std::fs::read_to_string(&log_path)?
+                    .lines()
+                    .filter(|line| *line == marker)
+                    .count();
+                writeln!(log, "{marker}")?;
+                println!("{}", states[reads.min(states.len() - 1)]);
+                return Ok(());
+            }
+        }
         let responses = match variable {
             "GH_FIXTURE_REPOSITORY" => Some("GH_FIXTURE_REPOSITORIES"),
             "GH_FIXTURE_BRANCH" => Some("GH_FIXTURE_BRANCHES"),
