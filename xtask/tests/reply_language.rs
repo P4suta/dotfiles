@@ -40,6 +40,28 @@ fn render_current(
     Ok(String::from_utf8(result.stdout)?)
 }
 
+fn stop_handlers(hooks: &Value) -> Vec<&Value> {
+    hooks["hooks"]["Stop"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|group| group["hooks"].as_array().unwrap())
+        .collect()
+}
+
+fn language_stop(hooks: &Value) -> &Value {
+    let handlers: Vec<_> = stop_handlers(hooks)
+        .into_iter()
+        .filter(|hook| {
+            hook["command"]
+                .as_str()
+                .is_some_and(|command| command.contains(" assure stop "))
+        })
+        .collect();
+    assert_eq!(handlers.len(), 1, "{hooks}");
+    handlers[0]
+}
+
 #[test]
 fn reapplying_a_language_change_replaces_managed_hooks_and_keeps_other_handlers() -> Result<()> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
@@ -57,16 +79,28 @@ fn reapplying_a_language_change_replaces_managed_hooks_and_keeps_other_handlers(
             for language in ["English", "Japanese", "Japanese"] {
                 current = render_current(profile, Some(language), &template, &current)?;
                 let hooks: Value = serde_json::from_str(&current)?;
-                let handlers: Vec<_> = hooks["hooks"]["Stop"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .flat_map(|group| group["hooks"].as_array().unwrap())
-                    .collect();
-                assert_eq!(handlers.len(), 2, "{current}");
-                assert_eq!(handlers[0]["command"], "owner-hook");
+                let handlers = stop_handlers(&hooks);
+                assert_eq!(
+                    handlers
+                        .iter()
+                        .filter(|hook| hook["command"] == "owner-hook")
+                        .count(),
+                    1,
+                    "{current}"
+                );
+                assert_eq!(
+                    handlers
+                        .iter()
+                        .filter(|hook| hook["command"]
+                            .as_str()
+                            .is_some_and(|command| command.ends_with(" answer stop")))
+                        .count(),
+                    1,
+                    "{current}"
+                );
+                let verification = language_stop(&hooks);
                 assert!(
-                    handlers[1]["command"]
+                    verification["command"]
                         .as_str()
                         .unwrap()
                         .ends_with(&format!("--reply-language {language}")),
@@ -74,7 +108,7 @@ fn reapplying_a_language_change_replaces_managed_hooks_and_keeps_other_handlers(
                 );
                 if profile == Profile::Windows && path.contains("codex") {
                     assert!(
-                        handlers[1]["commandWindows"]
+                        verification["commandWindows"]
                             .as_str()
                             .unwrap()
                             .contains(&format!("--reply-language {language}"))
@@ -122,18 +156,10 @@ fn every_profile_renders_the_selected_language_in_both_clients_and_the_policy() 
             ] {
                 let template = fs::read_to_string(root.join("home").join(path))?;
                 let hooks: Value = serde_json::from_str(&render(profile, configured, &template)?)?;
-                let commands: Vec<_> = hooks["hooks"]["Stop"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .flat_map(|group| group["hooks"].as_array().unwrap())
-                    .filter_map(|hook| hook["command"].as_str())
-                    .collect();
-                assert_eq!(commands.len(), 1, "{profile:?}: {path}");
+                let command = language_stop(&hooks)["command"].as_str().unwrap();
                 assert!(
-                    commands[0].contains(&format!("--reply-language {expected}")),
-                    "{}",
-                    commands[0]
+                    command.ends_with(&format!("--reply-language {expected}")),
+                    "{command}"
                 );
             }
         }
