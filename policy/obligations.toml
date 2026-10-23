@@ -1790,6 +1790,14 @@ verifier = "kani"
 source = "crates/rules/src/proof_budget_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_a_suite_cap_shorter_than_its_harness_waves() {
+    assert!(production::campaign_seconds(316, 1, 900) == Some(900));
+}
+#[kani::proof]
+fn reject_an_overflowing_campaign_budget() {
+    assert!(production::campaign_seconds(u32::MAX, 1, 0).is_some());
+}
+#[kani::proof]
 fn reject_rounding_a_positive_host_elapsed_down_to_zero() {
     assert!(production::elapsed_millis(0, 1) == Some(0));
 }

@@ -302,6 +302,25 @@ pub fn run(arguments: &[OsString], image: &str) -> Result<Output> {
     run_with(&Policy::load(None)?, arguments, image, false)
 }
 
+/// Run a proof campaign with its inventory-derived safety cap and the installed resource limits.
+///
+/// # Errors
+///
+/// Refuses an empty, invalid, or overflowing inventory and propagates container failures.
+pub fn run_campaign(
+    arguments: &[OsString],
+    image: &str,
+    harnesses: u32,
+    parallelism: u16,
+    overhead: u32,
+) -> Result<Output> {
+    let mut policy = Policy::load(None)?;
+    policy.limits.seconds =
+        rules::proof_budget_rules::campaign_seconds(harnesses, parallelism, overhead)
+            .context("proof campaign requires a nonempty finite inventory and parallelism")?;
+    run_with(&policy, arguments, image, false)
+}
+
 /// Recognize a project Docker run and route its immutable image through the bounded lifecycle.
 ///
 /// # Errors

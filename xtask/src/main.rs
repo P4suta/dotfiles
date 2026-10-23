@@ -151,6 +151,9 @@ enum Action {
     Proofs {
         #[command(flatten)]
         scope: xtask::change::Scope,
+        /// Verify only these registered Kani rule modules and their rejecting probes.
+        #[arg(long = "source")]
+        sources: Vec<String>,
     },
     /// Run the CI proof campaign, deferring mutation and its fixture to the full native campaign.
     ProofsCi {
@@ -488,7 +491,13 @@ fn run() -> Result<()> {
         Action::PublicAudit { denylist } => xtask::profiles::audit_private(&cli.root, &denylist)?,
         Action::InstallPrWorkflow => install_pr_workflow(&cli.root)?,
         Action::InstallProse => install_prose(&cli.root)?,
-        Action::Proofs { scope } => proofs(&cli.root, &scope)?,
+        Action::Proofs { scope, sources } => {
+            if sources.is_empty() {
+                proofs(&cli.root, &scope)?;
+            } else {
+                xtask::skill_proofs::verify_sources(&cli.root, &sources)?;
+            }
+        }
         Action::ProofsCi { phase: Some(phase) } => xtask::proof_ci_phase::verify(&cli.root, phase)?,
         Action::ProofsCi { phase: None } => xtask::skill_proofs::verify_ci(&cli.root)?,
         Action::VerificationEnv(request) => xtask::verification_env::run(&cli.root, &request)?,
