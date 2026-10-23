@@ -2,6 +2,31 @@
 # Each rule module owns its decisions through its own Kani harnesses, so only the other shapes need an entry.
 
 [[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/answer.rs"
+by = "fuzz/fuzz_targets/answer_plan.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/answer/arguments.rs"
+by = "fuzz/fuzz_targets/answer_plan.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/answer/lexicon.rs"
+by = "fuzz/fuzz_targets/answer_plan.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/answer/relations.rs"
+by = "fuzz/fuzz_targets/answer_plan.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/answer/sources.rs"
+by = "fuzz/fuzz_targets/answer_plan.rs"
+
+[[owner]]
 shape = "protocol"
 path = "crates/rules/src/pr_ready_rules.rs"
 by = "crates/pr-workflow/tests/pr_ready_replay.rs"

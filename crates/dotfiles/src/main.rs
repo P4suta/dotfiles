@@ -16,6 +16,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Check sources and formal arguments for the exact answer draft.
+    Answer {
+        #[command(subcommand)]
+        action: dotfiles::answer::Action,
+    },
     /// Run unbounded verification only inside a container with policy limits.
     Bounded {
         #[command(subcommand)]
@@ -218,6 +223,7 @@ fn run(mut cli: Cli) -> Result<()> {
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
     match cli.command {
+        Commands::Answer { action } => dotfiles::answer::execute(action)?,
         Commands::Bounded { action } => dotfiles::bounded::execute(action)?,
         Commands::MiseInstall { arguments } => {
             let home = platform::home::home().context("native home is unavailable")?;

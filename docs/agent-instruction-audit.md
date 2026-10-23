@@ -148,6 +148,26 @@ Judgment: whether a finding has support requires checking the code.
 
 Judgment: authorization comes from the owner's own messages, and no tool separates them from an agent's.
 
+> - Use japanese-lexicon to verify Japanese readings and romanizations with identified public lexical records or major dictionaries and a named spelling standard.
+
+Judgment: selecting the contextual sense and governing spelling standard needs lexical review.
+The answer checker retrieves the declared source and checks supported conversions in `crates/dotfiles/src/answer/lexicon.rs`.
+
+> - Use checked-arguments for substantive reasoning, comparisons, explanations, and recommendations, including the checks for scope, semantic roles, evidence, counterarguments, and suitable formal methods.
+
+Judgment: interpreting natural language and selecting a formal model need argument review.
+The answer checker checks declared dependencies, Boolean entailment, comparison axes, and parallel roles in `crates/dotfiles/src/answer.rs`.
+
+> - Before completing a request, check the exact answer draft with `dotfiles answer check` using the request's managed session context.
+
+Judgment: client trust and reload determine whether managed hooks run.
+The managed Stop path in `crates/dotfiles/src/answer.rs` refuses an exact draft without completed evidence for its current request.
+
+> - Keep premise truth, natural-language interpretation, formal entailment, and decision relevance separate, and report unsupported or incomplete checks without claiming verification.
+
+Judgment: a formal theorem doesn't establish its empirical premises or the correspondence between its model and prose.
+The answer checker distinguishes hypotheses and unverified statements from factual premises and complete proof evidence.
+
 ### `prose_policy`
 
 > ## Prose
