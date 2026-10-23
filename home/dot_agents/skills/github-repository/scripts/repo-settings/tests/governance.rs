@@ -1,7 +1,8 @@
 use anyhow::{Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use repo_settings::{
-    Api, Environment, Operation, Profile, Repository, Snapshot, State, Workflow, apply, plan,
+    Api, Environment, Operation, OwnerType, Profile, Repository, Snapshot, State, Workflow, apply,
+    plan,
 };
 use serde_json::{Value, json};
 use std::cell::{Cell, RefCell};
@@ -14,6 +15,7 @@ fn state() -> State {
             id: 7,
             full_name: "owner/project".into(),
             owner_id: 9,
+            owner_type: OwnerType::Organization,
             default_branch: "main".into(),
             archived: false,
             fork: false,
@@ -226,8 +228,90 @@ fn queue_requires_the_trigger_in_every_reporting_workflow() -> Result<()> {
 }
 
 #[test]
-fn queue_ready_workflows_plan_one_squash_update_and_drop_strict_checks() -> Result<()> {
-    let original = ready_queue_state()?;
+fn user_owned_repositories_keep_strict_checks_without_queue_findings() -> Result<()> {
+    for yaml in [
+        "on: [pull_request, merge_group]\njobs:\n  actual-ci: {}\n",
+        "on: pull_request\njobs:\n  actual-ci: {}\n",
+        "on: [invalid yaml",
+    ] {
+        for required_checks in [true, false] {
+            let mut previous = queue_state(&[(QUEUE_WORKFLOW, yaml)])?;
+            if !required_checks {
+                previous.rulesets[0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|rule| rule["type"] != "required_status_checks");
+            }
+            let mut api = ReadOnlyApi::new(&previous);
+            api.responses.get_mut("repos/owner/project").unwrap()["owner"]["type"] = json!("User");
+            let original = repo_settings::audit(&api, "owner/project")?;
+            let planned = plan(snapshot(original.clone()), Profile::baseline()?)?;
+            assert!(planned.changes.is_empty(), "{:#?}", planned.changes);
+            assert!(planned.findings.is_empty(), "{:#?}", planned.findings);
+            assert_eq!(planned.snapshot.repositories[0], original);
+            assert_eq!(api.writes.get(), 0);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn legacy_snapshots_default_to_user_owned_and_skip_queue_planning() -> Result<()> {
+    let mut value = serde_json::to_value(snapshot(ready_queue_state()?))?;
+    value["repositories"][0]["repository"]
+        .as_object_mut()
+        .unwrap()
+        .remove("owner_type");
+    let original: Snapshot = serde_json::from_value(value)?;
+    assert_eq!(
+        original.repositories[0].repository.owner_type,
+        OwnerType::User
+    );
+    let planned = plan(original.clone(), Profile::baseline()?)?;
+    assert!(planned.changes.is_empty(), "{:#?}", planned.changes);
+    assert!(planned.findings.is_empty(), "{:#?}", planned.findings);
+    assert_eq!(planned.snapshot, original);
+    Ok(())
+}
+
+#[test]
+fn audit_records_the_owner_type() -> Result<()> {
+    for owner_type in ["User", "Organization"] {
+        let mut api = ReadOnlyApi::new(&ready_queue_state()?);
+        api.responses.get_mut("repos/owner/project").unwrap()["owner"]["type"] = json!(owner_type);
+        let audited = repo_settings::audit(&api, "owner/project")?;
+        assert_eq!(
+            serde_json::to_value(audited.repository)?["owner_type"],
+            owner_type
+        );
+        assert_eq!(api.writes.get(), 0);
+    }
+    Ok(())
+}
+
+#[test]
+fn audit_rejects_missing_or_unknown_owner_types() -> Result<()> {
+    for owner_type in [None, Some(json!("Bot")), Some(Value::Null)] {
+        let mut api = ReadOnlyApi::new(&ready_queue_state()?);
+        let owner = api.responses.get_mut("repos/owner/project").unwrap()["owner"]
+            .as_object_mut()
+            .unwrap();
+        if let Some(owner_type) = owner_type {
+            owner.insert("type".into(), owner_type);
+        } else {
+            owner.remove("type");
+        }
+        assert!(repo_settings::audit(&api, "owner/project").is_err());
+        assert_eq!(api.writes.get(), 0);
+    }
+    Ok(())
+}
+
+#[test]
+fn organization_owned_queue_ready_workflows_plan_one_squash_update_and_drop_strict_checks()
+-> Result<()> {
+    let api = ReadOnlyApi::new(&ready_queue_state()?);
+    let original = repo_settings::audit(&api, "owner/project")?;
     let planned = plan(snapshot(original.clone()), Profile::baseline()?)?;
     assert!(planned.findings.is_empty());
     assert_eq!(planned.changes.len(), 1);
@@ -464,7 +548,7 @@ impl ReadOnlyApi {
         let mut raw = serde_json::to_value(&state.repository.settings).unwrap();
         raw["id"] = json!(state.repository.id);
         raw["full_name"] = json!(state.repository.full_name);
-        raw["owner"] = json!({"id":state.repository.owner_id});
+        raw["owner"] = json!({"id":state.repository.owner_id,"type":state.repository.owner_type});
         raw["default_branch"] = json!(state.repository.default_branch);
         raw["archived"] = json!(state.repository.archived);
         raw["fork"] = json!(state.repository.fork);

@@ -1,5 +1,5 @@
 use crate::merge_queue_rules::{Decision, decide};
-use crate::{Change, Finding, Operation, State, Workflow, number};
+use crate::{Change, Finding, Operation, OwnerType, State, Workflow, number};
 use anyhow::{Context, Result, bail, ensure};
 use glob::{MatchOptions, Pattern};
 use serde_json::{Value, json};
@@ -79,6 +79,7 @@ pub(crate) fn changes(
     changes: &mut Vec<Change>,
     findings: &mut Vec<Finding>,
 ) -> Result<()> {
+    let mut queue_findings = Vec::new();
     let mut applicable = Vec::new();
     let mut contexts = BTreeSet::new();
     let mut present = false;
@@ -102,7 +103,7 @@ pub(crate) fn changes(
                     }
                     if !reported.is_empty() && !merge_group {
                         ready = false;
-                        findings.push(Finding {
+                        queue_findings.push(Finding {
                             repository: state.repository.full_name.clone(),
                             message: format!("{} reports required checks but is missing the merge_group trigger.", workflow.path),
                         });
@@ -110,7 +111,7 @@ pub(crate) fn changes(
                 }
                 Err(error) => {
                     ready = false;
-                    findings.push(Finding {
+                    queue_findings.push(Finding {
                         repository: state.repository.full_name.clone(),
                         message: format!(
                             "Cannot verify merge_group reporting in {}: {error:#}.",
@@ -123,17 +124,26 @@ pub(crate) fn changes(
     }
     for context in missing {
         ready = false;
-        findings.push(Finding {
+        queue_findings.push(Finding {
             repository: state.repository.full_name.clone(),
             message: format!("No default-branch workflow reports required check {context}; verify its merge_group reporter before enabling a merge queue."),
         });
     }
-    match decide(!contexts.is_empty(), ready, present) {
+    let decision = decide(
+        state.repository.owner_type == OwnerType::Organization,
+        !contexts.is_empty(),
+        ready,
+        present,
+    );
+    if decision != Decision::Unavailable {
+        findings.extend(queue_findings);
+    }
+    match decision {
         Decision::NoChecks => findings.push(Finding {
             repository: state.repository.full_name.clone(),
             message: "Bind a real successful CI check before adding a required-status rule; the CLI never invents a check name.".into(),
         }),
-        Decision::Blocked | Decision::Present => {}
+        Decision::Unavailable | Decision::Blocked | Decision::Present => {}
         Decision::Add => {
             let mut add_queue = true;
             for before in applicable {
