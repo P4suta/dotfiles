@@ -24,6 +24,7 @@ pub(crate) const DEPTH: usize = 4;
 /// The shells whose script argument the hook reads.
 const SHELLS: [&str; 5] = ["sh", "bash", "zsh", "dash", "ksh"];
 
+mod syntax;
 mod translate;
 
 pub(crate) fn nested_scripts(command: &str) -> Vec<String> {
@@ -216,12 +217,22 @@ fn excepted(table: &Modern, path: &Path, directory: Option<&Path>) -> bool {
         .any(|exception| path == exception.path)
 }
 
-fn refusal_text(tool: &ModernTool, legacy: &str, arguments: &[&str]) -> String {
+fn refusal_text(
+    tool: &ModernTool,
+    legacy: &str,
+    arguments: Option<&[syntax::Argument<'_>]>,
+) -> String {
     format!(
         "Refused: `{legacy}` is a legacy command, and the modern tool table prefers `{preferred}`: {reason}\nNext action: {next}\nThe legacy tool stays correct for: {keep}\nTo run it once anyway, put the table entry and your reason before the command: {BYPASS}='{legacy}: <reason>' {legacy} ...",
         preferred = tool.preferred,
         reason = tool.reason,
-        next = translate::rewrite(&tool.next, arguments),
+        next = arguments.map_or_else(
+            || format!(
+                "Use `{}` with the original shell arguments after checking their syntax.",
+                tool.preferred
+            ),
+            |arguments| translate::rewrite_spelled(&tool.next, arguments).to_string(),
+        ),
         keep = tool.keep,
     )
 }
@@ -244,6 +255,22 @@ impl Findings {
         self.refusals.extend(other.refusals);
         self.unavailable.extend(other.unavailable);
     }
+
+    fn inspect_stdin(
+        &mut self,
+        invocation: &syntax::Invocation<'_>,
+        directory: Option<&Path>,
+        table: &Modern,
+        depth: usize,
+    ) {
+        for input in invocation.inputs() {
+            match input {
+                syntax::Input::Script(script) if depth < DEPTH => self.append(inspect(script, directory, table, depth + 1)),
+                syntax::Input::Script(_) => self.unavailable.push("script nesting exceeds the inspection limit".to_owned()),
+                syntax::Input::Unavailable => self.unavailable.push("Refused: the shell's standard-input script could not be inspected.\nNext action: use a literal script path or a literal heredoc for inspection.".to_owned()),
+            }
+        }
+    }
 }
 
 /// Every mapped invocation and unavailable inspection in the command's bounded scripts.
@@ -255,6 +282,54 @@ impl Findings {
 /// Returns an error when the embedded table doesn't parse.
 pub fn findings(command: &str, directory: Option<&Path>) -> Result<Findings> {
     Ok(inspect(command, directory, table()?, 0))
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Shell {
+    Bash,
+    PowerShell,
+}
+
+impl Shell {
+    fn invocations<'a>(
+        self,
+        command: &'a str,
+        findings: &mut Findings,
+    ) -> Vec<syntax::Invocation<'a>> {
+        let unparsed = || {
+            segments(command)
+                .into_iter()
+                .map(syntax::Invocation::unparsed)
+                .collect()
+        };
+        match self {
+            Self::PowerShell => unparsed(),
+            Self::Bash => match syntax::parse(command) {
+                Ok(invocations) => invocations,
+                Err(error) => {
+                    findings.unavailable.push(format!("Refused: shell argument spelling could not be verified: {error:#}.\nNext action: correct the shell syntax or restore the pinned shfmt parser before using a suggested command."));
+                    unparsed()
+                }
+            },
+        }
+    }
+}
+
+pub(crate) fn findings_in_shell(
+    command: &str,
+    directory: Option<&Path>,
+    shell: Shell,
+) -> Result<Findings> {
+    Ok(inspect_shell(command, directory, table()?, 0, shell))
+}
+
+/// Checks the byte ranges in argument metadata without executing the shell source.
+///
+/// # Errors
+///
+/// Returns an error for unreadable syntax metadata, unsupported source, or an invalid source range.
+pub fn check_shell_spelling_tree(source: &str, tree: &str) -> Result<()> {
+    syntax::check(source, tree)
 }
 
 /// The joined diagnostics, or `None` when every supported inspection admits the command.
@@ -363,10 +438,23 @@ fn shell_word(text: &str) -> Option<(&str, &str)> {
 }
 
 fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize) -> Findings {
+    inspect_shell(command, directory, table, depth, Shell::Bash)
+}
+
+fn inspect_shell(
+    command: &str,
+    directory: Option<&Path>,
+    table: &Modern,
+    depth: usize,
+    shell: Shell,
+) -> Findings {
     let nested = depth < DEPTH;
     let mut findings = Findings::default();
     let mut variables = std::collections::BTreeMap::new();
-    for words in segments(command) {
+    let mut inline_scripts = Vec::new();
+    let invocations = shell.invocations(command, &mut findings);
+    for invocation in invocations {
+        let words = invocation.values();
         assigned(&words, &mut variables);
         let (command_words, bypass) = command_words(&words);
         let Some((first, rest)) = command_words.split_first() else {
@@ -375,6 +463,17 @@ fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize
         let name = program(first);
         let name = name.as_str();
         let path = script_path(name, first, rest, directory);
+        let inline = rest.iter().position(|word| {
+            word.starts_with('-') && !word.starts_with("--") && word.contains('c')
+        });
+        if SHELLS.contains(&name)
+            && let Some(script) = inline.and_then(|position| rest.get(position + 1))
+        {
+            inline_scripts.push(script.clone());
+        }
+        if SHELLS.contains(&name) && path.is_none() && inline.is_none() {
+            findings.inspect_stdin(&invocation, directory, table, depth);
+        }
         if (SHELLS.contains(&name) || path.is_some())
             && dynamic_xargs_script(&words, command_words, path)
         {
@@ -424,7 +523,10 @@ fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize
         let bypassed = bypass.is_some_and(|value| legacy_rules::bypass_names(value, name));
         match (legacy_rules::verdict(tool.is_some(), false, bypassed), tool) {
             (Verdict::Refuse, Some(tool)) => {
-                findings.refusals.push(refusal_text(tool, name, &arguments));
+                let spelling = invocation.arguments(words.len() - rest.len());
+                findings
+                    .refusals
+                    .push(refusal_text(tool, name, spelling.as_deref().ok()));
             }
             (Verdict::Bypassed, _) => {
                 let reason = bypass
@@ -435,7 +537,7 @@ fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize
             _ => {}
         }
     }
-    for script in nested_scripts(command) {
+    for script in inline_scripts {
         if nested {
             findings.append(inspect(script.as_str(), directory, table, depth + 1));
         } else {
@@ -535,6 +637,37 @@ mod tests {
         refusal(command, None)
             .unwrap()
             .unwrap_or_else(|| panic!("admitted: {command}"))
+    }
+
+    #[test]
+    fn suggestions_preserve_shell_argument_spelling() {
+        for arguments in [
+            "-c '.foo' ~/.codex/hooks.json",
+            "'.foo' '~/path with spaces'",
+            "'.foo' ~/path\\ with\\ spaces",
+            "'.foo' \"$HOME/file name\" ''",
+            "'.foo' 'literal'\"suffix\"",
+        ] {
+            let message = refused(&format!("jq {arguments} 2>&1"));
+            assert!(
+                message
+                    .lines()
+                    .any(|line| line == format!("Next action: jaq {arguments}")),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_inline_script_inside_a_heredoc_is_inspected_once() -> Result<()> {
+        let findings = findings("sh <<'EOF'\nbash -c 'grep x f'\nEOF", None)?;
+        assert_eq!(findings.refusals.len(), 1, "{:?}", findings.refusals);
+        assert!(
+            findings.unavailable.is_empty(),
+            "{:?}",
+            findings.unavailable
+        );
+        Ok(())
     }
 
     #[test]

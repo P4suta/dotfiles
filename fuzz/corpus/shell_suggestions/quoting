@@ -1,0 +1,5 @@
+jq -c '.foo' ~/.codex/hooks.json 2>&1
+jq '.foo' '~/path with spaces'
+jq '.foo' ~/path\ with\ spaces
+env EXAMPLE=value command jq '.foo' "$HOME/file name" ''
+jq '.foo' 'literal'"suffix"

@@ -1,3 +1,4 @@
+use super::syntax::Argument;
 #[cfg(test)]
 use crate::legacy_rules::{bypass_names, invokes};
 use std::borrow::ToOwned;
@@ -19,8 +20,103 @@ fn quote(word: &str) -> String {
     }
 }
 
-fn join(words: &[String]) -> String {
-    words.join(" ")
+struct Literal<'a>(&'a str);
+
+impl<'a> Literal<'a> {
+    fn read(argument: &Argument<'a>) -> Option<Self> {
+        let source = argument.spelling;
+        let value = if plain(source) {
+            source
+        } else if let Some(inner) = source
+            .strip_prefix('\'')
+            .and_then(|text| text.strip_suffix('\''))
+        {
+            (!inner.contains('\'')).then_some(inner)?
+        } else {
+            let inner = source
+                .strip_prefix('"')
+                .and_then(|text| text.strip_suffix('"'))?;
+            (!inner.contains(['$', '`', '\\', '"', '!'])).then_some(inner)?
+        };
+        (value == argument.value).then_some(Self(value))
+    }
+
+    fn suffix(self, start: usize) -> Option<Self> {
+        self.0.get(start..).map(Self)
+    }
+
+    fn suffix_of(argument: &Argument<'a>, start: usize) -> Option<Self> {
+        let value = argument.value.get(start..)?;
+        let prefix = argument.value.get(..start)?;
+        if !plain(prefix) {
+            return None;
+        }
+        if let Some(spelling) = argument.spelling.strip_prefix(prefix) {
+            if spelling.is_empty() && value.is_empty() {
+                return Some(Self(""));
+            }
+            Self::read(&Argument {
+                value,
+                spelling,
+                order: argument.order,
+            })
+        } else {
+            Self::read(argument)?.suffix(start)
+        }
+    }
+
+    fn rendered(&self, prefix: &str, suffix: &str) -> String {
+        quote(&format!("{prefix}{}{suffix}", self.0))
+    }
+}
+
+enum Piece<'a> {
+    Generated(String),
+    Source {
+        spelling: &'a str,
+        dynamic_order: Option<usize>,
+    },
+}
+
+impl From<String> for Piece<'_> {
+    fn from(text: String) -> Self {
+        Self::Generated(text)
+    }
+}
+
+impl<'a> From<&Argument<'a>> for Piece<'a> {
+    fn from(argument: &Argument<'a>) -> Self {
+        Self::Source {
+            spelling: argument.spelling,
+            dynamic_order: Literal::read(argument).is_none().then_some(argument.order),
+        }
+    }
+}
+
+impl Piece<'_> {
+    fn text(&self) -> &str {
+        match self {
+            Self::Generated(text) => text,
+            Self::Source { spelling, .. } => spelling,
+        }
+    }
+}
+
+fn join(words: &[Piece<'_>]) -> Option<String> {
+    let mut previous = None;
+    for word in words {
+        if let Piece::Source {
+            dynamic_order: Some(order),
+            ..
+        } = word
+        {
+            if !crate::legacy_rules::spelling_follows(previous, *order) {
+                return None;
+            }
+            previous = Some(*order);
+        }
+    }
+    Some(words.iter().map(Piece::text).collect::<Vec<_>>().join(" "))
 }
 
 /// The next action a refusal names: the preferred command, or the tool to use instead.
@@ -42,45 +138,97 @@ impl PartialEq<&str> for Rewrite {
 /// The preferred command that does what `arguments` asked of the legacy command, from an entry's `next` text.
 /// `grep` and `find` translate their flags, and any other text replaces `{args}` with the quoted arguments.
 ///
-#[must_use]
-pub fn rewrite(next: &str, arguments: &[&str]) -> Rewrite {
-    Rewrite(match next {
-        "grep" => grep_to_rg(arguments),
-        "find" => find_to_fd(arguments),
-        text => text.replace(
-            "{args}",
-            &join(&arguments.iter().map(|word| quote(word)).collect::<Vec<_>>()),
+#[cfg(test)]
+fn rewrite(next: &str, arguments: &[&str]) -> Rewrite {
+    let spellings = arguments.iter().map(|word| quote(word)).collect::<Vec<_>>();
+    let arguments = arguments
+        .iter()
+        .zip(&spellings)
+        .enumerate()
+        .map(|(order, (value, spelling))| Argument {
+            value,
+            spelling,
+            order,
+        })
+        .collect::<Vec<_>>();
+    rewrite_spelled(next, &arguments)
+}
+
+pub(super) fn rewrite_spelled(next: &str, arguments: &[Argument<'_>]) -> Rewrite {
+    match next {
+        "grep" => Rewrite(grep_to_rg(arguments).unwrap_or_else(|| {
+            "Use `rg` with separate option values, the original expansion order, and shell quoting.".to_owned()
+        })),
+        "find" => Rewrite(find_to_fd(arguments).unwrap_or_else(|| {
+            "Use `fd` with complete option values, the original expansion order, and shell quoting.".to_owned()
+        })),
+        text => Rewrite(
+            text.replace(
+                "{args}",
+                &arguments
+                    .iter()
+                    .map(|argument| argument.spelling)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
         ),
-    })
+    }
 }
 
 /// The grep flags whose value follows them in the same word or the next.
 const GREP_VALUES: &str = "ABCefmd";
 
-fn grep_to_rg(arguments: &[&str]) -> String {
-    let mut out = vec!["rg".to_owned()];
+fn grep_to_rg(arguments: &[Argument<'_>]) -> Option<String> {
+    let mut out = vec![Piece::Generated("rg".to_owned())];
     let mut operands = Vec::new();
     let mut options = true;
     let mut arguments = arguments.iter();
-    while let Some(argument) = arguments.next() {
-        if !options || !argument.starts_with('-') || *argument == "-" {
-            operands.push(quote(argument));
+    while let Some(word) = arguments.next() {
+        let argument = word.value;
+        if !options || !argument.starts_with('-') || argument == "-" {
+            operands.push(Piece::from(word));
             continue;
         }
-        if *argument == "--" {
+        if argument == "--" {
             options = false;
-            operands.push("--".to_owned());
+            operands.push(Piece::Generated("--".to_owned()));
             continue;
         }
         if let Some(long) = argument.strip_prefix("--") {
             let (name, value) = long.split_once('=').unwrap_or((long, ""));
             match name {
-                "recursive" | "dereference-recursive" | "extended-regexp" => {}
-                "include" => out.extend(["-g".to_owned(), quote(value)]),
-                "exclude" => out.extend(["-g".to_owned(), quote(&format!("!{value}"))]),
-                "exclude-dir" => out.extend(["-g".to_owned(), quote(&format!("!{value}/"))]),
-                "no-filename" => out.push("-I".to_owned()),
-                _ => out.push(quote(argument)),
+                "recursive" | "dereference-recursive" | "extended-regexp" => {
+                    if long.contains('=') {
+                        return None;
+                    }
+                }
+                "include" | "exclude" | "exclude-dir" => {
+                    let (prefix, suffix) = match name {
+                        "include" => ("", ""),
+                        "exclude" => ("!", ""),
+                        _ => ("!", "/"),
+                    };
+                    let pattern = if long.contains('=') {
+                        Literal::suffix_of(word, argument.len() - value.len())?
+                            .rendered(prefix, suffix)
+                            .into()
+                    } else {
+                        let value = arguments.next()?;
+                        if name == "include" {
+                            Piece::from(value)
+                        } else {
+                            Literal::read(value)?.rendered(prefix, suffix).into()
+                        }
+                    };
+                    out.extend([Piece::Generated("-g".to_owned()), pattern]);
+                }
+                "no-filename" => {
+                    if long.contains('=') {
+                        return None;
+                    }
+                    out.push(Piece::Generated("-I".to_owned()));
+                }
+                _ => out.push(Piece::from(word)),
             }
             continue;
         }
@@ -88,20 +236,28 @@ fn grep_to_rg(arguments: &[&str]) -> String {
         while let Some(flag) = cluster.next() {
             match flag {
                 'r' | 'R' | 'E' => {}
-                'h' => out.push("-I".to_owned()),
-                's' => out.push("--no-messages".to_owned()),
-                'L' => out.push("--files-without-match".to_owned()),
+                'h' => out.push(Piece::Generated("-I".to_owned())),
+                's' => out.push(Piece::Generated("--no-messages".to_owned())),
+                'L' => out.push(Piece::Generated("--files-without-match".to_owned())),
                 value if GREP_VALUES.contains(value) => {
-                    out.push(format!("-{value}"));
+                    out.push(Piece::Generated(format!("-{value}")));
                     let rest = cluster.as_str();
                     if rest.is_empty() {
-                        out.extend(arguments.next().map(|next| quote(next)));
+                        Literal::read(word)?;
+                        out.push(Piece::from(arguments.next()?));
                     } else {
-                        out.push(quote(rest));
+                        out.push(
+                            Literal::suffix_of(word, argument.len() - rest.len())?
+                                .rendered("", "")
+                                .into(),
+                        );
                     }
                     break;
                 }
-                other => out.push(format!("-{other}")),
+                other => {
+                    Literal::read(word)?;
+                    out.push(Piece::Generated(format!("-{other}")));
+                }
             }
         }
     }
@@ -109,11 +265,13 @@ fn grep_to_rg(arguments: &[&str]) -> String {
     join(&out)
 }
 
-fn find_to_fd(arguments: &[&str]) -> String {
-    let paths: Vec<String> = arguments
+fn find_to_fd(arguments: &[Argument<'_>]) -> Option<String> {
+    let paths: Vec<Piece<'_>> = arguments
         .iter()
-        .take_while(|argument| !argument.starts_with('-') && !matches!(**argument, "(" | "!"))
-        .map(|path| quote(path))
+        .take_while(|argument| {
+            !argument.value.starts_with('-') && !matches!(argument.value, "(" | "!")
+        })
+        .map(Piece::from)
         .collect();
     let mut flags = Vec::new();
     let mut pattern = None;
@@ -121,77 +279,89 @@ fn find_to_fd(arguments: &[&str]) -> String {
     let mut untranslated = Vec::new();
     let mut arguments = arguments.iter().skip(paths.len()).peekable();
     while let Some(argument) = arguments.next() {
-        let value = arguments.peek().map(|word| quote(word));
-        let flag = match *argument {
+        let value = arguments.peek().map(|word| Piece::from(*word));
+        if pattern.is_some()
+            && matches!(argument.value, "-name" | "-iname" | "-path" | "-wholename")
+        {
+            return None;
+        }
+        let flag = match argument.value {
             "-name" => {
-                pattern = value;
+                pattern = Some(value?);
                 None
             }
             "-iname" => {
-                pattern = value;
+                pattern = Some(value?);
                 Some("--ignore-case")
             }
             "-path" | "-wholename" => {
-                pattern = value;
+                pattern = Some(value?);
                 Some("--full-path")
             }
             "-type" | "-maxdepth" | "-mindepth" => {
                 flags.push(
-                    match *argument {
+                    match argument.value {
                         "-type" => "--type",
                         "-maxdepth" => "--max-depth",
                         _ => "--min-depth",
                     }
-                    .to_owned(),
+                    .to_owned()
+                    .into(),
                 );
-                flags.extend(value);
+                flags.push(value?);
                 None
             }
             "-exec" | "-execdir" => {
                 let mut command = Vec::new();
+                let mut terminated = false;
                 for word in arguments.by_ref() {
-                    if matches!(*word, ";" | "+") {
+                    if matches!(word.value, ";" | "+") {
                         exec.push(
-                            if *word == "+" {
+                            if word.value == "+" {
                                 "--exec-batch"
                             } else {
                                 "--exec"
                             }
-                            .to_owned(),
+                            .to_owned()
+                            .into(),
                         );
+                        terminated = true;
                         break;
                     }
-                    command.push(quote(word));
+                    command.push(Piece::from(word));
+                }
+                if !terminated || command.is_empty() {
+                    return None;
                 }
                 exec.extend(command);
                 continue;
             }
             "-print" => continue,
-            other => {
-                untranslated.push(other.to_owned());
+            _ => {
+                untranslated.push(argument.spelling.to_owned());
                 continue;
             }
         };
         arguments.next();
-        flags.extend(flag.map(ToOwned::to_owned));
+        flags.extend(flag.map(|flag| Piece::Generated(flag.to_owned())));
     }
-    let mut out = vec!["fd".to_owned()];
+    let mut out = vec![Piece::Generated("fd".to_owned())];
     out.extend(flags);
     match pattern {
-        Some(glob) => out.extend(["--glob".to_owned(), glob]),
-        None if !paths.is_empty() => out.push(".".to_owned()),
+        Some(glob) => out.extend([Piece::Generated("--glob".to_owned()), glob]),
+        None if !paths.is_empty() => out.push(Piece::Generated(".".to_owned())),
         None => {}
     }
     out.extend(paths);
     out.extend(exec);
-    let command = join(&out);
+    let command = join(&out)?;
     if untranslated.is_empty() {
-        command
+        Some(command)
     } else {
-        format!(
+        Some(format!(
             "{command}, and translate {} by hand from `fd --help`",
             untranslated.join(" ")
-        )
+        ))
     }
 }
 
