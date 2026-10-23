@@ -95,6 +95,43 @@ fn bounded_for(command: &mut Command, input: Option<&str>, timeout: Duration) ->
     })
 }
 
+pub(crate) fn check_shell_syntax_source(input: &str) -> Result<()> {
+    ensure!(
+        u64::try_from(input.len())? <= MAX_FILE_BYTES,
+        "shell syntax input exceeds the inspection limit"
+    );
+    ensure!(
+        !input.contains('\0'),
+        "shell syntax input contains a NUL byte"
+    );
+    Ok(())
+}
+
+pub(crate) fn check_shell_syntax_output(input: &str) -> Result<()> {
+    ensure!(
+        u64::try_from(input.len())? < MAX_OUTPUT_BYTES,
+        "shell syntax output reached the inspection limit"
+    );
+    Ok(())
+}
+
+pub(crate) fn shell_syntax_tree(input: &str) -> Result<String> {
+    check_shell_syntax_source(input)?;
+    let completed = bounded(
+        Tool::Shfmt
+            .command()
+            .args(["--to-json", "--language-dialect", "bash"]),
+        Some(input),
+    )?;
+    ensure!(
+        completed.outcome == Outcome::Clean,
+        "the pinned shfmt parser could not finish: {:?}",
+        completed.outcome
+    );
+    check_shell_syntax_output(&completed.stdout)?;
+    Ok(completed.stdout)
+}
+
 fn tool(linter: Linter) -> Tool {
     match linter {
         Linter::Shellcheck => Tool::Shellcheck,
@@ -814,6 +851,17 @@ mod tests {
     const MANY_FINDINGS: usize = 221;
     #[cfg(unix)]
     const TEST_TIMEOUT: Duration = Duration::from_millis(30);
+
+    #[test]
+    fn shell_syntax_limits_reject_oversized_sources_and_truncated_output() {
+        let source = "x".repeat(usize::try_from(MAX_FILE_BYTES).unwrap());
+        assert!(check_shell_syntax_source(&source).is_ok());
+        assert!(check_shell_syntax_source(&format!("{source}x")).is_err());
+        assert!(check_shell_syntax_source("jq \0").is_err());
+        let output = "x".repeat(usize::try_from(MAX_OUTPUT_BYTES).unwrap());
+        assert!(check_shell_syntax_output(&output[..output.len() - 1]).is_ok());
+        assert!(check_shell_syntax_output(&output).is_err());
+    }
 
     #[test]
     fn missing_executables_supply_the_pinned_installation_command() {

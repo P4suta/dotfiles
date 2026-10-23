@@ -1,0 +1,3 @@
+sh <<'EOF'
+grep x f
+EOF

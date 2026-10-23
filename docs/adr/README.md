@@ -110,3 +110,4 @@
 | [2026-10-23 Limit merge queues to organization-owned repositories](limit-merge-queues-to-organization-repositories.md) | accepted |  |
 | [2026-10-23 Link issues with repository owner authority](link-issues-with-repository-owner-authority.md) | accepted |  |
 | [2026-10-23 Resolve SSH agents at use time](resolve-ssh-agents-at-use-time.md) | proposed |  |
+| [2026-10-24 Preserve shell argument source spellings](preserve-shell-argument-source-spellings.md) | proposed |  |

@@ -3,6 +3,16 @@
 
 [[owner]]
 shape = "parser"
+path = "crates/dotfiles/src/legacy.rs"
+by = "fuzz/fuzz_targets/shell_suggestions.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/legacy/syntax.rs"
+by = "fuzz/fuzz_targets/shell_suggestions.rs"
+
+[[owner]]
+shape = "parser"
 path = "crates/dotfiles/src/answer.rs"
 by = "fuzz/fuzz_targets/answer_plan.rs"
 
