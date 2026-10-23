@@ -173,6 +173,15 @@ pub(crate) fn build(root: &Path, image: &str) -> Result<()> {
     Ok(())
 }
 
+/// Prepare the same pinned image for per-answer proof checks.
+///
+/// # Errors
+///
+/// Reports build failures without recording a usable prover.
+pub fn prepare_image(root: &Path, image: &str) -> Result<()> {
+    build(root, image)
+}
+
 /// Builds a writable package copy, prints the axiom report, and replays each module in a fresh kernel.
 ///
 /// # Errors

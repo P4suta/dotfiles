@@ -43,6 +43,12 @@
 {{-   $own = append $own (includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" $arguments "trace" true) | fromJson) -}}
 {{-   $_ := set $hooks $event (concat $groups (list (dict "hooks" $own))) -}}
 {{- end -}}
+{{- range $event, $point := dict "UserPromptSubmit" "begin" "Stop" "stop" -}}
+{{- $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list (printf " answer %s" $point))) | fromJson -}}
+{{- $answer := includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" (printf "answer %s" $point) "trace" true) | fromJson -}}
+{{- $_ := set $answer "timeout" 10 -}}
+{{- $_ := set $hooks $event (concat $groups (list (dict "hooks" (list $answer)))) -}}
+{{- end -}}
 {{- if eq (includeTemplate "partials/skill_ops_experimental" .) "true" -}}
 {{- $observe := dict "type" "command" "command" "skill-ops observe --client codex" "timeout" 10 -}}
 {{- $_ := set $hooks "PostToolUse" (concat (dig "PostToolUse" (list) $hooks) (list (dict "matcher" "Read|read|Skill|skill|Bash|bash|exec_command" "hooks" (list $observe)))) -}}

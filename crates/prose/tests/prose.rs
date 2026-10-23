@@ -699,6 +699,7 @@ fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
     let (_, arguments) = body
         .split_once(" --bin prose -- ")
         .expect("prose arguments");
+    let arguments = arguments.replace("{{ ", "{{").replace(" }}", "}}");
     Ok(arguments
         .split_whitespace()
         .map(|argument| {
