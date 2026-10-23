@@ -28,7 +28,7 @@ const MUTABLE_OR_SHARED_ANCHOR_BITS: u32 = 0o277;
 const SEALED_FILE_MODE: u32 = 0o400;
 #[cfg(unix)]
 const SEALED_DIRECTORY_MODE: u32 = 0o500;
-const ENGINE_INPUTS: [&str; 39] = [
+const ENGINE_INPUTS: [&str; 41] = [
     "xtask/src/skill_proofs.rs",
     "xtask/src/phase_evidence.rs",
     "xtask/src/obligations.rs",
@@ -50,6 +50,8 @@ const ENGINE_INPUTS: [&str; 39] = [
     "crates/skill-ops/src/lib.rs",
     "crates/rules/src/lib.rs",
     "crates/rules/src/proof_budget_rules.rs",
+    "crates/dotfiles/src/bounded.rs",
+    "home/dot_config/dotfiles/bounded-tools.toml",
     "crates/rules/src/obligation_rules.rs",
     "crates/rules/src/phase_receipt_rules.rs",
     "crates/rules/src/incident_rules.rs",
@@ -711,10 +713,7 @@ fn hash_path(path: &Path, hash: &mut Sha256) -> Result<()> {
 }
 
 fn local_reuse(root: &Path) -> bool {
-    if !cfg!(unix)
-        || std::env::var_os("CI").is_some()
-        || std::env::var_os(crate::skill_proofs::INSIDE_CONTAINER).is_some()
-    {
+    if !cfg!(unix) || std::env::var_os("CI").is_some() {
         return false;
     }
     if fs::read(root.join("xtask/src/skill_proofs.rs"))
@@ -732,6 +731,17 @@ fn local_reuse(root: &Path) -> bool {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
+            if std::env::var_os(crate::skill_proofs::INSIDE_CONTAINER).is_some() {
+                let source = Path::new("/source");
+                return platform::build_inputs::content_hash(source)
+                    .is_ok_and(|hash| hash == platform::BUILD_HASH)
+                    && fs::OpenOptions::new()
+                        .write(true)
+                        .open(source.join("Cargo.toml"))
+                        .is_err_and(|error| {
+                            error.kind() == std::io::ErrorKind::ReadOnlyFilesystem
+                        });
+            }
             return fs::metadata(root)
                 .is_ok_and(|metadata| metadata.permissions().mode() & WRITE_PERMISSION_BITS == 0)
                 && fs::OpenOptions::new()
@@ -1043,14 +1053,7 @@ mod tests {
     #[test]
     fn kani_engine_identity_binds_the_driver_decoder_budget_and_compiler_configuration()
     -> Result<()> {
-        for relative in [
-            "xtask/tests/container_proofs.rs",
-            "xtask/src/skill_proofs.rs",
-            "crates/rules/src/proof_budget_rules.rs",
-            "Cargo.lock",
-            "mise.toml",
-            ".cargo/config.toml",
-        ] {
+        for relative in ENGINE_INPUTS {
             let scope = engine_fixture()?;
             let original = engine_source_digest(scope.path())?;
             let path = scope.path().join(relative);

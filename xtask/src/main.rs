@@ -159,6 +159,9 @@ enum Action {
     Proofs {
         #[command(flatten)]
         scope: xtask::change::Scope,
+        /// Verify only these registered Kani rule modules and their rejecting probes.
+        #[arg(long = "source")]
+        sources: Vec<String>,
     },
     /// Run the CI proof campaign, deferring mutation and its fixture to the full native campaign.
     ProofsCi {
@@ -439,7 +442,10 @@ fn report_benchmark_observation(root: &Path) -> Result<()> {
     })
 }
 
-fn proofs(root: &Path, scope: &xtask::change::Scope) -> Result<()> {
+fn proofs(root: &Path, scope: &xtask::change::Scope, sources: &[String]) -> Result<()> {
+    if !sources.is_empty() {
+        return xtask::skill_proofs::verify_sources(root, sources);
+    }
     if scope.resolve(root)?.contains(Gate::Proofs) {
         xtask::skill_proofs::verify(root)
     } else {
@@ -500,7 +506,7 @@ fn run() -> Result<()> {
             xtask::skill_proofs::verify_answer(&cli.root, policy.as_deref())?;
         }
         Action::InstallProse => install_prose(&cli.root)?,
-        Action::Proofs { scope } => proofs(&cli.root, &scope)?,
+        Action::Proofs { scope, sources } => proofs(&cli.root, &scope, &sources)?,
         Action::ProofsCi { phase: Some(phase) } => xtask::proof_ci_phase::verify(&cli.root, phase)?,
         Action::ProofsCi { phase: None } => xtask::skill_proofs::verify_ci(&cli.root)?,
         Action::VerificationEnv(request) => xtask::verification_env::run(&cli.root, &request)?,

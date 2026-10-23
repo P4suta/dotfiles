@@ -1,6 +1,15 @@
 /// The hang cap after which a harness has no completed proof evidence.
 pub const TIMEOUT_SECONDS: u64 = 60;
 
+#[must_use]
+pub fn campaign_seconds(harnesses: u32, parallelism: u16, overhead: u32) -> Option<u32> {
+    if harnesses == 0 || parallelism == 0 {
+        return None;
+    }
+    let waves = u64::from(harnesses).div_ceil(u64::from(parallelism));
+    u32::try_from(waves * TIMEOUT_SECONDS + u64::from(overhead)).ok()
+}
+
 pub const NANOS_PER_MILLI: u32 = 1_000_000;
 #[cfg(any(test, kani))]
 const MAX_ELAPSED_NANOS: u128 = (u64::MAX as u128) * (NANOS_PER_MILLI as u128);
@@ -137,6 +146,37 @@ pub const fn verdict(completed_result: Option<bool>) -> Verdict {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_campaign_seconds(harnesses: u32, parallelism: u16, overhead: u32) {
+        let budget = campaign_seconds(harnesses, parallelism, overhead);
+        if harnesses == 0 || parallelism == 0 {
+            assert!(budget.is_none());
+        } else {
+            let waves = u64::from(harnesses).div_ceil(u64::from(parallelism));
+            let expected = waves * TIMEOUT_SECONDS + u64::from(overhead);
+            assert_eq!(budget.is_some(), u32::try_from(expected).is_ok());
+            if let Some(actual) = budget {
+                assert_eq!(u64::from(actual), expected);
+                let available = u64::from(actual) - u64::from(overhead);
+                assert_eq!(available % TIMEOUT_SECONDS, 0);
+                let slots = available / TIMEOUT_SECONDS;
+                assert!(slots > 0);
+                assert!(slots * u64::from(parallelism) >= u64::from(harnesses));
+                assert!((slots - 1) * u64::from(parallelism) < u64::from(harnesses));
+            }
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn campaign_budget_covers_every_wave_without_overflow() {
+        let harnesses: u32 = kani::any();
+        let parallelism: u16 = kani::any();
+        let overhead: u32 = kani::any();
+        spec_campaign_seconds(harnesses, parallelism, overhead);
+        kani::cover!(campaign_seconds(harnesses, parallelism, overhead).is_some());
+        kani::cover!(campaign_seconds(harnesses, parallelism, overhead).is_none());
+    }
 
     pub fn spec_elapsed_millis(whole_millis: u128, remainder_nanos: u32) -> Option<u64> {
         let elapsed = elapsed_millis(whole_millis, remainder_nanos);
@@ -326,6 +366,23 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn campaign_budget_counts_sequential_waves_and_preserves_overhead() {
+        for (harnesses, parallelism, overhead, expected) in [
+            (1, 1, 900, Some(960)),
+            (316, 1, 900, Some(19_860)),
+            (3, 2, 900, Some(1_020)),
+            (0, 2, 900, None),
+            (1, 0, 900, None),
+            (1, 1, u32::MAX, None),
+            (u32::MAX, 1, 0, None),
+            (u32::MAX, u16::MAX, 0, Some(3_932_220)),
+        ] {
+            proofs::spec_campaign_seconds(harnesses, parallelism, overhead);
+            assert_eq!(campaign_seconds(harnesses, parallelism, overhead), expected);
+        }
+    }
 
     #[test]
     fn elapsed_milliseconds_preserve_fractional_boundaries_and_overflow() {
