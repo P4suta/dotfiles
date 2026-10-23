@@ -19,6 +19,40 @@ pub const fn map_source(owner_exists: bool, tracked: bool) -> MapSource {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum GeneratedMarker {
+    Set,
+    True,
+    False,
+    Unset,
+    Unspecified,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CatalogInput {
+    Scan,
+    Generated,
+}
+
+#[must_use]
+pub const fn catalog_input(typescript: bool, marker: GeneratedMarker) -> CatalogInput {
+    match marker {
+        GeneratedMarker::Set | GeneratedMarker::True => {
+            if typescript {
+                CatalogInput::Generated
+            } else {
+                CatalogInput::Scan
+            }
+        }
+        GeneratedMarker::False
+        | GeneratedMarker::Unset
+        | GeneratedMarker::Unspecified
+        | GeneratedMarker::Other => CatalogInput::Scan,
+    }
+}
+
 const SHA1_HEX_LENGTH: usize = 40;
 const SHA256_HEX_LENGTH: usize = 64;
 
@@ -41,6 +75,25 @@ pub fn commit_id(bytes: &[u8]) -> bool {
 mod input_proofs {
     use super::*;
 
+    pub fn spec_catalog_input(typescript: bool, marker: GeneratedMarker) {
+        let input = catalog_input(typescript, marker);
+        assert_eq!(
+            input == CatalogInput::Generated,
+            typescript && matches!(marker, GeneratedMarker::Set | GeneratedMarker::True)
+        );
+        assert_eq!(
+            input == CatalogInput::Scan,
+            !typescript
+                || matches!(
+                    marker,
+                    GeneratedMarker::False
+                        | GeneratedMarker::Unset
+                        | GeneratedMarker::Unspecified
+                        | GeneratedMarker::Other
+                )
+        );
+    }
+
     pub fn spec_source(owner_exists: bool, tracked: bool) {
         let source = map_source(owner_exists, tracked);
         assert_eq!(source == MapSource::Owner, owner_exists);
@@ -58,6 +111,21 @@ mod input_proofs {
             valid &= matches!(byte, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F');
         }
         assert_eq!(commit_id(bytes), valid);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(1)]
+    fn only_explicitly_generated_typescript_leaves_the_catalog() {
+        let typescript: bool = kani::any();
+        let marker: GeneratedMarker = kani::any();
+        spec_catalog_input(typescript, marker);
+        let input = catalog_input(typescript, marker);
+        kani::cover!(input == CatalogInput::Generated && marker == GeneratedMarker::Set);
+        kani::cover!(input == CatalogInput::Generated && marker == GeneratedMarker::True);
+        kani::cover!(typescript && input == CatalogInput::Scan && marker == GeneratedMarker::False);
+        kani::cover!(!typescript && input == CatalogInput::Scan && marker == GeneratedMarker::Set);
+        kani::cover!(typescript && input == CatalogInput::Scan && marker == GeneratedMarker::Other);
     }
 
     #[cfg(kani)]
@@ -88,6 +156,22 @@ mod input_proofs {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn catalog_input_covers_every_marker_and_language_class() {
+            for typescript in [false, true] {
+                for marker in [
+                    GeneratedMarker::Set,
+                    GeneratedMarker::True,
+                    GeneratedMarker::False,
+                    GeneratedMarker::Unset,
+                    GeneratedMarker::Unspecified,
+                    GeneratedMarker::Other,
+                ] {
+                    spec_catalog_input(typescript, marker);
+                }
+            }
+        }
 
         #[test]
         fn map_selection_covers_every_input() {

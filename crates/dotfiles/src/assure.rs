@@ -3,6 +3,8 @@
 //! The installed catalog and repository owner maps live under `~/.config/assure/`.
 //! An exemption sits in the comment block before the site it exempts.
 
+pub mod attributes;
+
 use crate::refusal::Refusal;
 use crate::reply_language_rules::{self, Language};
 use crate::shape_rules::{
@@ -520,7 +522,7 @@ pub struct Gap {
 pub struct Survey {
     pub gaps: Vec<Gap>,
     budgets: BTreeMap<String, (Bound, u64)>,
-    /// The owners file and every file and corpus an owner names, which decide sites outside their own file.
+    /// Owner inputs and repository attributes that decide sites outside their own file.
     owning: BTreeSet<String>,
     owner_input: String,
 }
@@ -674,6 +676,13 @@ fn survey_with(
     let scanned = scanned(catalog, &all, scope);
     let mut wanted = candidates.clone();
     wanted.extend(scanned.iter().cloned());
+    for path in all
+        .iter()
+        .filter(|path| attributes::is_attributes_path(path))
+    {
+        result.owning.insert(path.clone());
+        wanted.push(path.clone());
+    }
     for owner in &owners.owners {
         result.owning.insert(owner.by.clone());
         wanted.push(owner.by.clone());
@@ -784,9 +793,9 @@ fn anti_patterns(
         .into());
     }
     let scratch = tempfile::tempdir()?;
-    for path in scanned {
-        if let Some(bytes) = files.get(path) {
-            let target = scratch.path().join(path);
+    for path in attributes::source_paths(scratch.path(), scanned, files)? {
+        if let Some(bytes) = files.get(&path) {
+            let target = scratch.path().join(&path);
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -1071,7 +1080,7 @@ pub fn describe(catalog: &Catalog, gap: &Gap) -> String {
     )
 }
 
-/// The paths that decide the change from `before` to `after`: the changed paths, or every path once an owner changed.
+/// The changed paths, or every path once owner inputs or repository attributes changed.
 fn scope(
     root: &Path,
     catalog: &Catalog,

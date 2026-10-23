@@ -75,6 +75,14 @@ Ordinary agents read the applicable skill instructions directly.
 
 `home/dot_config/assure/shapes.toml` names the code shapes every repository on these machines must verify: pure decisions, protocols, and parsers, each with the signals that find it and the owner it needs.
 The same gate applies the anti-pattern catalog beside it, and counts each finding as a gap.
+The TypeScript number rule leaves declaration files, tests, stubs, and fixtures to their generators and test checks.
+For generated TypeScript, the survey resolves repository `.gitattributes` from the same working tree, index, or commit as the source.
+A changed or removed attribute file rechecks the source it can classify.
+An isolated Git repository applies the [attribute precedence](https://git-scm.com/docs/gitattributes) and [NUL-delimited attribute protocol](https://git-scm.com/docs/git-check-attr).
+The isolated context ignores owner and system attribute overrides.
+Only `linguist-generated` set or `true` omits TypeScript from this catalog, and other values keep the ordinary checks.
+Git's attribute semantics remain an external assumption checked by native regression fixtures, while the pure marker decision has a source-bound proof obligation.
+The attribute fuzz corpus uses line-separated fields that the target converts to NUL separators and checks through decoding and canonical marker encoding.
 The owner's configuration names each repository's owners and budgets under `~/.config/assure/repos/`, as [the owner-map decision](adr/keep-the-assure-owner-map-out-of-projects.md) describes.
 An exemption sits in the comment block that precedes the site it exempts.
 `dotfiles assure start` reports the gaps when an agent session starts, and the stop hook refuses to end a turn that leaves a gap in a file it changed.

@@ -1148,6 +1148,148 @@ fn numbers_in_code_that_verifies_demonstrates_or_derives_are_admitted() -> Resul
 }
 
 #[test]
+fn typescript_catalog_distinguishes_declarations_test_data_and_source() -> Result<()> {
+    let catalog = catalog()?;
+    let fixture = Fixture::new()?;
+    let declaration = "export type Status = 30000;\n";
+    let source = "export function wait(): number { return 30000; }\n";
+    for path in [
+        "crates/aozora-wasm/types/aozora_types.d.ts",
+        "web/types/client.d.mts",
+        "web/types/client.d.cts",
+    ] {
+        fixture.write(path, declaration)?;
+    }
+    for path in [
+        "web/__tests__/__stubs__/bridge.ts",
+        "web/__stubs__/bridge.ts",
+        "web/fixtures/bridge.ts",
+        "web/__fixtures__/bridge.ts",
+        "web/tests/bridge.ts",
+        "web/bridge.test.ts",
+        "web/bridge.spec.ts",
+        "web/src/fixtures.ts",
+        "web/src/testimonials/wait.ts",
+        "web/src/wait.ts",
+    ] {
+        fixture.write(path, source)?;
+    }
+    let survey = assure::survey(&fixture.root, &catalog, &assure::Tree::WorkingTree, None)?;
+    let mut gaps: Vec<_> = survey
+        .gaps
+        .iter()
+        .map(|gap| (gap.shape.as_str(), gap.path.as_str()))
+        .collect();
+    gaps.sort_unstable();
+    assert_eq!(
+        gaps,
+        [
+            ("typescript-magic-number", "web/src/fixtures.ts"),
+            ("typescript-magic-number", "web/src/testimonials/wait.ts"),
+            ("typescript-magic-number", "web/src/wait.ts"),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_catalog_reads_generated_markers_from_the_surveyed_tree() -> Result<()> {
+    let catalog = catalog()?;
+    let fixture = Fixture::new()?;
+    let source = "export function wait(): number { return 30000; }\n";
+    let marked = "web/generated/client with 'quotes'.ts";
+    fixture.write(marked, source)?;
+    fixture.write("web/generated/authored.ts", source)?;
+    fixture.write("web/generated/unspecified.ts", source)?;
+    fixture.write("web/explicit.ts", source)?;
+    fixture.write("web/negative.ts", source)?;
+    fixture.write("web/unknown.ts", source)?;
+    fixture.write("web/src/wait.ts", source)?;
+    fixture.write("src/retries.rs", MAGIC)?;
+    fixture.write(
+        ".gitattributes",
+        "web/generated/** linguist-generated\nweb/explicit.ts linguist-generated=true\nweb/negative.ts linguist-generated=false\nweb/unknown.ts linguist-generated=future-value\n*.rs linguist-generated\n",
+    )?;
+    fixture.write(
+        "web/generated/.gitattributes",
+        "authored.ts -linguist-generated\nunspecified.ts !linguist-generated\n",
+    )?;
+    let commit = fixture.commit("mark generated TypeScript")?;
+    fixture.write(".git/info/attributes", "*.ts linguist-generated\n")?;
+    fixture.write(".git/owner-attributes", "*.ts linguist-generated\n")?;
+    fixture.git(&["config", "core.attributesFile", ".git/owner-attributes"])?;
+    let paths = |tree: &assure::Tree, scope: Option<&std::collections::BTreeSet<String>>| {
+        let survey = assure::survey(&fixture.root, &catalog, tree, scope)?;
+        let mut paths: Vec<_> = survey.gaps.into_iter().map(|gap| gap.path).collect();
+        paths.sort_unstable();
+        Ok::<_, anyhow::Error>(paths)
+    };
+    let authored = [
+        "src/retries.rs",
+        "web/generated/authored.ts",
+        "web/generated/unspecified.ts",
+        "web/negative.ts",
+        "web/src/wait.ts",
+        "web/unknown.ts",
+    ];
+    assert_eq!(paths(&assure::Tree::WorkingTree, None)?, authored);
+    assert_eq!(paths(&assure::Tree::Index, None)?, authored);
+    assert_eq!(
+        paths(&assure::Tree::Commit(Some(commit.clone())), None)?,
+        authored
+    );
+    let scope = std::collections::BTreeSet::from([marked.to_owned()]);
+    assert_eq!(
+        paths(&assure::Tree::WorkingTree, Some(&scope))?,
+        Vec::<String>::new()
+    );
+    fixture.write(".gitattributes", "*.ts -linguist-generated\n")?;
+    assert_eq!(paths(&assure::Tree::WorkingTree, Some(&scope))?, [marked]);
+    assert_eq!(
+        paths(&assure::Tree::Index, Some(&scope))?,
+        Vec::<String>::new()
+    );
+    fixture.stage()?;
+    fixture.write(".gitattributes", "*.ts linguist-generated\n")?;
+    assert_eq!(
+        paths(&assure::Tree::WorkingTree, Some(&scope))?,
+        Vec::<String>::new()
+    );
+    assert_eq!(paths(&assure::Tree::Index, Some(&scope))?, [marked]);
+    assert_eq!(
+        paths(&assure::Tree::Commit(Some(commit)), Some(&scope))?,
+        Vec::<String>::new()
+    );
+    Ok(())
+}
+
+#[test]
+fn typescript_catalog_rechecks_source_when_only_generated_metadata_changes() -> Result<()> {
+    for remove in [false, true] {
+        let catalog = catalog()?;
+        let fixture = Fixture::new()?;
+        fixture.write(
+            "web/client.ts",
+            "export function wait(): number { return 30000; }\n",
+        )?;
+        fixture.write(".gitattributes", "*.ts linguist-generated\n")?;
+        fixture.commit("mark generated source")?;
+        if remove {
+            std::fs::remove_file(fixture.root.join(".gitattributes"))?;
+        } else {
+            fixture.write(".gitattributes", "*.ts -linguist-generated\n")?;
+        }
+        fixture.stage()?;
+        assert_eq!(
+            rule(assure::commit(&fixture.root, &catalog)).as_deref(),
+            Some("assure.added"),
+            "attribute removal={remove} must recheck the now-authored source"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn this_repository_has_no_gap() -> Result<()> {
     let catalog = catalog()?;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");

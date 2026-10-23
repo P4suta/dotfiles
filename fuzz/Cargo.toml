@@ -147,3 +147,10 @@ path = "fuzz_targets/shell_suggestions.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "generated_attributes"
+path = "fuzz_targets/generated_attributes.rs"
+test = false
+doc = false
+bench = false

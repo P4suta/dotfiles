@@ -2231,6 +2231,26 @@ source = "crates/rules/src/shape_rules.rs"
 probes = '''
 use production::{Bound, Change, Exemption, MapSource, Point, Verdict, commit_id, exemption, lowered, map_source, verdict};
 #[kani::proof]
+#[kani::unwind(1)]
+fn reject_omitting_non_typescript_for_a_generated_marker() {
+    assert_eq!(production::catalog_input(false, production::GeneratedMarker::Set), production::CatalogInput::Generated);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_omitting_explicitly_authored_typescript() {
+    assert_eq!(production::catalog_input(true, production::GeneratedMarker::False), production::CatalogInput::Generated);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_omitting_an_unknown_generated_marker() {
+    assert_eq!(production::catalog_input(true, production::GeneratedMarker::Other), production::CatalogInput::Generated);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_scanning_explicitly_generated_typescript() {
+    assert_eq!(production::catalog_input(true, production::GeneratedMarker::True), production::CatalogInput::Scan);
+}
+#[kani::proof]
 fn reject_reading_a_project_map_after_migration() {
     assert!(map_source(true, true) == MapSource::Tracked);
 }
