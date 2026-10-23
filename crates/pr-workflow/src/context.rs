@@ -303,6 +303,7 @@ pub(super) fn check(root: &Path, base: Option<&str>, staged: bool) -> Result<()>
     let github = Github {
         policy: workflow_policy()?,
         login: String::new(),
+        user_id: 0,
         repositories: std::cell::RefCell::default(),
     };
     let ChangeDestination {

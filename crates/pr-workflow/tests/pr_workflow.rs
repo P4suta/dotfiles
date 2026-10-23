@@ -3095,6 +3095,332 @@ fn local_create_is_draft_and_passes_the_checked_body_by_file() -> Result<()> {
     Ok(())
 }
 
+fn issue_link_fixture(fixture: &Fixture, original: &str) -> Result<Command> {
+    let target = serde_json::json!({
+        "id":37,"full_name":"P4suta/project","owner":{"login":"P4suta","id":42_543_015},
+        "fork":false,"default_branch":"main"
+    });
+    let source = serde_json::json!({
+        "id":73,"full_name":"contributor/project","owner":{"login":"contributor","id":1000},
+        "fork":true,"source":{"id":37,"full_name":"P4suta/project"},"default_branch":"main"
+    });
+    let pull = serde_json::json!({
+        "number":17,"html_url":"https://github.com/P4suta/project/pull/17",
+        "title":"Contributor proposal","body":original,"state":"open","draft":true,
+        "user":{"login":"contributor","id":1000},
+        "head":{"ref":"feature","sha":fixture.head,"repo":source},
+        "base":{"ref":"main","sha":fixture.base,"repo":target},
+        "labels":[{"id":3,"name":"retained"}],
+        "requested_reviewers":[{"id":41,"login":"reviewer"}],
+        "requested_teams":[{"id":51,"slug":"reviewers"}]
+    });
+    let mut after = pull.clone();
+    after["body"] = serde_json::json!(format!("{original}\nCloses #23.\n"));
+    let repositories = format!("repos/P4suta/project={target}\nrepos/contributor/project={source}");
+    let branches = format!(
+        "repos/p4suta/project/branches/main={}\nrepos/contributor/project/branches/feature={}",
+        serde_json::json!({"name":"main","commit":{"sha":fixture.base}}),
+        serde_json::json!({"name":"feature","commit":{"sha":fixture.head}})
+    );
+    let mut command = fixture.command_at_repo("link-issue", "P4suta/project", false)?;
+    command.args(["--pr", "17", "--issue", "23"])
+        .env("GH_FIXTURE_REPOSITORIES", repositories)
+        .env("GH_FIXTURE_BRANCHES", branches)
+        .env("GH_FIXTURE_LINK_PULLS", format!("17={pull}\n17={pull}\n17={after}\n17={after}"))
+        .env("GH_FIXTURE_ISSUE", serde_json::json!({
+            "number":23,"html_url":"https://github.com/P4suta/project/issues/23","state":"open",
+            "title":"Keep issue references","body":"Keep the selected issue linked to the proposal."
+        }).to_string());
+    Ok(command)
+}
+
+#[test]
+fn the_repository_owner_links_an_external_pr_without_replacing_its_review_evidence() -> Result<()> {
+    let original =
+        "Contributor rationale.\n\n<!-- retained assessment marker -->\n\n@coderabbitai ignore\n";
+    let fixture = Fixture::new(original)?;
+    let output = issue_link_fixture(&fixture, original)?.output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fixture.log()?;
+    let input = log
+        .split("input:\n")
+        .nth(1)
+        .context("body-only JSON update missing")?;
+    let input: serde_json::Value =
+        serde_json::from_str(input.lines().next().context("JSON input missing")?)?;
+    assert_eq!(
+        input,
+        serde_json::json!({"body":format!("{original}\nCloses #23.\n")})
+    );
+    assert_eq!(log.matches("\nPATCH\n").count(), 1);
+    assert!(!log.contains("ssh_signing_keys"));
+    assert!(!log.contains("\n--title\n"));
+    Ok(())
+}
+
+fn alter_json_fixture(
+    command: &mut Command,
+    variable: &str,
+    mut alter: impl FnMut(usize, &str, &mut serde_json::Value),
+) -> Result<()> {
+    let responses = command
+        .get_envs()
+        .find(|(name, _)| *name == variable)
+        .and_then(|(_, value)| value)
+        .and_then(|value| value.to_str())
+        .context("JSON fixture responses missing")?
+        .to_owned();
+    let mut changed = Vec::new();
+    for (index, line) in responses.lines().enumerate() {
+        let (endpoint, value) = line
+            .split_once('=')
+            .context("fixture response endpoint missing")?;
+        let mut value: serde_json::Value = serde_json::from_str(value)?;
+        alter(index, endpoint, &mut value);
+        changed.push(format!("{endpoint}={value}"));
+    }
+    command.env(variable, changed.join("\n"));
+    Ok(())
+}
+
+#[test]
+fn issue_link_refuses_a_different_numeric_owner_with_the_same_login() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let output = issue_link_fixture(&fixture, BODY)?
+        .env("GH_FIXTURE_USER", r#"{"login":"P4suta","id":7}"#)
+        .output()?;
+    assert_eq!(refusal(&output)["rule"], "pr.owner");
+    assert!(!fixture.log()?.contains("\nPATCH\n"));
+    Ok(())
+}
+
+#[test]
+fn issue_link_refuses_closed_or_misidentified_resources_before_writing() -> Result<()> {
+    for (pointer, value, expected) in [
+        ("/state", serde_json::json!("closed"), "pr.issue-link"),
+        ("/number", serde_json::json!(18), "pr.failed"),
+        (
+            "/html_url",
+            serde_json::json!("https://github.com/other/project/pull/17"),
+            "pr.failed",
+        ),
+        ("/head/repo", serde_json::Value::Null, "pr.failed"),
+        ("/base/repo/id", serde_json::json!(99), "pr.failed"),
+        ("/head/sha", serde_json::json!("short"), "pr.failed"),
+        ("/head/ref", serde_json::json!("--help"), "pr.branch"),
+        ("/user/id", serde_json::json!(0), "pr.failed"),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = issue_link_fixture(&fixture, BODY)?;
+        alter_json_fixture(&mut command, "GH_FIXTURE_LINK_PULLS", |_, _, pull| {
+            *pull.pointer_mut(pointer).unwrap() = value.clone();
+        })?;
+        assert_eq!(refusal(&command.output()?)["rule"], expected, "{pointer}");
+        assert!(!fixture.log()?.contains("\nPATCH\n"));
+    }
+    for (state, url, expected) in [
+        (
+            "closed",
+            "https://github.com/P4suta/project/issues/23",
+            "pr.issue-link",
+        ),
+        (
+            "open",
+            "https://github.com/other/project/issues/23",
+            "pr.failed",
+        ),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let output = issue_link_fixture(&fixture, BODY)?.env("GH_FIXTURE_ISSUE", serde_json::json!({
+            "number":23,"html_url":url,"state":state,"title":"Keep issue references","body":"Keep the reference."
+        }).to_string()).output()?;
+        assert_eq!(refusal(&output)["rule"], expected);
+        assert!(!fixture.log()?.contains("\nPATCH\n"));
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_requires_the_contributor_repository_to_share_the_destination_network() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let mut command = issue_link_fixture(&fixture, BODY)?;
+    alter_json_fixture(
+        &mut command,
+        "GH_FIXTURE_REPOSITORIES",
+        |_, endpoint, repository| {
+            if endpoint.contains("contributor") {
+                repository["source"]["id"] = serde_json::json!(99);
+            }
+        },
+    )?;
+    assert!(!command.output()?.status.success());
+    assert!(!fixture.log()?.contains("\nPATCH\n"));
+    Ok(())
+}
+
+#[test]
+fn issue_link_refuses_document_head_and_metadata_drift_before_writing() -> Result<()> {
+    for (pointer, value) in [
+        ("/body", serde_json::json!("Another editor's rationale.")),
+        ("/title", serde_json::json!("Another title")),
+        ("/head/sha", serde_json::json!("d".repeat(40))),
+        ("/draft", serde_json::json!(false)),
+        ("/user/id", serde_json::json!(99)),
+        ("/labels", serde_json::json!([])),
+        ("/requested_reviewers", serde_json::json!([])),
+        ("/requested_teams", serde_json::json!([])),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = issue_link_fixture(&fixture, BODY)?;
+        alter_json_fixture(&mut command, "GH_FIXTURE_LINK_PULLS", |index, _, pull| {
+            if index == 1 {
+                *pull.pointer_mut(pointer).unwrap() = value.clone();
+            }
+        })?;
+        let record = refusal(&command.output()?);
+        assert!(
+            record["cause"].as_str().unwrap().contains("changed before"),
+            "{pointer}: {record}"
+        );
+        assert!(!fixture.log()?.contains("\nPATCH\n"));
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_stops_after_an_uncertain_write_or_changed_readback_without_retrying() -> Result<()> {
+    for scenario in ["transport", "acknowledgement", "readback"] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = issue_link_fixture(&fixture, BODY)?;
+        if scenario == "transport" {
+            command.env("GH_FIXTURE_LINK_WRITE_FAILURE", "1");
+        } else {
+            alter_json_fixture(&mut command, "GH_FIXTURE_LINK_PULLS", |index, _, pull| {
+                if index == if scenario == "acknowledgement" { 2 } else { 3 } {
+                    pull["body"] = serde_json::json!("Another editor's rationale.");
+                }
+            })?;
+        }
+        let record = refusal(&command.output()?);
+        assert!(
+            record["cause"]
+                .as_str()
+                .unwrap()
+                .contains("before another write")
+        );
+        assert_eq!(fixture.log()?.matches("\nPATCH\n").count(), 1);
+        if scenario != "readback" {
+            assert_eq!(record["rule"], "pr.link-write");
+            assert_eq!(fixture.log()?.matches("issue-link-read\n").count(), 3);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_keeps_an_existing_reference_without_a_write() -> Result<()> {
+    let original = "Contributor rationale.\n\nCloses #23.\n\n@coderabbitai ignore\n";
+    let fixture = Fixture::new(original)?;
+    let output = issue_link_fixture(&fixture, original)?.output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("already closes"));
+    assert!(!fixture.log()?.contains("\nPATCH\n"));
+    Ok(())
+}
+
+#[test]
+fn issue_link_rejects_zero_numbers_before_any_github_request() -> Result<()> {
+    for (pr, issue) in [("0", "23"), ("17", "0")] {
+        let fixture = Fixture::new(BODY)?;
+        let output = fixture
+            .command_at_repo("link-issue", "P4suta/project", false)?
+            .args(["--pr", pr, "--issue", issue])
+            .output()?;
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(fs::read_to_string(&fixture.log).unwrap_or_default(), "");
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_accepts_a_null_existing_body() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let mut command = issue_link_fixture(&fixture, BODY)?;
+    alter_json_fixture(&mut command, "GH_FIXTURE_LINK_PULLS", |index, _, pull| {
+        pull["body"] = if index < 2 {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!("Closes #23.\n")
+        };
+    })?;
+    let output = command.output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fixture.log()?;
+    let input = log
+        .split("input:\n")
+        .nth(1)
+        .context("JSON update missing")?;
+    let input: serde_json::Value =
+        serde_json::from_str(input.lines().next().context("JSON missing")?)?;
+    assert_eq!(input, serde_json::json!({"body":"Closes #23.\n"}));
+    Ok(())
+}
+
+#[test]
+fn issue_link_preserves_body_prefixes_and_adds_one_separate_reference() -> Result<()> {
+    for (original, expected) in [
+        ("", "Closes #23.\n"),
+        ("Rationale.", "Rationale.\n\nCloses #23.\n"),
+        ("Rationale.\n", "Rationale.\n\nCloses #23.\n"),
+        ("Rationale.\n\n", "Rationale.\n\nCloses #23.\n"),
+        ("根拠。", "根拠。\n\nCloses #23.\n"),
+        ("Rationale.\r\n", "Rationale.\r\n\nCloses #23.\n"),
+        ("Rationale.\r\n\r\n", "Rationale.\r\n\r\nCloses #23.\n"),
+        ("Rationale.\n\r\n", "Rationale.\n\r\nCloses #23.\n"),
+        (
+            "Closes other/project#23.\n",
+            "Closes other/project#23.\n\nCloses #23.\n",
+        ),
+    ] {
+        let fixture = Fixture::new(original)?;
+        let mut command = issue_link_fixture(&fixture, original)?;
+        alter_json_fixture(&mut command, "GH_FIXTURE_LINK_PULLS", |index, _, pull| {
+            if index >= 2 {
+                pull["body"] = serde_json::json!(expected);
+            }
+        })?;
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "{original:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let log = fixture.log()?;
+        let input = log
+            .split("input:\n")
+            .nth(1)
+            .context("JSON update missing")?;
+        let input: serde_json::Value =
+            serde_json::from_str(input.lines().next().context("JSON missing")?)?;
+        assert_eq!(input, serde_json::json!({"body":expected}));
+        assert!(input["body"].as_str().unwrap().starts_with(original));
+        assert_eq!(log.matches("\nPATCH\n").count(), 1);
+    }
+    Ok(())
+}
+
 fn owned_work(
     number: u64,
     head: &str,

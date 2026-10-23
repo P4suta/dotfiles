@@ -22,6 +22,16 @@ pub struct Binding {
 
 impl Binding {
     #[must_use]
+    pub const fn source_id(&self) -> u64 {
+        self.source.id
+    }
+
+    #[must_use]
+    pub const fn target_id(&self) -> u64 {
+        self.target.id
+    }
+
+    #[must_use]
     pub fn source(&self) -> &str {
         &self.source.repository
     }
@@ -176,7 +186,7 @@ fn identities(
 pub fn capture(
     root: &Path,
     target: &str,
-    mut read: impl FnMut(&str) -> Result<Repository>,
+    read: impl FnMut(&str) -> Result<Repository>,
 ) -> Result<Checked> {
     ensure!(
         github_slug(&format!("{GITHUB_HTTPS_PREFIX}{target}")).as_deref() == Some(target),
@@ -184,12 +194,35 @@ pub fn capture(
     );
     let root = crate::issue_context::checkout(root)?;
     let source_name = repository(&root)?;
+    let checked = Checked {
+        binding: bind(&source_name, target, read)?,
+        root,
+    };
+    checked.require_current()?;
+    Ok(checked)
+}
+
+/// # Errors
+/// Returns an error for unknown repository identities or unrelated source and destination networks.
+pub fn bind(
+    source_name: &str,
+    target: &str,
+    mut read: impl FnMut(&str) -> Result<Repository>,
+) -> Result<Binding> {
+    ensure!(
+        github_slug(&format!("{GITHUB_HTTPS_PREFIX}{target}")).as_deref() == Some(target),
+        "PR destination does not name one exact GitHub repository"
+    );
+    ensure!(
+        github_slug(&format!("{GITHUB_HTTPS_PREFIX}{source_name}")).as_deref() == Some(source_name),
+        "PR source does not name one exact GitHub repository"
+    );
     let same = source_name.eq_ignore_ascii_case(target);
     let (target_identity, target_network) = identities(read(target)?, target, !same)?;
     let (source, source_network) = if same {
         (target_identity.clone(), target_network.clone())
     } else {
-        identities(read(&source_name)?, &source_name, true)?
+        identities(read(source_name)?, source_name, true)?
     };
     let relation = source_relation(RepositoryIdentities {
         source: source.id,
@@ -203,16 +236,11 @@ pub fn capture(
             && (source == target_identity) == (relation == SourceRelation::Same),
         "checkout source and PR destination do not share a verified repository network"
     );
-    let checked = Checked {
-        root,
-        binding: Binding {
-            source,
-            target: target_identity,
-            network: source_network,
-        },
-    };
-    checked.require_current()?;
-    Ok(checked)
+    Ok(Binding {
+        source,
+        target: target_identity,
+        network: source_network,
+    })
 }
 
 /// # Errors

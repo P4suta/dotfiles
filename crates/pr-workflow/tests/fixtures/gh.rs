@@ -103,6 +103,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}\n", headers(variable));
             }
         }
+        if endpoint.contains("/pulls/")
+            && let Ok(pulls) = std::env::var("GH_FIXTURE_LINK_PULLS")
+        {
+            let number = endpoint
+                .rsplit('/')
+                .next()
+                .ok_or("link PR number missing")?;
+            let states = states::parse(&pulls)?;
+            let states = states.get(number).ok_or("link PR states missing")?;
+            let reads = std::fs::read_to_string(&log_path)?
+                .matches("issue-link-read\n")
+                .count();
+            writeln!(log, "issue-link-read")?;
+            if args.iter().any(|argument| argument == "PATCH")
+                && std::env::var_os("GH_FIXTURE_LINK_WRITE_FAILURE").is_some()
+            {
+                eprintln!("injected uncertain issue-link write");
+                std::process::exit(42);
+            }
+            println!("{}", states[reads.min(states.len() - 1)]);
+            return Ok(());
+        }
         let responses = match variable {
             "GH_FIXTURE_REPOSITORY" => Some("GH_FIXTURE_REPOSITORIES"),
             "GH_FIXTURE_BRANCH" => Some("GH_FIXTURE_BRANCHES"),

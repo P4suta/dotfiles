@@ -1665,6 +1665,42 @@ verifier = "kani"
 source = "crates/rules/src/pr_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_a_leading_gap_for_an_empty_body() {
+    assert!(production::issue_reference_gap(true, false, false) == "\n\n");
+}
+#[kani::proof]
+fn reject_a_second_gap_after_a_blank_line() {
+    assert!(production::issue_reference_gap(false, true, true) == "\n");
+}
+#[kani::proof]
+fn reject_a_missing_line_after_a_single_newline() {
+    assert!(production::issue_reference_gap(false, true, false).is_empty());
+}
+#[kani::proof]
+fn reject_a_missing_paragraph_after_a_nonempty_line() {
+    assert!(production::issue_reference_gap(false, false, false).is_empty());
+}
+#[kani::proof]
+fn reject_issue_link_authority_from_another_numeric_owner() {
+    assert!(production::issue_link(2, 1, true, true, false) == production::IssueLinkDecision::Append);
+}
+#[kani::proof]
+fn reject_issue_link_authority_from_unknown_equal_identities() {
+    assert!(production::issue_link(0, 0, true, true, false) == production::IssueLinkDecision::Append);
+}
+#[kani::proof]
+fn reject_a_closing_reference_on_a_closed_pull() {
+    assert!(production::issue_link(1, 1, false, true, false) == production::IssueLinkDecision::Append);
+}
+#[kani::proof]
+fn reject_a_closing_reference_to_a_closed_issue() {
+    assert!(production::issue_link(1, 1, true, false, false) == production::IssueLinkDecision::Append);
+}
+#[kani::proof]
+fn reject_a_duplicate_closing_reference() {
+    assert!(production::issue_link(1, 1, true, true, true) == production::IssueLinkDecision::Append);
+}
+#[kani::proof]
 fn reject_unrelated_repositories_with_copied_commits() {
     assert!(production::source_relation(production::RepositoryIdentities { source: 1, target: 2, source_network: 1, target_network: 2 }) == production::SourceRelation::ForkNetwork);
 }
