@@ -3188,6 +3188,100 @@ fn alter_json_fixture(
 }
 
 #[test]
+fn issue_link_accepts_a_stable_base_tip_beyond_the_pr_snapshot() -> Result<()> {
+    for original in [BODY, "Contributor rationale.\n\nCloses #23.\n"] {
+        let fixture = Fixture::new(original)?;
+        let mut command = issue_link_fixture(&fixture, original)?;
+        alter_json_fixture(
+            &mut command,
+            "GH_FIXTURE_BRANCHES",
+            |_, endpoint, branch| {
+                if endpoint == "repos/p4suta/project/branches/main" {
+                    branch["commit"]["sha"] = serde_json::json!("d".repeat(40));
+                }
+            },
+        )?;
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fixture.log()?.matches("\nPATCH\n").count(),
+            usize::from(original == BODY)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_refuses_a_live_source_or_base_change_before_writing() -> Result<()> {
+    for source in [false, true] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = issue_link_fixture(&fixture, BODY)?;
+        let (endpoint, name, initial) = if source {
+            (
+                "repos/contributor/project/branches/feature",
+                "feature",
+                fixture.head.clone(),
+            )
+        } else {
+            ("repos/p4suta/project/branches/main", "main", "d".repeat(40))
+        };
+        let before = serde_json::json!({"name":name,"commit":{"sha":initial}});
+        let after = serde_json::json!({"name":name,"commit":{"sha":"e".repeat(40)}});
+        command.env(
+            "GH_FIXTURE_LINK_BRANCHES",
+            format!("{endpoint}={before}\n{endpoint}={after}"),
+        );
+        let record = refusal(&command.output()?);
+        assert!(
+            record["cause"].as_str().unwrap().contains("changed"),
+            "{record}"
+        );
+        let log = fixture.log()?;
+        assert_eq!(
+            log.lines()
+                .filter(|line| *line == format!("issue-link-branch {endpoint}"))
+                .count(),
+            2
+        );
+        assert!(!log.contains("\nPATCH\n"));
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_refuses_malformed_live_branch_identities() -> Result<()> {
+    for source in [false, true] {
+        for (pointer, value) in [
+            ("/name", "other".to_owned()),
+            ("/commit/sha", "short".to_owned()),
+            ("/commit/sha", "g".repeat(40)),
+        ] {
+            let fixture = Fixture::new(BODY)?;
+            let mut command = issue_link_fixture(&fixture, BODY)?;
+            alter_json_fixture(
+                &mut command,
+                "GH_FIXTURE_BRANCHES",
+                |_, endpoint, branch| {
+                    if endpoint.contains("contributor") == source {
+                        *branch.pointer_mut(pointer).unwrap() = serde_json::json!(value);
+                    }
+                },
+            )?;
+            assert!(
+                !command.output()?.status.success(),
+                "{source} {pointer} {value}"
+            );
+            assert!(!fixture.log()?.contains("\nPATCH\n"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn issue_link_refuses_a_different_numeric_owner_with_the_same_login() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
     let output = issue_link_fixture(&fixture, BODY)?
@@ -3211,6 +3305,7 @@ fn issue_link_refuses_closed_or_misidentified_resources_before_writing() -> Resu
         ("/head/repo", serde_json::Value::Null, "pr.failed"),
         ("/base/repo/id", serde_json::json!(99), "pr.failed"),
         ("/head/sha", serde_json::json!("short"), "pr.failed"),
+        ("/base/sha", serde_json::json!("short"), "pr.failed"),
         ("/head/ref", serde_json::json!("--help"), "pr.branch"),
         ("/user/id", serde_json::json!(0), "pr.failed"),
     ] {

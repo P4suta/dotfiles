@@ -43,15 +43,21 @@ struct Pull {
     requested_teams: Vec<serde_json::Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Eq, PartialEq)]
 struct Branch {
     name: String,
     commit: Commit,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Eq, PartialEq)]
 struct Commit {
     sha: String,
+}
+
+#[derive(Eq, PartialEq)]
+struct BranchHeads {
+    source: Branch,
+    destination: Branch,
 }
 
 fn read_pull(github: &Github, repo: &str, pr: NonZeroU64) -> Result<Pull> {
@@ -103,31 +109,45 @@ fn source(github: &Github, repo: &str, pull: &Pull) -> Result<platform::source_i
     Ok(binding)
 }
 
+fn current_branch(github: &Github, repo: &str, reference: &Reference) -> Result<Branch> {
+    branch(&reference.name)?;
+    ensure!(
+        reference.sha.len() == COMMIT_HEX_DIGITS
+            && reference.sha.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "PR head or base is not a full commit identity"
+    );
+    let current: Branch = github.read(&format!(
+        "repos/{repo}/branches/{}",
+        super::review_policy::path_segment(&reference.name)?
+    ))?;
+    ensure!(
+        current.name == reference.name
+            && current.commit.sha.len() == COMMIT_HEX_DIGITS
+            && current
+                .commit
+                .sha
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit()),
+        "the named PR branch response has an invalid identity"
+    );
+    Ok(current)
+}
+
 fn current_heads(
     github: &Github,
     binding: &platform::source_identity::Binding,
     pull: &Pull,
-) -> Result<()> {
-    for (repo, reference) in [
-        (binding.source(), &pull.head),
-        (binding.target(), &pull.base),
-    ] {
-        branch(&reference.name)?;
-        ensure!(
-            reference.sha.len() == COMMIT_HEX_DIGITS
-                && reference.sha.bytes().all(|byte| byte.is_ascii_hexdigit()),
-            "PR head or base is not a full commit identity"
-        );
-        let current: Branch = github.read(&format!(
-            "repos/{repo}/branches/{}",
-            super::review_policy::path_segment(&reference.name)?
-        ))?;
-        ensure!(
-            current.name == reference.name && current.commit.sha == reference.sha,
-            "PR source or base branch changed during issue-link inspection"
-        );
-    }
-    Ok(())
+) -> Result<BranchHeads> {
+    let source = current_branch(github, binding.source(), &pull.head)?;
+    ensure!(
+        source.commit.sha == pull.head.sha,
+        "PR source branch changed during issue-link inspection"
+    );
+    let destination = current_branch(github, binding.target(), &pull.base)?;
+    Ok(BranchHeads {
+        source,
+        destination,
+    })
 }
 
 fn admission(
@@ -232,7 +252,7 @@ pub(super) fn run(repo: &str, pr: NonZeroU64, issue: NonZeroU64) -> Result<()> {
         issue,
     )?;
     let binding = source(&github, repo, &before)?;
-    current_heads(&github, &binding, &before)?;
+    let heads = current_heads(&github, &binding, &before)?;
     if !append {
         println!("PR #{pr} already closes issue #{issue}; its document is unchanged");
         return Ok(());
@@ -248,7 +268,10 @@ pub(super) fn run(repo: &str, pr: NonZeroU64, issue: NonZeroU64) -> Result<()> {
         read_pull(&github, repo, pr)? == before,
         "the PR changed before the issue-link write"
     );
-    current_heads(&github, &binding, &before)?;
+    ensure!(
+        current_heads(&github, &binding, &before)? == heads,
+        "PR source or base branch changed before the issue-link write"
+    );
     write(&github, repo, pr, &expected)?;
     ensure!(
         read_pull(&github, repo, pr)? == expected,
