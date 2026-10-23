@@ -18,8 +18,8 @@
   The Git guard runs on every host, refuses the same bypasses with the sanctioned next step, and admits the tool-owned operations a prefix rule can't tell apart, such as reset --hard of a clean tree.
   So only the bypasses that no task ever needs stay here as a second check, and conditional Git operations stay with the guard.
 
-  dot_claude/modify_settings.json sets these keys over the file Claude Code last wrote, and an array here, such as permissions.deny, replaces the array the client wrote.
-  A runtime change to a key set here, such as `/advisor` changing advisorModel, reverts on the next apply, and every other key the client wrote stays.
+  dot_claude/modify_settings.json enforces permissions.deny and autoMemoryEnabled over the file Claude Code last wrote.
+  Other keys supply defaults only when absent, preserving runtime model and preference choices.
   The client keeps permissions.allow and permissions.defaultMode, which the owner sets at a prompt.
   Edit this template and apply to change one of these keys.
 
