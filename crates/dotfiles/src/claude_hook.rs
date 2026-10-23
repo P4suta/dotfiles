@@ -463,11 +463,17 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
     if let Some(message) = attribution_refusal(command, event["cwd"].as_str().map(Path::new)) {
         findings.push(blocked("hook.attribution", GateRefusal, message));
     }
-    let legacy = crate::legacy::findings(command, event["cwd"].as_str().map(Path::new))
-        .unwrap_or_else(|error| crate::legacy::Findings {
-            refusals: Vec::new(),
-            unavailable: vec![format!("{error:#}")],
-        });
+    let shell = if powershell(&event) {
+        crate::legacy::Shell::PowerShell
+    } else {
+        crate::legacy::Shell::Bash
+    };
+    let legacy =
+        crate::legacy::findings_in_shell(command, event["cwd"].as_str().map(Path::new), shell)
+            .unwrap_or_else(|error| crate::legacy::Findings {
+                refusals: Vec::new(),
+                unavailable: vec![format!("{error:#}")],
+            });
     for message in legacy.refusals {
         findings.push(blocked(LEGACY, GateRefusal, message));
     }
@@ -1269,6 +1275,25 @@ mod tests {
     fn a_malformed_event_is_an_error_rather_than_an_admission() {
         assert!(refusal("not json").is_err());
         assert!(refusal(r#"{"tool_name":"Bash","tool_input":{}}"#).is_err());
+    }
+
+    #[test]
+    fn powershell_source_does_not_enter_the_bash_argument_parser() -> Result<()> {
+        let event = json!({
+            "tool_name": "PowerShell",
+            "tool_input": {"command": "$items = @(1, 2); $items | ForEach-Object { $_.ToString() }"}
+        })
+        .to_string();
+        let findings = policy_refusals(&event)?;
+        assert!(
+            findings.is_empty(),
+            "{:?}",
+            findings
+                .iter()
+                .map(|finding| &finding.message)
+                .collect::<Vec<_>>()
+        );
+        Ok(())
     }
 
     #[test]

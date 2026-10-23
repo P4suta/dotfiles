@@ -1,0 +1,3 @@
+jq a
+---
+{"Type":"File","Pos":{"Offset":0,"Line":1,"Col":1},"End":{"Offset":4,"Line":1,"Col":5},"Stmts":[{"Pos":{"Offset":0,"Line":1,"Col":1},"End":{"Offset":4,"Line":1,"Col":5},"Cmd":{"Type":"CallExpr","Pos":{"Offset":0,"Line":1,"Col":1},"End":{"Offset":4,"Line":1,"Col":5},"Args":[{"Pos":{"Offset":0,"Line":1,"Col":1},"End":{"Offset":8,"Line":1,"Col":9}}]}}]}

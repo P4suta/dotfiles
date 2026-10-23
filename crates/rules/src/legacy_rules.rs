@@ -9,6 +9,49 @@ pub enum Verdict {
     Refuse,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceRange {
+    start: usize,
+    end: usize,
+}
+
+impl SourceRange {
+    #[must_use]
+    pub const fn bounds(self) -> (usize, usize) {
+        (self.start, self.end)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SpellingSpan {
+    InSource(SourceRange),
+    Unpositioned,
+    Empty,
+    Outside,
+    NonBoundary,
+}
+
+#[must_use]
+pub const fn spelling_span(
+    start: usize,
+    end: usize,
+    length: usize,
+    positioned: bool,
+    boundaries: [bool; 2],
+) -> SpellingSpan {
+    if !positioned {
+        SpellingSpan::Unpositioned
+    } else if start >= end {
+        SpellingSpan::Empty
+    } else if end > length {
+        SpellingSpan::Outside
+    } else if !boundaries[0] || !boundaries[1] {
+        SpellingSpan::NonBoundary
+    } else {
+        SpellingSpan::InSource(SourceRange { start, end })
+    }
+}
+
 #[must_use]
 pub fn verdict(mapped: bool, excepted: bool, bypassed: bool) -> Verdict {
     if !mapped || excepted {
@@ -17,6 +60,14 @@ pub fn verdict(mapped: bool, excepted: bool, bypassed: bool) -> Verdict {
         Verdict::Bypassed
     } else {
         Verdict::Refuse
+    }
+}
+
+#[must_use]
+pub const fn spelling_follows(previous: Option<usize>, current: usize) -> bool {
+    match previous {
+        None => true,
+        Some(previous) => previous < current,
     }
 }
 
@@ -112,6 +163,73 @@ fn line(text: &str) -> Option<u64> {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_spelling_order(previous: Option<usize>, current: usize) {
+        assert_eq!(
+            spelling_follows(previous, current),
+            previous.is_none_or(|previous| previous < current)
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn copied_dynamic_spellings_keep_strict_source_order() {
+        let previous: Option<usize> = kani::any();
+        let current: usize = kani::any();
+        spec_spelling_order(previous, current);
+        kani::cover!(previous.is_none());
+        kani::cover!(previous.is_some() && spelling_follows(previous, current));
+        kani::cover!(!spelling_follows(previous, current));
+    }
+
+    pub fn spec_spelling_span(
+        start: usize,
+        end: usize,
+        length: usize,
+        positioned: bool,
+        boundaries: [bool; 2],
+    ) {
+        let result = spelling_span(start, end, length, positioned, boundaries);
+        assert_eq!(
+            matches!(result, SpellingSpan::InSource(_)),
+            positioned && boundaries[0] && boundaries[1] && start < end && end <= length
+        );
+        if let SpellingSpan::InSource(range) = result {
+            assert_eq!(range.bounds(), (start, end));
+            assert!(range.start < range.end && range.end <= length);
+        }
+        assert_eq!(result == SpellingSpan::Unpositioned, !positioned);
+        assert_eq!(result == SpellingSpan::Empty, positioned && start >= end);
+        assert_eq!(
+            result == SpellingSpan::Outside,
+            positioned && start < end && end > length
+        );
+        assert_eq!(
+            result == SpellingSpan::NonBoundary,
+            positioned && start < end && end <= length && (!boundaries[0] || !boundaries[1])
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn spelling_ranges_are_nonempty_and_inside_the_observed_utf8_source() {
+        let (start, end, length, positioned, boundaries): (usize, usize, usize, bool, [bool; 2]) = (
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+            kani::any(),
+        );
+        spec_spelling_span(start, end, length, positioned, boundaries);
+        let result = spelling_span(start, end, length, positioned, boundaries);
+        kani::cover!(matches!(result, SpellingSpan::InSource(_)));
+        kani::cover!(result == SpellingSpan::Unpositioned);
+        kani::cover!(result == SpellingSpan::Empty);
+        kani::cover!(result == SpellingSpan::Outside);
+        kani::cover!(result == SpellingSpan::NonBoundary);
+    }
 
     #[cfg(kani)]
     #[kani::proof]
@@ -232,6 +350,28 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spelling_order_covers_first_duplicate_reversed_and_integer_boundaries() {
+        for previous in [None, Some(0), Some(1), Some(usize::MAX)] {
+            for current in [0, 1, usize::MAX] {
+                proofs::spec_spelling_order(previous, current);
+            }
+        }
+    }
+
+    #[test]
+    fn source_ranges_cover_invalid_positions_and_integer_boundaries() {
+        for start in [0, 1, 2, usize::MAX] {
+            for end in [0, 1, 2, usize::MAX] {
+                for length in [0, 1, 2, usize::MAX] {
+                    for [positioned, first, last] in crate::domain::flags() {
+                        proofs::spec_spelling_span(start, end, length, positioned, [first, last]);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn every_input_meets_the_verdict_specification() {

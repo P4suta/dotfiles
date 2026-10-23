@@ -140,3 +140,10 @@ path = "fuzz_targets/proof_image_server.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "shell_suggestions"
+path = "fuzz_targets/shell_suggestions.rs"
+test = false
+doc = false
+bench = false
