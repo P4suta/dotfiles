@@ -25,6 +25,7 @@ mod domain;
 
 pub mod adr_rules;
 pub mod agent_memory_rules;
+pub mod answer_rules;
 pub mod artifact_rules;
 pub mod aside_rules;
 pub mod benchmark_rules;

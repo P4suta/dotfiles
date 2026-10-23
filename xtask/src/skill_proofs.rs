@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -1133,6 +1134,92 @@ pub(crate) fn verify_kani(root: &Path, manifest: &obligations::Manifest) -> Resu
     })
 }
 
+/// Verify the answer gate's registered subjects under the installed or explicitly selected bounded policy.
+///
+/// # Errors
+///
+/// Refuses missing obligations, incomplete proofs, admitted counterexamples, and a failed corpus replay.
+pub fn verify_answer(root: &Path, policy: Option<&Path>) -> Result<()> {
+    let root = crate::canonical(root)?;
+    if dotfiles::bounded::requires_container() {
+        return verify_answer_container(&root, &dotfiles::bounded::Policy::load(policy)?);
+    }
+    ensure!(
+        policy.is_none(),
+        "an explicit policy requires the owner-side container route"
+    );
+    let mut manifest = obligations::manifest(&root)?;
+    manifest.obligations.retain(|obligation| matches!(obligation, Obligation::Kani { source, .. } if source == "crates/rules/src/answer_rules.rs"));
+    ensure!(
+        manifest.obligations.len() == 1,
+        "answer gate needs exactly one registered rule obligation"
+    );
+    crate::phase_evidence::run(&root, "answer policy subjects", 1, || {
+        kani_environment_version(&root)?;
+        let verifier = crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+        let engine = crate::phase_evidence::engine_digest(&root)?;
+        let (proved, rejected) = run_rule_subjects(
+            &manifest,
+            |source, probes| {
+                prepare_rules(
+                    &root,
+                    source,
+                    probes,
+                    &flags(&manifest, source),
+                    &verifier,
+                    &engine,
+                )
+            },
+            execute_rules,
+        )?;
+        println!(
+            "Verified {proved} answer policy harnesses and rejected {rejected} counterexamples."
+        );
+        let host = nightly_host(&root)?;
+        let output = replay(&root, FUZZ_DIRECTORY, "answer_plan", &host)?;
+        ensure!(
+            output.status.success(),
+            "answer parser corpus replay failed"
+        );
+        println!("Replayed the committed answer parser corpus.");
+        Ok(())
+    })
+}
+
+fn verify_answer_container(root: &Path, policy: &dotfiles::bounded::Policy) -> Result<()> {
+    ensure_linux_engine()?;
+    let image = proof_image(root)?;
+    ensure_image(root, &root.join(PROOF_IMAGE), &image)?;
+    let image = verified_image_id(&image)?;
+    crate::container::prepare_cargo(root, &image)?;
+    let mut arguments = container_run_arguments(root, &image, &container_target_volume(root));
+    *arguments.last_mut().context("answer proof container omits its command")? = format!(
+        "{CONTAINER_SOURCE} exec cargo run --locked --manifest-path xtask/Cargo.toml -- answer-proofs"
+    ).into();
+    arguments.splice(
+        1..1,
+        [
+            OsString::from("--network"),
+            OsString::from("none"),
+            OsString::from("--env"),
+            OsString::from("CARGO_BUILD_JOBS=1"),
+        ],
+    );
+    crate::phase_evidence::run(root, "bounded answer proof subjects", 1, || {
+        let output = dotfiles::bounded::run_with_policy(policy, &arguments, &image)?;
+        crate::phase_evidence::retain("answer proof container", "stdout", &output.stdout)?;
+        crate::phase_evidence::retain("answer proof container", "stderr", &output.stderr)?;
+        std::io::stdout().write_all(&output.stdout)?;
+        std::io::stderr().write_all(&output.stderr)?;
+        ensure!(
+            output.status.success(),
+            "answer proof subjects are incomplete: {}",
+            output.status
+        );
+        Ok(())
+    })
+}
+
 fn verify_kani_measured(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     kani_environment_version(root)?;
     verify_kani_driver(root)?;
@@ -1389,17 +1476,14 @@ fn nightly_host(root: &Path) -> Result<String> {
 
 /// Replays the committed corpus of `target` once for the pinned compiler's host, with no new input.
 fn replay(root: &Path, directory: &str, target: &str, host: &str) -> Result<std::process::Output> {
+    let mut command = nightly_cargo(root);
+    command.args(["fuzz", "run"]);
+    if directory == FUZZ_DIRECTORY && target == "answer_plan" {
+        command.arg("--no-default-features");
+    }
     crate::phase_evidence::output(
-        nightly_cargo(root)
-            .args([
-                "fuzz",
-                "run",
-                "--target",
-                host,
-                "--fuzz-dir",
-                directory,
-                target,
-            ])
+        command
+            .args(["--target", host, "--fuzz-dir", directory, target])
             .arg(format!("{directory}/corpus/{target}"))
             .args(["--", "-runs=0"]),
         &format!("fuzz {directory}/{target} for {host}"),

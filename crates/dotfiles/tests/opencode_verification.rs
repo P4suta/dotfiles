@@ -9,6 +9,45 @@ mod fixture_git;
 
 const PARSER: &str = "pub fn parse(text: &str) -> Option<u8> {\n    text.parse().ok()\n}\n";
 
+#[test]
+fn answer_evidence_reaches_the_native_checker_and_bounds_corrections() -> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let home = scope.path().join("home");
+    let root = scope.path().join("outside-a-repository");
+    fs::create_dir_all(&home)?;
+    fs::create_dir(&root)?;
+    let output = platform::process::command("bun")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/answer-adapter.ts"))
+        .arg(&root)
+        .arg(env!("CARGO_BIN_EXE_dotfiles"))
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "OpenCode answer adapter failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert!(
+        summary["context"]
+            .to_string()
+            .contains("--session answer-fixture"),
+        "{summary}"
+    );
+    assert_eq!(summary["accepted"], 0, "{summary}");
+    let prompts = summary["prompts"].as_array().cloned().unwrap_or_default();
+    assert_eq!(prompts.len(), 1, "{summary}");
+    assert!(
+        prompts[0]
+            .as_str()
+            .is_some_and(|prompt| prompt.contains("stale or incomplete")),
+        "{summary}"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Stop requirements remain unmet"));
+    Ok(())
+}
+
 fn copy_tree(from: &Path, to: &Path) -> Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {

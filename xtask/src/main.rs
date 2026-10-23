@@ -134,6 +134,14 @@ enum Action {
     InstallReviewGuard,
     InstallSkillOps,
     InstallPrWorkflow,
+    /// Build the pinned answer proof image and record its immutable identity on this host.
+    InstallAnswerProver,
+    /// Verify the answer gate's registered Kani contracts, rejecting probes, and parser corpus.
+    AnswerProofs {
+        /// Use an explicit bounded policy for this owner-side run.
+        #[arg(long)]
+        policy: Option<PathBuf>,
+    },
     /// Install the persisted prose checker and its pinned linters, and remove retired reply checks.
     InstallProse,
     /// Refuse a lint baseline that admits more than it did at `--base`, or rewrite every baseline from the tracked files with `--write`.
@@ -487,6 +495,10 @@ fn run() -> Result<()> {
         }
         Action::PublicAudit { denylist } => xtask::profiles::audit_private(&cli.root, &denylist)?,
         Action::InstallPrWorkflow => install_pr_workflow(&cli.root)?,
+        Action::InstallAnswerProver => install_answer_prover(&cli.root)?,
+        Action::AnswerProofs { policy } => {
+            xtask::skill_proofs::verify_answer(&cli.root, policy.as_deref())?;
+        }
         Action::InstallProse => install_prose(&cli.root)?,
         Action::Proofs { scope } => proofs(&cli.root, &scope)?,
         Action::ProofsCi { phase: Some(phase) } => xtask::proof_ci_phase::verify(&cli.root, phase)?,
@@ -682,6 +694,34 @@ fn install_pr_workflow(root: &Path) -> Result<()> {
             .context("scoped PR skill installation failed")
     })?;
     platform::freshness::record_installation(&user_directory, root, Built::PrWorkflow)
+}
+
+fn install_answer_prover(root: &Path) -> Result<()> {
+    let image = xtask::lean::image(root)?;
+    xtask::lean::prepare_image(root, &image)?;
+    let output = Tool::Docker
+        .command()
+        .args(["image", "inspect", "--format", "{{.Id}}", &image])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "inspect the pinned answer proof image"
+    );
+    let image = String::from_utf8(output.stdout)?.trim().to_owned();
+    let path = user_directory()?.join(".config/dotfiles/answer-proof.json");
+    std::fs::create_dir_all(
+        path.parent()
+            .context("answer prover configuration has no parent")?,
+    )?;
+    std::fs::write(
+        path,
+        serde_json::to_vec_pretty(&dotfiles::answer::Prover {
+            version: 1,
+            image,
+            lean_version: dotfiles::answer::lean_version()?.to_owned(),
+        })?,
+    )?;
+    Ok(())
 }
 
 fn install_prose(root: &Path) -> Result<()> {

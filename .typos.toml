@@ -26,4 +26,11 @@ serie = "serie" # Tool name.
 
 [type.rust]
 # Windows command arguments and Alloy model extensions remain literal protocol text.
-extend-ignore-re = ['"/fo"', '\.als\b']
+# The Cabinet mora table specifies these three pairs.
+extend-ignore-re = [
+  '"/fo"',
+  '\.als\b',
+  '\("ば", "ba"\)',
+  '\("ぎゃ", "gya"\)',
+  '\("みゅ", "myu"\)',
+]
