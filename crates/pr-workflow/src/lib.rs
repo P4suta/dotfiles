@@ -2,6 +2,7 @@
 
 mod context;
 mod evidence;
+mod link_issue;
 mod local;
 mod merge;
 mod review_policy;
@@ -219,6 +220,15 @@ pub enum Commands {
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: u64,
     },
+    /// Add an issue closing reference as the destination repository owner.
+    LinkIssue {
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        pr: std::num::NonZeroU64,
+        #[arg(long)]
+        issue: std::num::NonZeroU64,
+    },
     /// Validate the current GitHub document and move an open draft to review.
     Ready {
         #[command(flatten)]
@@ -350,6 +360,7 @@ impl Commands {
             Self::Check { .. } => "check",
             Self::Create { .. } => "create",
             Self::Edit { .. } => "edit",
+            Self::LinkIssue { .. } => "link-issue",
             Self::Ready { .. } => "ready",
             Self::Merge { .. } => "merge",
             Self::PruneMerged { .. } => "prune-merged",
@@ -667,6 +678,7 @@ impl WorkInProgress {
 struct Github {
     policy: WorkflowPolicy,
     login: String,
+    user_id: u64,
     repositories: RefCell<BTreeMap<String, Repository>>,
 }
 
@@ -1274,6 +1286,7 @@ impl Github {
         let mut github = Self {
             policy: workflow_policy()?,
             login: String::new(),
+            user_id: 0,
             repositories: RefCell::default(),
         };
         let user: Owner = github.read("user").map_err(|error| {
@@ -1300,6 +1313,7 @@ impl Github {
             ))
         })?;
         github.login = user.login;
+        github.user_id = user.id;
         Ok(github)
     }
 
@@ -2002,6 +2016,7 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             rerun,
         )?,
         Commands::Edit { document, pr } => edit(document, pr, rerun)?,
+        Commands::LinkIssue { repo, pr, issue } => link_issue::run(&repo, pr, issue)?,
         Commands::Ready { target, pr } => ready_command(&target, pr, rerun)?,
         Commands::Merge {
             target,

@@ -63,6 +63,13 @@ Never use a manual rebase or force push.
 Merge with `pr-workflow merge` or `stack merge`.
 The section [stacks and merging](references/workflow.md#stacks-and-merging) describes both.
 
+Use `pr-workflow link-issue --repo OWNER/REPO --pr NUMBER --issue NUMBER` to add a closing reference to an existing PR as the authenticated numeric repository owner.
+The operation checks the open issue, PR source network, head, base, and current document.
+It preserves existing assessment markers and review metadata while appending one reference or leaving a matching reference unchanged.
+The normal assessment and review gates continue to govern source acceptance.
+Inspect an uncertain write before another attempt.
+The command checks state before and after its write and assumes no unobserved concurrent edit during that interval.
+
 Without destination-specific rules, write an English [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) title: `type(scope)!: description`.
 `pr-workflow check` runs the prose checker on the title and body of a personal non-fork destination.
 Write one sentence per line in commit messages, issue and PR bodies, comments, documents, and replies in English and Japanese.

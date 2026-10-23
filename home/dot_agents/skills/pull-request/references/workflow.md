@@ -64,6 +64,23 @@ Every generation mode starts as a draft before any review request.
 `edit` replaces title and body together and leaves draft state unchanged.
 Local-file `check` never contacts GitHub and leaves the live issue prerequisite unmet, and `check --pr` only reads.
 
+## Existing PR issue references
+
+The authenticated numeric destination repository owner can add an open issue reference to an existing PR, including a contributor's fork PR.
+
+```console
+pr-workflow link-issue --repo OWNER/REPO --pr 17 --issue 23
+```
+
+The command checks the exact open issue, PR, source network, head, and base.
+It keeps the current title and body prefix, draft state, creator, labels, review requests, assessment markers, and CodeRabbit directives.
+A matching reference leaves the document unchanged.
+The command adds only one closing-reference paragraph through a body-only update.
+It rechecks state before writing and requires a matching acknowledgement and fresh readback.
+An uncertain write stops without retrying and names the PR to inspect.
+The write has no atomic comparison condition, so concurrent edits between the final read and the write remain an external assumption.
+Source approval, assessments, review completion, readiness, and merging continue through their existing gates.
+
 ## Stacks and merging
 
 The work-in-progress limit counts one open stack as one unit and each independent PR as one unit, with a default of three units.

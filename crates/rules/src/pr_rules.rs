@@ -49,6 +49,47 @@ pub enum IssueGate {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IssueLinkDecision {
+    NotOwner,
+    ClosedPull,
+    ClosedIssue,
+    Unchanged,
+    Append,
+}
+
+#[must_use]
+pub const fn issue_link(
+    authenticated: u64,
+    owner: u64,
+    open_pull: bool,
+    open_issue: bool,
+    linked: bool,
+) -> IssueLinkDecision {
+    if authenticated == 0 || owner == 0 || authenticated != owner {
+        IssueLinkDecision::NotOwner
+    } else if !open_pull {
+        IssueLinkDecision::ClosedPull
+    } else if !open_issue {
+        IssueLinkDecision::ClosedIssue
+    } else if linked {
+        IssueLinkDecision::Unchanged
+    } else {
+        IssueLinkDecision::Append
+    }
+}
+
+#[must_use]
+pub const fn issue_reference_gap(empty: bool, newline: bool, blank_line: bool) -> &'static str {
+    if empty || blank_line {
+        ""
+    } else if newline {
+        "\n"
+    } else {
+        "\n\n"
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceRelation {
     Same,
     ForkNetwork,
@@ -466,6 +507,63 @@ pub fn plan(
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_issue_link(authenticated: u64, owner: u64, flags: [bool; 3]) {
+        let [open_pull, open_issue, linked] = flags;
+        let decision = issue_link(authenticated, owner, open_pull, open_issue, linked);
+        let owns = authenticated != 0 && owner != 0 && authenticated == owner;
+        assert_eq!(decision == IssueLinkDecision::NotOwner, !owns);
+        assert_eq!(
+            decision == IssueLinkDecision::ClosedPull,
+            owns && !open_pull
+        );
+        assert_eq!(
+            decision == IssueLinkDecision::ClosedIssue,
+            owns && open_pull && !open_issue
+        );
+        assert_eq!(
+            decision == IssueLinkDecision::Unchanged,
+            owns && open_pull && open_issue && linked
+        );
+        assert_eq!(
+            decision == IssueLinkDecision::Append,
+            owns && open_pull && open_issue && !linked
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_the_numeric_owner_links_an_open_issue_to_an_open_pull() {
+        let authenticated = kani::any();
+        let owner = kani::any();
+        let flags = kani::any();
+        spec_issue_link(authenticated, owner, flags);
+        let decision = issue_link(authenticated, owner, flags[0], flags[1], flags[2]);
+        kani::cover!(decision == IssueLinkDecision::Append);
+        kani::cover!(decision == IssueLinkDecision::Unchanged);
+        kani::cover!(decision == IssueLinkDecision::NotOwner);
+        kani::cover!(decision == IssueLinkDecision::ClosedPull);
+        kani::cover!(decision == IssueLinkDecision::ClosedIssue);
+    }
+
+    pub fn spec_issue_reference_gap(flags: [bool; 3]) {
+        let [empty, newline, blank_line] = flags;
+        let gap = issue_reference_gap(empty, newline, blank_line);
+        assert_eq!(gap.is_empty(), empty || blank_line);
+        assert_eq!(gap == "\n", !empty && !blank_line && newline);
+        assert_eq!(gap == "\n\n", !empty && !blank_line && !newline);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn closing_reference_gaps_match_the_observed_paragraph_state() {
+        let flags = kani::any();
+        spec_issue_reference_gap(flags);
+        let gap = issue_reference_gap(flags[0], flags[1], flags[2]);
+        kani::cover!(gap.is_empty());
+        kani::cover!(gap == "\n");
+        kani::cover!(gap == "\n\n");
+    }
 
     pub fn spec_source_relation(identities: RepositoryIdentities) {
         let relation = source_relation(identities);
@@ -897,6 +995,24 @@ mod proofs {
 mod tests {
     use super::*;
     use crate::domain::flags;
+
+    #[test]
+    fn issue_links_require_the_numeric_owner_and_open_resources_without_duplicates() {
+        for authenticated in [0, 1, 2, u64::MAX] {
+            for owner in [0, 1, 2, u64::MAX] {
+                for state in flags() {
+                    proofs::spec_issue_link(authenticated, owner, state);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn closing_reference_gaps_meet_every_boundary() {
+        for state in flags() {
+            proofs::spec_issue_reference_gap(state);
+        }
+    }
 
     #[test]
     fn dependency_skips_preserve_all_other_candidates() {
