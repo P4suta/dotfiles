@@ -2942,6 +2942,37 @@ fn sync_stack(target: &Target) -> Result<()> {
 }
 
 /// Merges the stack up to `top` once every PR in it can merge.
+fn check_stack_issue(
+    github: &Github,
+    target: &Target,
+    destination: Destination,
+    pr: u64,
+    view: &MergeView,
+    rerun: &str,
+) -> Result<()> {
+    if view.state != "OPEN"
+        || ((destination.fork || !destination.personal) && target.issue.is_none())
+    {
+        return Ok(());
+    }
+    let member = ready_target(target, view);
+    inspect_issue(
+        github,
+        &member,
+        destination,
+        Some((&view.body, BodySource::Pr(pr))),
+        rerun,
+    )
+    .and_then(|gate| require_issue(gate, &member))
+    .map_err(|error| {
+        if let Some(refusal) = error.downcast_ref::<Refusal>() {
+            anyhow::Error::from(refusal.clone().evidence(format!("stack member #{pr}")))
+        } else {
+            error.context(format!("stack member #{pr}"))
+        }
+    })
+}
+
 fn merge_stack(
     github: &Github,
     target: &Target,
@@ -2950,6 +2981,7 @@ fn merge_stack(
     rerun: &str,
 ) -> Result<()> {
     let started = Instant::now();
+    let destination = destination(github, &target.repo)?;
     let mut carry = BTreeMap::new();
     'restart: loop {
         let open = open_prs(target)?;
@@ -2971,6 +3003,7 @@ fn merge_stack(
         let mut assessments = BTreeMap::new();
         for &pr in &numbers {
             let view = merge_view(target, pr)?;
+            check_stack_issue(github, target, destination, pr, &view, rerun)?;
             let (state, assessment) = merge_state(
                 github,
                 target,

@@ -106,6 +106,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let responses = match variable {
             "GH_FIXTURE_REPOSITORY" => Some("GH_FIXTURE_REPOSITORIES"),
             "GH_FIXTURE_BRANCH" => Some("GH_FIXTURE_BRANCHES"),
+            "GH_FIXTURE_ISSUE" => Some("GH_FIXTURE_ISSUES"),
             _ => None,
         };
         if let Some(responses) = responses

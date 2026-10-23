@@ -5193,6 +5193,125 @@ fn stack_resolves_the_owner_installation_and_refuses_an_unexpected_version() -> 
 }
 
 #[test]
+fn stack_merge_refuses_a_ready_member_without_its_own_open_issue_before_merging() -> Result<()> {
+    for issue in [None, Some(24)] {
+        let fixture = Fixture::new(BODY)?;
+        let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+        let parent = git(&checkout, &["rev-parse", "parent"])?;
+        let top = git(&checkout, &["rev-parse", "HEAD"])?;
+        let closed = format!("{BODY}\nCloses #23.\n\n@coderabbitai ignore\n");
+        let body = issue.map_or_else(
+            || format!("{BODY}\n@coderabbitai ignore\n"),
+            |number| format!("{BODY}\nCloses #{number}.\n\n@coderabbitai ignore\n"),
+        );
+        let mut member: serde_json::Value = serde_json::from_str(
+            read(17, &top, false, &body, PASSING, "CLEAN")
+                .split_once('=')
+                .unwrap()
+                .1,
+        )?;
+        member["closingIssuesReferences"] = serde_json::json!(
+            issue
+                .map(|number| serde_json::json!({"number":number}))
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
+        let mut merged = member.clone();
+        merged["state"] = serde_json::json!("MERGED");
+        merged["mergeStateStatus"] = serde_json::json!("MERGED");
+        let views = format!(
+            "{}\n{}\n{}\n17={member}\n17={member}\n17={merged}",
+            read(5, &parent, false, &closed, PASSING, "CLEAN"),
+            read(5, &parent, false, &closed, PASSING, "CLEAN"),
+            read(5, &parent, false, &closed, PASSING, "MERGED")
+        );
+        let issues = [
+            (23, "open"),
+            (24, "closed"),
+        ].map(|(number, state)| format!("repos/P4suta/project/issues/{number}={}", serde_json::json!({"number":number,"title":"Preserve edits","body":"Keep the input.","state":state,"html_url":format!("https://github.com/P4suta/project/issues/{number}")}))).join("\n");
+        let output = fixture.stack_command(&checkout, &lease, &["merge", "--pr", "17", "--interval", "0"])?
+            .env("GH_FIXTURE_LIST", r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":17,"headRefName":"topic","baseRefName":"parent"}]"#)
+            .env("GH_FIXTURE_VIEWS", views)
+            .env("GH_FIXTURE_ISSUES", issues)
+            .env("GH_FIXTURE_ASYNC", r#"{"status":"merged","details":{"message":"merged"}}"#)
+            .output()?;
+        assert!(
+            !output.status.success(),
+            "a member without an open issue must refuse"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("stack member #17"), "{stderr}");
+        assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());
+        assert!(!fixture.log()?.contains("/merge-async"));
+    }
+    Ok(())
+}
+
+#[test]
+fn stack_merge_checks_three_members_own_issues_or_the_explicit_common_issue() -> Result<()> {
+    for common in [false, true] {
+        let fixture = Fixture::new(BODY)?;
+        let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+        let trunk = git(&checkout, &["rev-parse", "origin/main"])?;
+        let parent = git(&checkout, &["rev-parse", "parent"])?;
+        let middle = git(&checkout, &["rev-parse", "prior-topic"])?;
+        let top = git(&checkout, &["rev-parse", "HEAD"])?;
+        let mut views = Vec::new();
+        for (pr, head, base, issue) in [
+            (5, &parent, "main", 23),
+            (11, &middle, "parent", 24),
+            (17, &top, "prior-topic", 25),
+        ] {
+            let mut body = format!("{BODY}\nCloses #{issue}.\n\n@coderabbitai ignore\n");
+            if common && issue != 23 {
+                body.push_str("\nCloses #23.\n");
+            }
+            for state in ["CLEAN", "CLEAN", "MERGED"] {
+                let response = read(pr, head, false, &body, PASSING, state);
+                let mut document: serde_json::Value =
+                    serde_json::from_str(response.split_once('=').unwrap().1)?;
+                document["baseRefName"] = serde_json::json!(base);
+                document["closingIssuesReferences"] = serde_json::json!([{"number":issue}]);
+                views.push(format!("{pr}={document}"));
+            }
+        }
+        let issues = [23, 24, 25].map(|number| format!("repos/P4suta/project/issues/{number}={}", serde_json::json!({"number":number,"title":"Preserve edits","body":"Keep the input.","state":"open","html_url":format!("https://github.com/P4suta/project/issues/{number}")}))).join("\n");
+        let mut command = fixture.stack_command(
+            &checkout,
+            &lease,
+            &["merge", "--pr", "17", "--interval", "0"],
+        )?;
+        command.env("GH_FIXTURE_LIST", r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":11,"headRefName":"prior-topic","baseRefName":"parent"},{"number":17,"headRefName":"topic","baseRefName":"prior-topic"}]"#)
+            .env("GH_FIXTURE_VIEWS", views.join("\n"))
+            .env("GH_FIXTURE_ISSUES", issues)
+            .env("GH_FIXTURE_ASYNC", r#"{"status":"merged","details":{"message":"merged"}}"#)
+            .env("GH_FIXTURE_BASES", format!("{parent}={trunk}\n{middle}={parent}\n{top}={middle}"))
+            .env("GH_FIXTURE_ASSESSMENTS", fixture.assessment_records(&checkout, "P4suta/project", &[("parent", "origin/main"), ("prior-topic", "origin/parent"), ("HEAD", "prior-topic")])?);
+        if common {
+            command.args(["--issue", "23"]);
+        }
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let log = fixture.log()?;
+        for number in [23, 24, 25] {
+            assert_eq!(
+                log.contains(&format!("\nrepos/P4suta/project/issues/{number}\n")),
+                !common || number == 23
+            );
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for number in [5, 11, 17] {
+            assert!(stdout.contains(&format!("#{number} merged")), "{stdout}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<()> {
     let closed = format!("{BODY}\nCloses #23.\n");
     let excluded = format!("{closed}\n@coderabbitai ignore\n");
