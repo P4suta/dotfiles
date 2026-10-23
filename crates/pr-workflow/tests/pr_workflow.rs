@@ -5510,6 +5510,127 @@ fn an_independent_creation_keeps_its_reason_in_owner_local_state() -> Result<()>
 }
 
 #[test]
+fn existing_pr_start_preserves_unrelated_work_units() -> Result<()> {
+    for login in ["P4suta", "renovate[bot]"] {
+        let fixture = Fixture::new(BODY)?;
+        let mut pulls: Vec<_> = (1..=4)
+            .map(|number| {
+                owned_work(
+                    number,
+                    &format!("work-{number}"),
+                    "main",
+                    &fixture.base,
+                    "owner/project",
+                )
+            })
+            .collect();
+        let mut current = owned_work(10, "feature", "main", &fixture.head, "owner/project");
+        current["user"]["login"] = login.into();
+        pulls.push(current);
+        let index = fs::read(fixture.directory.path().join(".git/index"))?;
+        let output = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", serde_json::to_string(&pulls)?)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{login}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read(fixture.directory.path().join(".git/index"))?,
+            index
+        );
+        assert_eq!(
+            git(fixture.directory.path(), &["rev-parse", "HEAD"])?,
+            fixture.head
+        );
+        let creation = fixture
+            .command("create")?
+            .args(["--title", "fix: preserve edits", "--body-file"])
+            .arg(&fixture.body)
+            .args(["--head", "feature"])
+            .env("GH_FIXTURE_PULLS", serde_json::to_string(&pulls)?)
+            .output()?;
+        assert_eq!(refusal(&creation)["rule"], "pr.work-units");
+        assert!(!fixture.log()?.contains("\ncreate\n"));
+        let declaration = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", serde_json::to_string(&pulls)?)
+            .args(["--independent", "Declare independent work"])
+            .output()?;
+        assert_eq!(refusal(&declaration)["rule"], "pr.work-units");
+    }
+    Ok(())
+}
+
+#[test]
+fn existing_pr_start_rejects_foreign_and_invalid_subjects() -> Result<()> {
+    #[derive(Clone, Copy, Debug)]
+    enum Fault {
+        RepositoryId,
+        RepositoryName,
+        Unavailable,
+        Commit,
+        Destination,
+        Missing,
+        Duplicate,
+    }
+    for fault in [
+        Fault::RepositoryId,
+        Fault::RepositoryName,
+        Fault::Unavailable,
+        Fault::Commit,
+        Fault::Destination,
+        Fault::Missing,
+        Fault::Duplicate,
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let mut pulls: Vec<_> = (1..=4)
+            .map(|number| {
+                owned_work(
+                    number,
+                    &format!("work-{number}"),
+                    "main",
+                    &fixture.base,
+                    "owner/project",
+                )
+            })
+            .collect();
+        let mut current = owned_work(10, "feature", "main", &fixture.head, "owner/project");
+        current["user"]["login"] = "renovate[bot]".into();
+        match fault {
+            Fault::RepositoryId => current["head"]["repo"]["id"] = 38.into(),
+            Fault::RepositoryName => current["head"]["repo"]["full_name"] = "other/project".into(),
+            Fault::Unavailable => current["head"]["repo"] = serde_json::Value::Null,
+            Fault::Commit => current["head"]["sha"] = "incomplete".into(),
+            Fault::Destination => {
+                current["html_url"] = "https://github.com/other/project/pull/10".into();
+            }
+            Fault::Missing => current["head"]["ref"] = "other".into(),
+            Fault::Duplicate => {
+                let mut duplicate = current.clone();
+                duplicate["number"] = 11.into();
+                duplicate["html_url"] = "https://github.com/owner/project/pull/11".into();
+                pulls.push(duplicate);
+            }
+        }
+        pulls.push(current);
+        let output = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", serde_json::to_string(&pulls)?)
+            .output()?;
+        assert!(
+            !output.status.success(),
+            "{fault:?}: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(!fixture.log()?.contains("\ncreate\n"));
+    }
+    Ok(())
+}
+
+#[test]
 fn start_requires_the_open_stack_tip_or_an_independent_declaration() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
     git(
