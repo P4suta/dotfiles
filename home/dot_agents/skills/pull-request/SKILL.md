@@ -76,6 +76,9 @@ Write one sentence per line in commit messages, issue and PR bodies, comments, d
 Never wrap a sentence across lines or put two sentences on one line.
 Split long sentences into shorter ones when the destination limits line length.
 Headings, labels ending in a colon, lists, tables, code, quotes, and front matter keep their structural line rules.
+The shell guard checks literal GitHub body, body-file, close and reopen comment, and nested JSON body inputs through the publication prose channel.
+An unreadable file, unresolved expansion, ambiguous standard input, or unsupported publishing command supplies no completed check and blocks the command.
+Use a readable UTF-8 body file with a direct command in its known execution directory, and keep issue and PR documents on the checked workflow route.
 Use `Why`, `Changes`, and `Validation` when no template exists, and state the actual validation outcome.
 Rewrite the description around the final change if the scope changed.
 Write every PR, issue, review, and comment in the owner's voice: flat, short, and about the change or the decision.

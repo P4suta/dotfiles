@@ -737,6 +737,51 @@ verifier = "kani"
 source = "crates/rules/src/body_rules.rs"
 probes = '''
 #[kani::proof]
+#[kani::unwind(1)]
+fn reject_expanding_a_single_quoted_dollar() {
+    assert_eq!(production::word_step(production::Quote::Single, '$'), production::WordStep::Opaque);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_admitting_a_double_quoted_expansion() {
+    assert_eq!(production::word_step(production::Quote::Double, '$'), production::WordStep::Emit);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_an_escape_inside_single_quotes() {
+    assert_eq!(production::word_step(production::Quote::Single, '\\'), production::WordStep::Escape(production::EscapeMode::Double));
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_admitting_an_unquoted_glob() {
+    assert_eq!(production::word_step(production::Quote::Unquoted, '*'), production::WordStep::Emit);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_dropping_an_ordinary_double_quoted_backslash() {
+    assert_eq!(production::escape_step(production::EscapeMode::Double, 'q'), production::EscapeStep::Emit);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_emitting_a_line_continuation() {
+    assert_eq!(production::escape_step(production::EscapeMode::Unquoted, '\n'), production::EscapeStep::Emit);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_admitting_an_unreadable_published_body() {
+    assert_eq!(production::publication(production::Inspection::Unreadable), production::Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_admitting_prose_findings() {
+    assert_eq!(production::publication(production::Inspection::Findings), production::Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_refusing_a_complete_clear_inspection() {
+    assert_eq!(production::publication(production::Inspection::Clear), production::Verdict::Refuse(production::Reason::UnreadableBody));
+}
+#[kani::proof]
 fn reject_admitting_an_attributed_body() {
     assert!(production::verdict(true) == production::Verdict::Admit);
 }
@@ -1993,6 +2038,26 @@ fn reject_an_overflow_under_checked_mir() {
 verifier = "kani"
 source = "crates/rules/src/prose_rules.rs"
 probes = '''
+#[kani::proof]
+#[kani::unwind(65)]
+fn reject_hiding_ordinary_colon_prose_as_metadata() {
+    assert!(production::coauthor_trailer(b"Note: First. Second."));
+}
+#[kani::proof]
+#[kani::unwind(65)]
+fn reject_hiding_a_coauthor_record_without_an_address() {
+    assert!(production::coauthor_trailer(b"Co-authored-by: First. Second."));
+}
+#[kani::proof]
+#[kani::unwind(65)]
+fn reject_hiding_prose_after_a_coauthor_address() {
+    assert!(production::coauthor_trailer(b"Co-authored-by: A <a@b> More."));
+}
+#[kani::proof]
+#[kani::unwind(65)]
+fn reject_refusing_structured_initials_in_a_coauthor_record() {
+    assert!(!production::coauthor_trailer(b"Co-authored-by: A. Human <a@b>"));
+}
 #[kani::proof]
 fn reject_admitting_a_wrapped_prose_pair() {
     assert!(!production::wraps(production::Line::Prose, production::Line::Prose, false));

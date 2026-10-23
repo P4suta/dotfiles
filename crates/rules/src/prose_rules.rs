@@ -12,6 +12,52 @@ const ABBREVIATIONS: [&str; 16] = [
     "ltd", "u.s",
 ];
 
+const COAUTHOR_KEY: &[u8] = b"Co-authored-by:";
+
+/// Recognizes a name-and-email metadata record without asserting its identity.
+#[must_use]
+pub fn coauthor_trailer(line: &[u8]) -> bool {
+    if line.iter().any(u8::is_ascii_control) {
+        return false;
+    }
+    let line = line.trim_ascii();
+    let Some(key) = line.get(..COAUTHOR_KEY.len()) else {
+        return false;
+    };
+    if !key.eq_ignore_ascii_case(COAUTHOR_KEY) {
+        return false;
+    }
+    let Some(fields) = line.get(COAUTHOR_KEY.len()..) else {
+        return false;
+    };
+    let fields = fields.trim_ascii();
+    let Some(fields) = fields.strip_suffix(b">") else {
+        return false;
+    };
+    let Some(open) = fields.iter().rposition(|&byte| byte == b'<') else {
+        return false;
+    };
+    let Some((name, address)) = fields.split_at_checked(open) else {
+        return false;
+    };
+    let Some(email) = address.strip_prefix(b"<") else {
+        return false;
+    };
+    if !name.ends_with(b" ")
+        || name.trim_ascii().is_empty()
+        || name.iter().any(|&byte| matches!(byte, b'<' | b'>'))
+        || email
+            .iter()
+            .any(|byte| !byte.is_ascii_graphic() || matches!(byte, b'<' | b'>'))
+    {
+        return false;
+    }
+    let mut parts = email.split(|&byte| byte == b'@');
+    parts.next().is_some_and(|part| !part.is_empty())
+        && parts.next().is_some_and(|part| !part.is_empty())
+        && parts.next().is_none()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Line {
@@ -267,6 +313,85 @@ pub fn keep_hook_group(before: usize, after: usize) -> bool {
 mod proofs {
     use super::*;
 
+    pub fn spec_coauthor_trailer(line: &[u8]) {
+        if coauthor_trailer(line) {
+            assert!(!line.iter().any(u8::is_ascii_control));
+            let line = line.trim_ascii();
+            assert!(
+                line.get(..COAUTHOR_KEY.len())
+                    .is_some_and(|key| key.eq_ignore_ascii_case(COAUTHOR_KEY))
+            );
+            assert_eq!(line.last(), Some(&b'>'));
+            let fields = line
+                .get(COAUTHOR_KEY.len()..)
+                .and_then(|fields| fields.strip_suffix(b">"))
+                .unwrap_or_default();
+            let open = fields.iter().position(|&byte| byte == b'<');
+            assert!(open.is_some());
+            if let Some(open) = open {
+                let name = fields.get(..open).unwrap_or_default();
+                assert_ne!(name.trim_ascii(), []);
+                assert_eq!(name.last(), Some(&b' '));
+                assert!(!name.contains(&b'>'));
+                let email = fields
+                    .get(open..)
+                    .and_then(|address| address.strip_prefix(b"<"))
+                    .unwrap_or_default();
+                assert!(
+                    email
+                        .iter()
+                        .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'<' | b'>'))
+                );
+                let at = email.iter().position(|&byte| byte == b'@');
+                assert!(at.is_some());
+                if let Some(at) = at {
+                    assert!(at > 0);
+                    let domain = email.get(at.saturating_add(1)..).unwrap_or_default();
+                    assert_ne!(domain, []);
+                    assert!(!domain.contains(&b'@'));
+                }
+            }
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(65)]
+    fn coauthor_records_require_exact_structure_within_64_bytes() {
+        let bytes: [u8; 64] = kani::any();
+        let length: usize = kani::any();
+        kani::assume(length <= bytes.len());
+        let line = &bytes[..length];
+        spec_coauthor_trailer(line);
+        kani::cover!(coauthor_trailer(line));
+        kani::cover!(!coauthor_trailer(line));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(65)]
+    fn bounded_valid_identity_fields_remain_structured_records() {
+        let name: [u8; 8] = kani::any();
+        let local: [u8; 4] = kani::any();
+        let domain: [u8; 4] = kani::any();
+        kani::assume(
+            name.iter()
+                .chain(local.iter())
+                .chain(domain.iter())
+                .all(u8::is_ascii_alphanumeric),
+        );
+        let mut record = alloc::vec::Vec::from(COAUTHOR_KEY);
+        record.push(b' ');
+        record.extend_from_slice(&name);
+        record.extend_from_slice(b" <");
+        record.extend_from_slice(&local);
+        record.push(b'@');
+        record.extend_from_slice(&domain);
+        record.push(b'>');
+        assert!(coauthor_trailer(&record));
+        spec_coauthor_trailer(&record);
+    }
+
     pub const LINE_KINDS: [Line; 4] = [Line::Prose, Line::List, Line::LeadIn, Line::Boundary];
 
     pub fn spec_wraps(previous: Line, next: Line, terminated: bool) {
@@ -494,6 +619,28 @@ mod proofs {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_structured_coauthor_records_are_metadata() {
+        for (line, expected) in [
+            ("Co-authored-by: A. Human <a@example.com>", true),
+            ("co-AUTHORED-by: Person <person@host>", true),
+            (" Co-authored-by: Bot [bot] <bot+id@example.com> ", true),
+            ("Note: First. Second.", false),
+            ("Co-authored-by: First. Second.", false),
+            ("Co-authored-by: <a@example.com>", false),
+            ("Co-authored-by: Person<a@example.com>", false),
+            ("Co-authored-by: Person <@example.com>", false),
+            ("Co-authored-by: Person <a@>", false),
+            ("Co-authored-by: Person <a@@example.com>", false),
+            ("Co-authored-by: Person <a@example.com> More prose.", false),
+            ("Co-authored-by: Person <a@example.com>\n", false),
+            ("Co-authored-by: Person <a b@example.com>", false),
+        ] {
+            assert_eq!(super::coauthor_trailer(line.as_bytes()), expected, "{line}");
+            super::proofs::spec_coauthor_trailer(line.as_bytes());
+        }
+    }
+
     use super::{
         HOOK_PREFIX, LayoutViolation, Line, classify, ends_sentence, proofs, reply_hook,
         sentence_lines, sentence_starts,

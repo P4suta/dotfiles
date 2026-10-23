@@ -13,6 +13,11 @@ by = "fuzz/fuzz_targets/shell_suggestions.rs"
 
 [[owner]]
 shape = "parser"
+path = "crates/dotfiles/src/claude_hook/github.rs"
+by = "fuzz/fuzz_targets/github_bodies.rs"
+
+[[owner]]
+shape = "parser"
 path = "crates/dotfiles/src/legacy/syntax.rs"
 by = "fuzz/fuzz_targets/shell_suggestions.rs"
 

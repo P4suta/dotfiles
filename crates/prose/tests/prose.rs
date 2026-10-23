@@ -61,6 +61,30 @@ fn binary(arguments: &[&str], input: &str, runtime: &Path) -> Result<(i32, Strin
 }
 
 #[test]
+fn publication_checks_prose_around_structured_coauthor_metadata() -> Result<()> {
+    let bundle = source()?;
+    let record = "Co-authored-by: A. Human <person@example.com>";
+    let body = format!("The checks passed.\n{record}\nThe change is ready.\n");
+    assert_eq!(
+        prose::publication(None, &body),
+        "The checks passed.\n\nThe change is ready.\n"
+    );
+    assert_eq!(prose::check(&bundle, Channel::Pr, "body.md", &body)?, []);
+    for line in [
+        "Note: First. Second.",
+        "Co-authored-by: First. Second.",
+        "Co-authored-by: A <a@b> First. Second.",
+    ] {
+        assert_eq!(prose::publication(None, line), format!("{line}\n"));
+        assert!(
+            !prose::check(&bundle, Channel::Issue, "body.md", line)?.is_empty(),
+            "{line}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn documents_report_the_rule_and_the_offending_sentence() -> Result<()> {
     let bundle = source()?;
     let text = format!("# Parser\n\n{ATTRIBUTED}\n");
