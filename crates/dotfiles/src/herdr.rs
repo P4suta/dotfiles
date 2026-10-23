@@ -285,11 +285,24 @@ pub fn server_running(home: &Path, limit: Duration) -> Result<bool> {
     .responding()
 }
 
+/// An exclusive launch lease that unlocks when its owner leaves scope.
+#[derive(Debug)]
+#[must_use]
+pub struct LaunchLease {
+    file: std::fs::File,
+}
+
+impl Drop for LaunchLease {
+    fn drop(&mut self) {
+        platform::cleanup::report(self.file.unlock(), "release the Herdr launch lease");
+    }
+}
+
 /// Hold the launch lock until the server has become responsive.
 ///
 /// # Errors
 /// Returns errors when another launcher owns the lock or an observation fails.
-pub fn launch_guard(home: &Path) -> Result<(std::fs::File, Launch)> {
+pub fn launch_guard(home: &Path) -> Result<(LaunchLease, Launch)> {
     let lock = launch_lock(home)?;
     let mut native = Native::new(home);
     let processes = native.processes()?;
@@ -310,13 +323,13 @@ pub fn launch_guard(home: &Path) -> Result<(std::fs::File, Launch)> {
     Ok((lock, decision))
 }
 
-fn launch_lock(home: &Path) -> Result<std::fs::File> {
+fn launch_lock(home: &Path) -> Result<LaunchLease> {
     let path = home.join(LAUNCH_LOCK);
     std::fs::create_dir_all(path.parent().context("launch lock has no directory")?)?;
     let lock = std::fs::File::create(path)?;
     lock.try_lock()
         .context("another Herdr launcher is active; try again after it finishes")?;
-    Ok(lock)
+    Ok(LaunchLease { file: lock })
 }
 
 /// Stop one owned Herdr instance after exact interactive confirmation and identity revalidation.
@@ -366,6 +379,47 @@ pub fn cleanup(home: &Path, pid: u32) -> Result<()> {
 mod tests {
     use super::*;
 
+    const LEASE_HOME: &str = "DOTFILES_LAUNCH_LEASE_TEST_HOME";
+    const LEASE_AVAILABLE: &str = "DOTFILES_LAUNCH_LEASE_TEST_AVAILABLE";
+    const LEASE_PROBE: &str = "herdr::tests::child_process_checks_the_fixture_lease";
+    const LEASE_PROBE_RESULT: &str = "test result: ok. 1 passed; 0 failed;";
+
+    fn child_lease(home: &Path, available: bool) -> Result<()> {
+        let output = platform::process::command(std::env::current_exe()?)
+            .args(["--exact", LEASE_PROBE, "--ignored", "--nocapture"])
+            .env(LEASE_HOME, home)
+            .env(LEASE_AVAILABLE, available.to_string())
+            .output()?;
+        let stdout = String::from_utf8(output.stdout)?;
+        ensure!(
+            output.status.success() && stdout.contains(LEASE_PROBE_RESULT),
+            "the child lease probe did not pass: {stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Runs inside the retained-handle test's child process"]
+    fn child_process_checks_the_fixture_lease() -> Result<()> {
+        let home = std::env::var_os(LEASE_HOME).context("fixture home missing")?;
+        let expected: bool = std::env::var(LEASE_AVAILABLE)?.parse()?;
+        let available = match launch_lock(Path::new(&home)) {
+            Ok(_lease) => true,
+            Err(error)
+                if matches!(
+                    error.downcast_ref::<std::fs::TryLockError>(),
+                    Some(std::fs::TryLockError::WouldBlock)
+                ) =>
+            {
+                false
+            }
+            Err(error) => return Err(error),
+        };
+        ensure!(available == expected, "unexpected child lease availability");
+        Ok(())
+    }
+
     #[test]
     fn a_launch_lock_serializes_launchers_and_releases_after_failure() -> Result<()> {
         let home = tempfile::tempdir()?;
@@ -373,6 +427,22 @@ mod tests {
         assert!(launch_lock(home.path()).is_err());
         drop(lock);
         let _lock = launch_lock(home.path())?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_launch_lease_releases_with_a_duplicate_handle_still_open() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let lock = launch_lock(home.path())?;
+        let duplicate = lock.file.try_clone()?;
+        assert!(launch_lock(home.path()).is_err());
+        assert!(launch_lock(home.path()).is_err());
+        child_lease(home.path(), false)?;
+        drop(lock);
+        child_lease(home.path(), true)?;
+        let _next = launch_lock(home.path())
+            .context("the owning lease must release before its duplicate closes")?;
+        drop(duplicate);
         Ok(())
     }
 
