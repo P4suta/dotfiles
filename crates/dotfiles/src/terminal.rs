@@ -49,41 +49,25 @@ fn execute(mut command: Command) -> Result<ExitStatus> {
     }
 }
 
-/// Builds the session a terminal window runs, choosing Herdr with its server started, else Nushell, else a login shell.
-fn child_command(native: &mut Real, session: Session, arguments: &[OsString]) -> Result<Command> {
-    if matches!(session, Session::Herdr) && native.available(Tool::Herdr) {
-        #[cfg(unix)]
-        let managed_agent = matches!(
-            crate::profiles::native_profile()?,
-            crate::profile_rules::Profile::Mac | crate::profile_rules::Profile::Linux
-        );
-        #[cfg(unix)]
-        if managed_agent {
-            start_herdr_server(native)?;
-        }
-        let mut command = native.command(Tool::Herdr);
-        #[cfg(unix)]
-        if managed_agent {
-            command.env("GIT_SSH_COMMAND", SSH_PROGRAM);
-        }
+fn child_command(
+    native: &Real,
+    program: Tool,
+    arguments: &[OsString],
+    ssh_program: Option<&str>,
+) -> Command {
+    let mut command = native.command(program);
+    if matches!(program, Tool::Herdr | Tool::Nu) {
         command.args(arguments);
-        return Ok(command);
-    }
-    if native.available(Tool::Nu) {
-        let mut command = native.command(Tool::Nu);
-        command.args(arguments);
-        return Ok(command);
-    }
-    let mut command = native.command(if cfg!(target_os = "macos") {
-        Tool::Zsh
     } else {
-        Tool::Bash
-    });
+        command
+            .arg("-l")
+            .env("DOTFILES_NO_NU", "1")
+            .env("DOTFILES_BASH_ONLY", "1");
+    }
+    if let Some(ssh_program) = ssh_program {
+        command.env("GIT_SSH_COMMAND", ssh_program);
+    }
     command
-        .arg("-l")
-        .env("DOTFILES_NO_NU", "1")
-        .env("DOTFILES_BASH_ONLY", "1");
-    Ok(command)
 }
 
 /// Starts the Herdr server with its SSH agent unless it already runs, waiting up to five seconds for it.
@@ -137,23 +121,39 @@ pub fn run(
     child: bool,
     arguments: &[OsString],
 ) -> Result<ExitStatus> {
-    let child = child
-        || arguments
-            .first()
-            .is_some_and(|argument| argument == "--child");
-    let arguments = if arguments
-        .first()
-        .is_some_and(|argument| argument == "--child")
-    {
-        &arguments[1..]
-    } else {
-        arguments
+    let (child, arguments) = match arguments {
+        [first, remaining @ ..] if first == "--child" => (true, remaining),
+        _ => (child, arguments),
     };
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
-    let mut native = Real::new(Path::new(&home))?;
+    let native = Real::new(Path::new(&home))?;
+    #[cfg(unix)]
+    let mut native = native;
     if child {
-        return execute(child_command(&mut native, session, arguments)?);
+        let (program, ssh_program) =
+            if matches!(session, Session::Herdr) && native.available(Tool::Herdr) {
+                #[cfg(unix)]
+                let ssh_program = if matches!(
+                    crate::profiles::native_profile()?,
+                    crate::profile_rules::Profile::Mac | crate::profile_rules::Profile::Linux
+                ) {
+                    start_herdr_server(&mut native)?;
+                    Some(SSH_PROGRAM)
+                } else {
+                    None
+                };
+                #[cfg(not(unix))]
+                let ssh_program = None;
+                (Tool::Herdr, ssh_program)
+            } else if native.available(Tool::Nu) {
+                (Tool::Nu, None)
+            } else if cfg!(target_os = "macos") {
+                (Tool::Zsh, None)
+            } else {
+                (Tool::Bash, None)
+            };
+        return execute(child_command(&native, program, arguments, ssh_program));
     }
     let title = if matches!(session, Session::Herdr) {
         "Herdr"
