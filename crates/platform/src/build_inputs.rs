@@ -24,7 +24,7 @@ pub const CRATES: [&str; 9] = [
 ];
 
 /// Files outside the crates' `src` directories that the compiler includes or that decide how the tools build.
-const SHARED: [&str; 54] = [
+const SHARED: [&str; 58] = [
     ".cargo/config.toml",
     ".chezmoiroot",
     ".github/workflows/ci.yml",
@@ -52,6 +52,10 @@ const SHARED: [&str; 54] = [
     "fuzz/corpus/generated_attributes/unknown-value",
     "fuzz/corpus/generated_attributes/valid",
     "fuzz/corpus/generated_attributes/wrong-path",
+    "fuzz/corpus/github_bodies/arguments",
+    "fuzz/corpus/github_bodies/duplicate-json",
+    "fuzz/corpus/github_bodies/expansion",
+    "fuzz/corpus/github_bodies/nested-json",
     "fuzz/corpus/shell_suggestions/invalid-range",
     "fuzz/corpus/shell_suggestions/quoting",
     "fuzz/corpus/shell_suggestions/valid-tree",

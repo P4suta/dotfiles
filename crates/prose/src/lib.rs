@@ -723,7 +723,7 @@ pub fn commit_message(raw: &str) -> String {
     text
 }
 
-/// A pull request or issue as one text: the title, then the body without `CodeRabbit` requests.
+/// Projects publication prose without requests or structured coauthor metadata, preserving line numbers.
 #[must_use]
 pub fn publication(title: Option<&str>, body: &str) -> String {
     let mut text = String::new();
@@ -732,7 +732,9 @@ pub fn publication(title: Option<&str>, body: &str) -> String {
         text.push_str("\n\n");
     }
     for line in body.lines() {
-        if !line.trim().starts_with("@coderabbitai") {
+        if !line.trim().starts_with("@coderabbitai")
+            && !prose_rules::coauthor_trailer(line.as_bytes())
+        {
             text.push_str(line);
         }
         text.push('\n');
