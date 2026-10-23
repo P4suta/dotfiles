@@ -1,6 +1,9 @@
 (?i)agents?
 (?i)home director(y|ies)
 (?i)validate[sd]?
+(?i)equivalent
+(?i)samples?
+(?i)sufficient
 1Password
 ADRs?
 APIs?
@@ -81,9 +84,11 @@ RFCs?
 RNGs?
 Rust
 SARIF
+SAT
 SBOM
 SHA(-256)?
 SLSA
+SMT
 SPDX
 SPICE
 SSH

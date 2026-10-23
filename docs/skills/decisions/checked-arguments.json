@@ -1,0 +1,13 @@
+{
+  "revision": "ce48876943d10a78af2bf94822c64a9befb4dfd7e78e39560744f60c305495bf",
+  "outcome": "implemented",
+  "reason": "Separate source evidence, semantic interpretation, formal entailment, comparisons, and decisions, and bind automated checks to the current answer draft.",
+  "evidence": [
+    "home/dot_agents/skills/checked-arguments/SKILL.md",
+    "home/dot_agents/skills/checked-arguments/references/argument-quality.md",
+    "home/dot_agents/skills/checked-arguments/references/verification-methods.md",
+    "crates/dotfiles/src/answer.rs",
+    "crates/rules/src/answer_rules.rs"
+  ],
+  "revisit": null
+}

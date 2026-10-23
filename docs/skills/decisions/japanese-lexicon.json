@@ -1,0 +1,11 @@
+{
+  "revision": "e2f9f3d45a0b34061536a5e923d08728d5d811b4836aedcac459a5739b63515a",
+  "outcome": "implemented",
+  "reason": "Verify contextual kana readings with public lexical records or major dictionaries before checking a named romanization convention or an attested spelling.",
+  "evidence": [
+    "home/dot_agents/skills/japanese-lexicon/SKILL.md",
+    "crates/dotfiles/src/answer/lexicon.rs",
+    "crates/dotfiles/src/answer/sources.rs"
+  ],
+  "revisit": null
+}

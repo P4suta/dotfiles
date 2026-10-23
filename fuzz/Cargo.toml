@@ -10,6 +10,10 @@ license = "MIT OR Apache-2.0"
 [package.metadata]
 cargo-fuzz = true
 
+[features]
+default = ["xtask-parsers"]
+xtask-parsers = ["dep:xtask"]
+
 [dependencies]
 anyhow = "1.0"
 coderabbit-guard = { path = "../crates/coderabbit-guard" }
@@ -25,7 +29,7 @@ serde_json = "1.0"
 tempfile = "3.27"
 tar = { version = "0.4.46", default-features = false }
 toml = "1.0"
-xtask = { path = "../xtask" }
+xtask = { path = "../xtask", optional = true }
 
 [[bin]]
 name = "artifact_plan"
@@ -71,6 +75,7 @@ bench = false
 
 [[bin]]
 name = "opencode_permissions"
+required-features = ["xtask-parsers"]
 path = "fuzz_targets/opencode_permissions.rs"
 test = false
 doc = false
@@ -101,6 +106,13 @@ bench = false
 members = ["."]
 
 [[bin]]
+name = "answer_plan"
+path = "fuzz_targets/answer_plan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "bounded_policy"
 path = "fuzz_targets/bounded_policy.rs"
 test = false
@@ -123,6 +135,7 @@ bench = false
 
 [[bin]]
 name = "proof_image_server"
+required-features = ["xtask-parsers"]
 path = "fuzz_targets/proof_image_server.rs"
 test = false
 doc = false

@@ -162,7 +162,7 @@ pub fn resource_arguments() -> Vec<OsString> {
         .resource_arguments()
 }
 
-fn pinned(image: &str) -> bool {
+pub(crate) fn pinned(image: &str) -> bool {
     let digest = image
         .strip_prefix(DIGEST_PREFIX)
         .or_else(|| image.rsplit_once("@sha256:").map(|(_, digest)| digest));
@@ -299,7 +299,16 @@ fn exit_status(code: i32) -> Result<ExitStatus> {
 ///
 /// Refuses mutable images and invalid plans, reports Docker failures, and leaves limit stops inconclusive.
 pub fn run(arguments: &[OsString], image: &str) -> Result<Output> {
-    run_with(&Policy::load(None)?, arguments, image, false)
+    run_with_policy(&Policy::load(None)?, arguments, image)
+}
+
+/// Execute a project plan under an explicit validated policy without changing the installed policy.
+///
+/// # Errors
+///
+/// Refuses invalid plans and mutable images, and reports resource stops as inconclusive.
+pub fn run_with_policy(policy: &Policy, arguments: &[OsString], image: &str) -> Result<Output> {
+    run_with(policy, arguments, image, false)
 }
 
 /// Run a proof campaign with its inventory-derived safety cap and the installed resource limits.

@@ -6,6 +6,32 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/answer_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_reversing_a_comparison() {
+    assert!(production::rank(i64::MIN, i64::MAX, production::Preference::Lower) == production::Ranking::Second);
+}
+#[kani::proof]
+fn reject_an_incomplete_proof_completing_an_answer() {
+    assert!(production::may_complete(production::Evidence {
+        binding: production::Binding::Current,
+        coverage: production::Check::Complete, sources: production::Check::Complete, proof_required: true,
+        proof: production::Proof::Inconclusive,
+    }));
+}
+#[kani::proof]
+fn reject_a_stale_draft_reusing_a_proof() {
+    assert!(production::may_complete(production::Evidence {
+        binding: production::Binding::OtherDraft,
+        coverage: production::Check::Complete, sources: production::Check::Complete, proof_required: true,
+        proof: production::Proof::Verified,
+    }));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/herdr_rules.rs"
 probes = '''
 #[kani::proof]

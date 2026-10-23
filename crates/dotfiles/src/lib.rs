@@ -1,5 +1,6 @@
 //! The installed runtime behind every Git hook, setup launcher, and agent hook, and the Windows machine setup.
 
+pub mod answer;
 pub mod artifacts;
 pub mod assure;
 pub mod bounded;

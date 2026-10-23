@@ -293,6 +293,70 @@ fn herdr_codex_configuration_keeps_host_state_and_replaces_stale_command_overrid
 }
 
 #[test]
+fn claude_application_keeps_existing_preferences_and_enforces_managed_policy() {
+    let preferences = json!({
+        "model": "owner-primary",
+        "advisorModel": "fable",
+        "language": "English",
+        "theme": "dark",
+        "skipDangerousModePermissionPrompt": false,
+        "skipAutoPermissionPrompt": false,
+        "enabledPlugins": {"rust-analyzer-lsp@claude-plugins-official": false, "owner-plugin": true}
+    });
+    let mut host = preferences.clone();
+    host["autoMemoryEnabled"] = json!(true);
+    host["permissions"] = json!({"deny": ["Bash(owner)"], "defaultMode": "auto"});
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered: Value = serde_json::from_str(&render_merged(
+            profile,
+            "dot_claude/modify_settings.json",
+            ".claude/settings.json",
+            &host.to_string(),
+        ))
+        .unwrap();
+        for (key, value) in preferences.as_object().unwrap() {
+            assert_eq!(&rendered[key], value, "{profile}: {key}");
+        }
+        assert_eq!(rendered["autoMemoryEnabled"], json!(false));
+        assert_eq!(rendered["permissions"]["defaultMode"], json!("auto"));
+        assert!(
+            rendered["permissions"]["deny"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Bash(sudo:*)"))
+        );
+        assert!(
+            !rendered["permissions"]["deny"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Bash(owner)"))
+        );
+        assert!(rendered["hooks"]["PreToolUse"].is_array());
+    }
+}
+
+#[test]
+fn claude_application_supplies_missing_preference_defaults() {
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered: Value = serde_json::from_str(&render_merged(
+            profile,
+            "dot_claude/modify_settings.json",
+            ".claude/settings.json",
+            "{}",
+        ))
+        .unwrap();
+        assert_eq!(rendered["advisorModel"], json!("opus"));
+        assert_eq!(rendered["theme"], json!("auto"));
+        assert_eq!(rendered["skipAutoPermissionPrompt"], json!(true));
+        assert_eq!(rendered["language"], json!("Japanese"));
+        assert_eq!(
+            rendered["enabledPlugins"]["rust-analyzer-lsp@claude-plugins-official"],
+            json!(true)
+        );
+    }
+}
+
+#[test]
 fn application_turns_off_memory_a_client_turned_back_on() {
     let host = r#"{"autoMemoryEnabled":true,"model":"opus","permissions":{"allow":["Bash(host)"],"deny":["Bash(host)"],"defaultMode":"auto"}}"#;
     for profile in ["mac", "linux", "windows", "wsl"] {

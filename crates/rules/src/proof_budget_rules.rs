@@ -157,6 +157,12 @@ mod proofs {
             assert_eq!(budget.is_some(), u32::try_from(expected).is_ok());
             if let Some(actual) = budget {
                 assert_eq!(u64::from(actual), expected);
+                let available = u64::from(actual) - u64::from(overhead);
+                assert_eq!(available % TIMEOUT_SECONDS, 0);
+                let slots = available / TIMEOUT_SECONDS;
+                assert!(slots > 0);
+                assert!(slots * u64::from(parallelism) >= u64::from(harnesses));
+                assert!((slots - 1) * u64::from(parallelism) < u64::from(harnesses));
             }
         }
     }
