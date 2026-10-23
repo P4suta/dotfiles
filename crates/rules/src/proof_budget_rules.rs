@@ -6,10 +6,8 @@ pub fn campaign_seconds(harnesses: u32, parallelism: u16, overhead: u32) -> Opti
     if harnesses == 0 || parallelism == 0 {
         return None;
     }
-    let waves = harnesses.div_ceil(u32::from(parallelism));
-    waves
-        .checked_mul(u32::try_from(TIMEOUT_SECONDS).ok()?)?
-        .checked_add(overhead)
+    let waves = u64::from(harnesses).div_ceil(u64::from(parallelism));
+    u32::try_from(waves * TIMEOUT_SECONDS + u64::from(overhead)).ok()
 }
 
 pub const NANOS_PER_MILLI: u32 = 1_000_000;
@@ -373,6 +371,7 @@ mod tests {
             (1, 0, 900, None),
             (1, 1, u32::MAX, None),
             (u32::MAX, 1, 0, None),
+            (u32::MAX, u16::MAX, 0, Some(3_932_220)),
         ] {
             proofs::spec_campaign_seconds(harnesses, parallelism, overhead);
             assert_eq!(campaign_seconds(harnesses, parallelism, overhead), expected);

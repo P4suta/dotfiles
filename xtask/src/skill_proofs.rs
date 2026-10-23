@@ -62,10 +62,14 @@ pub fn verify_push(
 /// A normal run must pass every proof with an assertion, two satisfied cover witnesses, and every property verified, and a counterexample run must fail every harness on an assertion.
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
+    let complete = summary["status"] == "completed"
+        && summary["executed"].as_u64() == Some(expected.len() as u64)
+        && !expected.is_empty();
+    if !complete {
+        report_incomplete(expected);
+    }
     ensure!(
-        summary["status"] == "completed"
-            && summary["executed"].as_u64() == Some(expected.len() as u64)
-            && !expected.is_empty(),
+        complete,
         "proof did not complete: incomplete or empty execution for [{}] (missing evidence, inconclusive)",
         expected.join(", ")
     );
@@ -103,9 +107,12 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
             }
             _ => None,
         };
+        let verdict = proof_budget_rules::verdict(completed_result);
+        if verdict == proof_budget_rules::Verdict::Inconclusive {
+            report_incomplete(expected);
+        }
         ensure!(
-            proof_budget_rules::verdict(completed_result)
-                != proof_budget_rules::Verdict::Inconclusive,
+            verdict != proof_budget_rules::Verdict::Inconclusive,
             "proof did not complete: {} (missing evidence, inconclusive)",
             result["harness_id"]
         );
@@ -134,14 +141,33 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
     for result in results {
         let name = result["harness_id"].as_str().unwrap_or_default();
         checks.run(&format!("harness {name}"), || {
-            if counterexample {
-                validate_counterexample(result)
-            } else {
-                validate_proof(result)
-            }
+            validate_reported_result(result, counterexample)
         });
     }
     checks.finish()
+}
+
+fn report_incomplete(expected: &[&str]) {
+    for name in expected {
+        println!("Kani {name}: incomplete (batch not validated)");
+    }
+}
+
+fn validate_reported_result(result: &Value, counterexample: bool) -> Result<()> {
+    let validation = if counterexample {
+        validate_counterexample(result)
+    } else {
+        validate_proof(result)
+    };
+    let outcome = if validation.is_ok() {
+        if counterexample { "refuted" } else { "proved" }
+    } else if result["status"] == "Failure" && validate_counterexample(result).is_ok() {
+        "refuted"
+    } else {
+        "incomplete"
+    };
+    println!("Kani {}: {outcome}", result["harness_id"]);
+    validation
 }
 
 fn validate_counterexample(result: &Value) -> Result<()> {
