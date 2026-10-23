@@ -1,7 +1,7 @@
 {{- /* chezmoi:modify-template */ -}}
 {{- /*
   Claude Code rewrites this file at runtime.
-  Each profile sets the keys here over the current file, treats an array as one value, and keeps every other key the client wrote.
+  Each profile enforces its hooks and policy while supplying only missing client preferences.
   Persistent agent memory stays off.
   docs/agent-memory-migration.md records where its former content lives.
 */ -}}
@@ -68,6 +68,12 @@ Unrelated handlers remain in their existing groups.
 {{- $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " notifications agent claude")) | fromJson -}}
 {{- $_ := set $hooks $event (concat $groups (list (dict "hooks" (list $notify)))) -}}
 {{- end -}}
-{{- $managed = mergeOverwrite $managed (includeTemplate "partials/claude_settings" . | fromJson) -}}
+{{- range $key, $value := (includeTemplate "partials/claude_settings" . | fromJson) -}}
+{{-   if or (eq $key "permissions") (eq $key "autoMemoryEnabled") -}}
+{{-     $_ := set $managed $key $value -}}
+{{-   else if not (hasKey $current $key) -}}
+{{-     $_ := set $current $key $value -}}
+{{-   end -}}
+{{- end -}}
 {{ mergeOverwrite $current $managed | toPrettyJson "  " | trim }}
 
