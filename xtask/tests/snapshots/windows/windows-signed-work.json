@@ -243,7 +243,7 @@
     {"mode":null,"path":".claude/skills/xtask","sha256":"d2875a72f680ac4046db693472fcba086d762c7310990da6d93c8dd2094ae6c9","type":"symlink"},
     {"mode":"0755","path":".codex","sha256":null,"type":"dir"},
     {"mode":"0644","path":".codex/AGENTS.md","sha256":"2eb395f3ff4b1dfb0cb854ef665e70de61c97a83734c651367bf79cc067b1154","type":"file"},
-    {"mode":"0644","path":".codex/config.toml","sha256":"db65ed2e85d4ee574e47e299520d05fac0900326e9e4bd2294a90e3909f0bbeb","type":"file"},
+    {"mode":"0644","path":".codex/config.toml","sha256":"6e3cc07b0be673a0d4e2d6f6f940d493fec964e2e5b6a5421d16140c2d47a020","type":"file"},
     {"mode":"0644","path":".codex/hooks.json","sha256":"83709c092011c30be8d5e5d4b6235c57be7d101ecde04c314a9137d262719915","type":"file"},
     {"mode":"0755","path":".config","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/assure","sha256":null,"type":"dir"},

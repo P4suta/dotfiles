@@ -15,7 +15,10 @@
 {{- $current = setValueAtPath "shell_environment_policy.set.GIT_SSH_COMMAND" "/usr/bin/ssh" $current -}}
 {{- $current = setValueAtPath "shell_environment_policy.set.SSH_AUTH_SOCK" $socket $current -}}
 {{- end -}}
-{{- if eq .profile "windows" -}}{{- $tool = printf "%s.exe" $tool -}}{{- end -}}
+{{- if eq .profile "windows" -}}
+{{- $tool = printf "%s.exe" $tool -}}
+{{- $current = setValueAtPath "features.prefer_mxc" true $current -}}
+{{- end -}}
 {{- $previous := dig "notify" (list) $current -}}
 {{- if kindIs "slice" $previous -}}
 {{- $notify := includeTemplate "partials/codex_notify" (dict "tool" $tool "previous" $previous) | fromJson -}}
