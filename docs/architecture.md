@@ -79,6 +79,10 @@ The owner's configuration names each repository's owners and budgets under `~/.c
 An exemption sits in the comment block that precedes the site it exempts.
 `dotfiles assure start` reports the gaps when an agent session starts, and the stop hook refuses to end a turn that leaves a gap in a file it changed.
 Claude Code and Codex also pass the owner's `reply_language` to this hook to check final reply prose, with at most one continuation, as [the language decision](adr/check-owner-reply-language-at-stop.md) describes.
+The hook and every prose channel share the sentence layout rules in `crates/rules/src/prose_rules.rs`.
+They refuse two sentences on one line and a sentence that wraps across adjacent prose lines.
+They report the first line and tell writers to split long sentences when a channel limits line length.
+Headings, labels ending in a colon, lists, tables, code, quotes, and front matter keep their structural line rules.
 The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
 `pr-workflow ready` also refuses a PR that weakens a budget.
 Existing gaps remain in the session report without requiring an unrelated repair in every PR.

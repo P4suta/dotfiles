@@ -59,6 +59,10 @@ The section [stacks and merging](references/workflow.md#stacks-and-merging) desc
 
 Without destination-specific rules, write an English [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) title: `type(scope)!: description`.
 `pr-workflow check` runs the prose checker on the title and body of a personal non-fork destination.
+Write one sentence per line in commit messages, issue and PR bodies, comments, documents, and replies in English and Japanese.
+Never wrap a sentence across lines or put two sentences on one line.
+Split long sentences into shorter ones when the destination limits line length.
+Headings, labels ending in a colon, lists, tables, code, quotes, and front matter keep their structural line rules.
 Use `Why`, `Changes`, and `Validation` when no template exists, and state the actual validation outcome.
 Rewrite the description around the final change if the scope changed.
 Write every PR, issue, review, and comment in the owner's voice: flat, short, and about the change or the decision.

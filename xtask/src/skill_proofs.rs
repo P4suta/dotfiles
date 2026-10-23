@@ -836,7 +836,7 @@ pub fn container_target_volume(root: &Path) -> String {
 }
 
 /// Kani writes temporary files beside the source it compiles, so the gate runs on a container-local copy of the read-only checkout.
-const CONTAINER_GATE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; exec cargo run --locked --manifest-path xtask/Cargo.toml --";
+const CONTAINER_SOURCE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -;";
 
 #[must_use]
 pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) -> Vec<OsString> {
@@ -885,7 +885,7 @@ fn container_campaign_arguments(
             "bash",
             "-ec",
             &format!(
-                "{CONTAINER_GATE} {}",
+                "{CONTAINER_SOURCE} exec cargo run --locked --manifest-path xtask/Cargo.toml -- {}",
                 match campaign {
                     ProofCampaign::Full => "proofs",
                     ProofCampaign::Ci => "proofs-ci",
@@ -3342,6 +3342,75 @@ mod tests {
     #[test]
     #[ignore = "requires the installed pinned Kani"]
     #[cfg(not(target_os = "windows"))]
+    fn prose_layout_decisions_and_their_counterexamples_verify_against_production() -> Result<()> {
+        const EXPECTED: (usize, usize) = (11, 15);
+        const TEST: &str = "skill_proofs::tests::prose_layout_decisions_and_their_counterexamples_verify_against_production";
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        if dotfiles::bounded::requires_container() {
+            ensure_linux_engine()?;
+            let image = proof_image(root)?;
+            ensure_image(root, &root.join(PROOF_IMAGE), &image)?;
+            let image = verified_image_id(&image)?;
+            crate::container::prepare_cargo(root, &image)?;
+            let mut arguments =
+                container_run_arguments(root, &image, &container_target_volume(root));
+            *arguments.last_mut().context("proof container command")? = format!(
+                "{CONTAINER_SOURCE} exec cargo test --locked --package xtask --lib -- --ignored --exact {TEST} --nocapture"
+            ).into();
+            let output = crate::phase_evidence::output(
+                Tool::Docker.command().args(arguments),
+                "bounded prose layout proofs",
+            )?;
+            ensure!(
+                output.status.success(),
+                "bounded prose layout proofs failed"
+            );
+            return Ok(());
+        }
+        crate::phase_evidence::run(
+            root,
+            "prose layout subject regression",
+            EXPECTED.0 + EXPECTED.1,
+            || {
+                let manifest = obligations::manifest(root)?;
+                let source = "crates/rules/src/prose_rules.rs";
+                let probes = manifest
+                    .obligations
+                    .iter()
+                    .find_map(|obligation| match obligation {
+                        Obligation::Kani {
+                            source: candidate,
+                            probes,
+                            ..
+                        } if candidate == source => Some(probes),
+                        _ => None,
+                    })
+                    .context("prose layout decisions have a registered proof obligation")?;
+                kani_environment_version(root)?;
+                verify_kani_driver(root)?;
+                let verifier_hash =
+                    crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+                let engine_hash = crate::phase_evidence::engine_digest(root)?;
+                let result = verify_rules(
+                    root,
+                    source,
+                    probes,
+                    &flags(&manifest, source),
+                    &verifier_hash,
+                    &engine_hash,
+                )?;
+                ensure!(
+                    result == EXPECTED,
+                    "prose layout proof inventory differs: {result:?}"
+                );
+                Ok(())
+            },
+        )
+    }
+
+    #[test]
+    #[ignore = "requires the installed pinned Kani"]
+    #[cfg(not(target_os = "windows"))]
     fn reply_language_decisions_and_their_counterexamples_verify_against_production() -> Result<()>
     {
         const EXPECTED: (usize, usize) = (9, 4);
@@ -4013,7 +4082,9 @@ mod tests {
             assert_eq!(arguments[..arguments.len() - 1], full[..full.len() - 1]);
             assert_eq!(
                 arguments.last().unwrap(),
-                &OsString::from(format!("{CONTAINER_GATE} {entry}"))
+                &OsString::from(format!(
+                    "{CONTAINER_SOURCE} exec cargo run --locked --manifest-path xtask/Cargo.toml -- {entry}"
+                ))
             );
         }
     }

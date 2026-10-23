@@ -1,9 +1,11 @@
 ## Prose
 
-Write prose one sentence per line, in English and in Japanese: break after `。`, `！`, `？`, `.`, `!`, and `?`, and optionally after a clause when that clarifies structure.
-Never wrap prose to a fixed column.
+Write prose one sentence per line in English and Japanese: break after `。`, `！`, `？`, `.`, `!`, and `?`.
+Never wrap a sentence across lines or put two sentences on one line.
+Split long sentences into shorter ones when a channel limits line length.
 Never merge a paragraph onto one line.
 Never use a hard line break inside a paragraph.
 A blank line separates paragraphs.
 The pre-commit hook applies this to comments and Markdown in committed files.
-Apply it yourself to commit messages, issue and PR bodies, and release notes.
+The Stop hook applies the same rule to replies with `--reply-language`.
+Apply it yourself to commit messages, issue and PR bodies, release notes, and every agent reply.

@@ -1848,6 +1848,30 @@ verifier = "kani"
 source = "crates/rules/src/prose_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_admitting_a_wrapped_prose_pair() {
+    assert!(!production::wraps(production::Line::Prose, production::Line::Prose, false));
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_wrapping_a_colon_lead_in() {
+    assert!(production::classify("a:") == production::Line::Prose);
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_losing_japanese_sentence_punctuation() {
+    assert!(!production::ends_sentence("あ。"));
+}
+#[kani::proof]
+#[kani::unwind(24)]
+fn reject_missing_a_lowercase_second_sentence() {
+    assert!(production::sentence_starts("go. go").is_empty());
+}
+#[kani::proof]
+#[kani::unwind(24)]
+fn reject_missing_a_wrapped_sentence_in_layout() {
+    assert!(production::sentence_lines("go\non.").is_empty());
+}
+#[kani::proof]
 fn reject_retaining_a_managed_reply_handler() {
     assert!(!production::reply_hook(production::HOOK_PREFIX));
 }
