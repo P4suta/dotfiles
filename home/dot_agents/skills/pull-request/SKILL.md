@@ -43,15 +43,21 @@ Keep the standalone PR description exclusion for all noncritical levels, and per
 Read [commands and generation](references/workflow.md) for the placeholders, the PR review budget, and the optional configuration example.
 Write the document locally when the service fails or the destination requires a document it fails to produce.
 Local creation always starts as a draft, and moving it to review needs separate authorization.
-The workflow policy caps how many PRs one person may keep open.
-`create` refuses a new PR once that person reaches the cap, so add the work to the PR it names.
+The workflow policy caps work units at three per person and repository by default.
+One open stack counts as one unit, and each declared independent PR counts as one unit.
+Normal `start` and `create` use the person's open stack tip, and `create` links the new member into that stack.
+Existing members can receive fixes in place.
+Declare unrelated work with `start --independent <reason>` or `create --independent <reason>`.
+The reason stays in owner-local state and never enters the PR body.
+A declaration from `start` carries into `create` for the same source, branch, issue, and descendant history.
+At the cap, work can join the existing stack but can't add another unit.
 `ready` refuses until every head check passes, so run it only when no scoped work remains.
-Open dependent work with `pr-workflow stack create`.
+Use `pr-workflow stack create` to name the open stack tip explicitly.
 The dependency check skips PRs opened by bots identified by an `app/` login prefix, a `[bot]` login suffix, or the `Bot` account type.
 It also skips stale PRs that already conflict with their own base and reports every skipped PR with its reason.
-`create` refuses shared commits and merges overlapping heads in memory using their merge base.
-A clean merge permits an independent PR.
-A conflict names the PR to stack on.
+For every PR outside the selected parent chain, `create` refuses shared commits and merges overlapping heads in memory using their merge base.
+A clean merge permits creation.
+A dependency names the PR to stack on, or requires resolution before extending an existing stack.
 Restack with `pr-workflow stack sync` or `stack rebase`.
 Never use a manual rebase or force push.
 Merge with `pr-workflow merge` or `stack merge`.

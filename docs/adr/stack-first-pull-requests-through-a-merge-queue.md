@@ -1,8 +1,11 @@
 ---
-status: accepted
+status: amended
+changed_by: [keep-independent-work-reasons-owner-local.md]
 date: 2026-10-22
 ---
 # Make one stack the unit of open work and merge it through a merge queue
+
+The [local-reason decision](keep-independent-work-reasons-owner-local.md) amends the requirement to publish independence reasons.
 
 ## Context
 

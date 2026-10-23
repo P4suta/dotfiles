@@ -2432,12 +2432,48 @@ source = "crates/rules/src/wip_rules.rs"
 probes = '''
 use production::{admits, limit};
 #[kani::proof]
-fn reject_admitting_a_pr_at_the_limit() {
+fn reject_admitting_a_new_unit_at_the_limit() {
     assert!(admits(1, limit(1, None)));
 }
 #[kani::proof]
 fn reject_ignoring_a_repository_override() {
     assert!(limit(1, Some(3)) == 1);
+}
+#[kani::proof]
+fn reject_counting_stack_members_as_separate_work_units() {
+    use production::StackMember;
+    let members = [
+        StackMember { parent: None, independent: false },
+        StackMember { parent: Some(0), independent: false },
+        StackMember { parent: None, independent: true },
+    ];
+    assert!(production::workload(&members).is_ok_and(|work| work.units() == 3));
+}
+#[kani::proof]
+fn reject_selecting_the_stack_root_as_its_tip() {
+    use production::StackMember;
+    let members = [
+        StackMember { parent: None, independent: false },
+        StackMember { parent: Some(0), independent: false },
+    ];
+    assert!(production::workload(&members).is_ok_and(|work| work.tip() == Some(0)));
+}
+#[kani::proof]
+fn reject_refusing_a_stack_member_at_the_work_limit() {
+    assert!(!production::admits_creation(3, 3, true));
+}
+#[kani::proof]
+fn reject_admitting_an_additional_unit_at_the_work_limit() {
+    assert!(production::admits_creation(3, 3, false));
+}
+#[kani::proof]
+fn reject_accepting_a_cycle_as_a_stack() {
+    use production::StackMember;
+    let members = [
+        StackMember { parent: Some(1), independent: false },
+        StackMember { parent: Some(0), independent: false },
+    ];
+    assert!(production::workload(&members).is_ok());
 }
 '''
 

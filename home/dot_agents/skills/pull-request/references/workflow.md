@@ -16,7 +16,7 @@ pr-workflow start --repo P4suta/project --issue 23
 pr-workflow start --repo upstream/project
 ```
 
-`start` only reads and never opens an issue.
+`start` reads GitHub and records checked preparation in owner-local state without opening an issue.
 `issue check`, `create`, and `edit` refuse an empty or unfinished document, and for a personal non-fork destination a title or body that fails the prose checker.
 
 ```console
@@ -66,6 +66,27 @@ Local-file `check` never contacts GitHub and leaves the live issue prerequisite 
 
 ## Stacks and merging
 
+The work-in-progress limit counts one open stack as one unit and each independent PR as one unit, with a default of three units.
+Normal `start` requires new work to include the person's current open stack tip.
+Normal `create` selects that tip as its base and links the new member into the stack.
+Existing stack members can receive fixes in place, and adding a member never consumes another unit.
+The inventory permits one owned stack and refuses branching stacks, cycles, and incomplete identities.
+
+Declare an unrelated unit with either command:
+
+```console
+pr-workflow start --repo OWNER/REPO --issue 23 --path src --independent "Urgent correction unrelated to the open stack"
+pr-workflow create --repo OWNER/REPO --issue 23 --head feature --title "fix: preserve edits" --body-file body.md --independent "Urgent correction unrelated to the open stack"
+```
+
+The reason stays in owner-local state and never enters the published document.
+A declaration from `start` carries into `create` for the same repository identities, login, branch, issue, and descendant history.
+`create` binds the declaration to the created PR number.
+Reusing a merged branch name doesn't reuse its old declaration.
+On another machine, declare an existing owned independent PR with `start --independent` from its branch before opening more work.
+Every listed independent unit names its recorded reason, and a new unit at the cap refuses with the current inventory.
+The flag keeps the issue, signing, review, dependency, and check requirements.
+
 The owner's shared mise tools pin `gh-stack` on every profile.
 pr-workflow resolves that installation outside the target repository and verifies its version.
 The stack commands run it in a checkout whose `origin` matches the target.
@@ -78,13 +99,15 @@ pr-workflow stack merge --repo OWNER/REPO --pr 18
 pr-workflow merge --repo OWNER/REPO --pr 17 --pr 19
 ```
 
-Before checking dependencies, `create` skips PRs opened by bots identified by an `app/` login prefix, a `[bot]` login suffix, or the `Bot` account type.
+`create` checks dependencies on every PR outside the selected parent chain, including when appending a stack member.
+It skips PRs opened by bots identified by an `app/` login prefix, a `[bot]` login suffix, or the `Bot` account type.
 It also skips stale PRs whose `mergeable` state is `CONFLICTING` with their own base.
 Every skipped PR appears in the output with its reason.
-For every remaining PR, `create` refuses a head that shares commits with it and names `stack create` on that PR.
+For every remaining PR, `create` refuses a head that shares commits with it.
+The refusal names `stack create` on that PR, or requires resolution before extending an existing stack.
 When paths overlap, it runs `git merge-tree --write-tree` on the two heads using their merge base without changing the worktree or index.
-A clean merge permits an independent PR.
-A conflict refuses creation and names the conflicting PR and `stack create`.
+A clean merge permits creation.
+A conflict refuses creation and names the conflicting PR and the required next step.
 Git execution failures stop creation, and no flag overrides a conflict.
 `stack create` opens a draft on the parent's open PR and links the chain down to the trunk.
 `stack sync` and `stack rebase` hold the repository's stack lease, the only way dotguard admits a rebase or leased force push of a published branch besides an `ALLOW_FORCE` waiver.
