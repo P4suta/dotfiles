@@ -57,6 +57,19 @@ The same bounded linter adapter checks scripts before the Bash guard admits exec
 The pure `lint_hook_rules` selects file types, linters, configuration sources, and admission, while repository configuration keeps its supported exclusions.
 Missing linters, timeouts, and findings block with reproducing commands.
 
+The Bash guard collects GitHub publication bodies during the same bounded shell traversal that inspects legacy commands.
+The pinned syntax parser supplies source spans, and a static-word decoder preserves quoting and refuses unresolved expansions.
+File inputs need one direct invocation, no redirects, bounded regular UTF-8 files, and complete JSON with unique keys.
+Relative files also need a known execution directory.
+One literal standard-input heredoc supplies exact bytes.
+Pipelines and expandable heredocs leave inspection incomplete.
+Close and reopen comments, merge bodies, and nested API body fields share the issue or PR prose channel and the attribution checks.
+Legacy exceptions never exempt publication prose.
+Structured coauthor records keep names as metadata.
+The checker still inspects ordinary colon prose and malformed records.
+These checks assume that the executable is the supported GitHub CLI and that files and context stay fixed between inspection and execution.
+They establish neither a coauthor's identity nor atomic enforcement at the network boundary.
+
 Codex runs command hooks through the configured session shell.
 The Windows profile uses PowerShell invocation syntax and `dotfiles codex-hooks run` to preserve each hook's input, output, and exit status.
 The wrapper records its start, child completion, and failure diagnostics under `~/.local/state/dotfiles/codex-hooks.jsonl`.

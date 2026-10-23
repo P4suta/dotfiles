@@ -1,18 +1,16 @@
-use crate::body_rules::{self, Verdict as BodyVerdict};
 use crate::disk_scan_rules;
 use crate::path_conversion_rules;
 use crate::shell_syntax_rules;
-use crate::shell_write_rules::{
-    Source, Verdict, body_sources, inspect, next_action, program, segments,
-};
+use crate::shell_write_rules::{Verdict, inspect, next_action, program, segments};
 use crate::tailscale_rules;
 use anyhow::{Context, Result};
-use dotguard::provenance_rules;
 use serde_json::Value;
 use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+
+pub mod github;
 
 /// A Git Bash drive path's parts: the empty root, the drive letter, and the rest.
 const DRIVE_PATH_PARTS: usize = 3;
@@ -45,54 +43,6 @@ fn native_path(path: &str) -> PathBuf {
         }
     }
     PathBuf::from(path)
-}
-
-fn read_body(path: &str, directory: Option<&Path>) -> Option<String> {
-    let path = native_path(path);
-    let path = match directory {
-        Some(directory) if path.is_relative() => directory.join(path),
-        _ => path,
-    };
-    std::fs::read_to_string(path).ok()
-}
-
-/// The text a source sends.
-/// A file that fails to open sends nothing here, and `gh` reports the failure itself.
-fn body_text(source: &Source, directory: Option<&Path>) -> Option<String> {
-    match source {
-        Source::Inline(text) | Source::Stdin(text) => Some(text.clone()),
-        Source::File(path) => read_body(path, directory),
-        Source::Json(path) => {
-            let text = read_body(path, directory)?;
-            let json: Value = serde_json::from_str(&text).ok()?;
-            Some(json["body"].as_str().unwrap_or_default().to_owned())
-        }
-    }
-}
-
-fn attribution_refusal(command: &str, directory: Option<&Path>) -> Option<String> {
-    for source in body_sources(command) {
-        let Some(text) = body_text(&source, directory) else {
-            continue;
-        };
-        let found = dotguard::attribution::find(&text);
-        if let BodyVerdict::Refuse(reason) = body_rules::verdict(found.is_some()) {
-            let (number, line) = found?;
-            return Some(format!(
-                "Refused: this gh command sends a body with an AI attribution line (body line {number}: {line}).\nNext action: {}",
-                body_rules::next_action(reason)
-            ));
-        }
-        let provenance = provenance_rules::find(&text);
-        if provenance_rules::verdict(provenance.is_some()) == provenance_rules::Verdict::Refuse {
-            let (number, phrase) = provenance?;
-            return Some(format!(
-                "Refused: this gh command sends a body that says how its text came about (body line {number}: `{phrase}`).\nNext action: {}",
-                provenance_rules::NEXT_ACTION
-            ));
-        }
-    }
-    None
 }
 
 /// Whether `command` walks a tree and whether it reports sizes: `du` and its kin, `find` with a size test or size output, or a recursive `Get-ChildItem` measured by length.
@@ -295,6 +245,38 @@ pub(crate) fn shell_command(event: &Value) -> Result<String> {
     }
 }
 
+fn execution_directory(event: &Value) -> Result<Option<PathBuf>> {
+    let base = event
+        .get("cwd")
+        .filter(|value| !value.is_null())
+        .map(|value| {
+            value
+                .as_str()
+                .map(native_path)
+                .context("the session directory is not a string")
+        })
+        .transpose()?;
+    let requested = event["tool_input"]
+        .get("workdir")
+        .or_else(|| event["tool_input"].get("cwd"))
+        .filter(|value| !value.is_null())
+        .map(|value| {
+            value
+                .as_str()
+                .map(native_path)
+                .context("the execution directory is not a string")
+        })
+        .transpose()?;
+    match requested {
+        Some(directory) if directory.is_absolute() => Ok(Some(directory)),
+        Some(directory) => Ok(base
+            .filter(|base| base.is_absolute())
+            .map(|base| base.join(directory))
+            .filter(|path| path.is_absolute())),
+        None => Ok(base.filter(|base| base.is_absolute())),
+    }
+}
+
 fn powershell(event: &Value) -> bool {
     let input = &event["tool_input"];
     let explicit = input["shell"]
@@ -392,6 +374,13 @@ fn rewrite_output(event: &Value, replaced: &str) -> Value {
 /// The independent policy refusals for one event.
 /// Client and subagent events share the same command policy.
 fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
+    policy_refusals_with(event, prose::Bundle::installed)
+}
+
+fn policy_refusals_with(
+    event: &str,
+    bundle: impl FnOnce() -> Result<prose::Bundle>,
+) -> Result<Vec<Blocked>> {
     use skill_ops::incident_rules::Source::GateRefusal;
 
     let event: Value = serde_json::from_str(event).context("PreToolUse event is not JSON")?;
@@ -404,6 +393,7 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
     }
     let command = shell_command(&event)?;
     let command = command.as_str();
+    let directory = execution_directory(&event)?;
     let session = event["session_id"]
         .as_str()
         .filter(|value| !value.is_empty())
@@ -440,7 +430,7 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
     }
     let written = match inspect(command) {
         Verdict::Refuse(crate::shell_write_rules::Reason::FileRedirect) => {
-            let ignored = ignored_targets(command, event["cwd"].as_str().map(Path::new));
+            let ignored = ignored_targets(command, directory.as_deref());
             crate::shell_write_rules::inspect_except(
                 command,
                 &ignored.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -460,24 +450,24 @@ fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
             ),
         ));
     }
-    if let Some(message) = attribution_refusal(command, event["cwd"].as_str().map(Path::new)) {
-        findings.push(blocked("hook.attribution", GateRefusal, message));
-    }
     let shell = if powershell(&event) {
         crate::legacy::Shell::PowerShell
     } else {
         crate::legacy::Shell::Bash
     };
-    let legacy =
-        crate::legacy::findings_in_shell(command, event["cwd"].as_str().map(Path::new), shell)
-            .unwrap_or_else(|error| crate::legacy::Findings {
-                refusals: Vec::new(),
-                unavailable: vec![format!("{error:#}")],
-            });
+    let legacy = crate::legacy::findings_in_shell(command, directory.as_deref(), shell)
+        .unwrap_or_else(|error| crate::legacy::Findings {
+            refusals: Vec::new(),
+            unavailable: vec![format!("{error:#}")],
+            ..crate::legacy::Findings::default()
+        });
+    for message in github::refusals(&legacy.bodies, bundle) {
+        findings.push(blocked("hook.prose", GateRefusal, message));
+    }
     for message in legacy.refusals {
         findings.push(blocked(LEGACY, GateRefusal, message));
     }
-    for message in crate::lint_hook::scripts(command, event["cwd"].as_str().map(Path::new)) {
+    for message in crate::lint_hook::scripts(command, directory.as_deref()) {
         findings.push(blocked("hook.lint", GateRefusal, message));
     }
     for message in legacy.unavailable {
@@ -503,7 +493,16 @@ fn combined(findings: Vec<Blocked>) -> Option<Blocked> {
 
 #[cfg(test)]
 pub(crate) fn refusal(event: &str) -> Result<Option<Blocked>> {
-    Ok(combined(policy_refusals(event)?))
+    Ok(combined(policy_refusals_with(event, test_bundle)?))
+}
+
+#[cfg(test)]
+fn test_bundle() -> Result<prose::Bundle> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .context("dotfiles source root is unavailable")?;
+    prose::Bundle::source(root)
 }
 
 fn validate_command(
@@ -738,7 +737,12 @@ pub fn run(rewrite: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dotguard::provenance_rules;
     use serde_json::json;
+
+    fn policy_refusals(event: &str) -> Result<Vec<Blocked>> {
+        super::policy_refusals_with(event, super::test_bundle)
+    }
 
     fn bash(command: &str) -> String {
         json!({"tool_name": "Bash", "tool_input": {"command": command}}).to_string()
@@ -764,6 +768,204 @@ mod tests {
             .unwrap()
             .unwrap_or_else(|| panic!("admitted: {command}"))
             .message
+    }
+
+    #[test]
+    fn github_close_comments_refuse_two_sentences_on_one_line() -> Result<()> {
+        for command in [
+            "gh issue close 3 --comment 'The check passed. The issue is complete.'",
+            "gh issue close 3 -c 'The check passed. The issue is complete.'",
+            "gh pr close 3 --comment='The check passed. The issue is complete.'",
+        ] {
+            let findings = policy_refusals(&bash(command))?;
+            assert!(
+                findings.iter().any(|finding| finding.rule == "hook.prose"),
+                "admitted prose without a sentence break: {command}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn github_close_comments_admit_one_sentence_per_line() -> Result<()> {
+        for command in [
+            "gh issue close 3 --comment 'The check passed.\nThe issue is complete.'",
+            "gh issue close 3 -c 'The check passed.\nThe issue is complete.'",
+            "gh pr close 3 --comment='The check passed.\nThe issue is complete.'",
+        ] {
+            let findings = policy_refusals(&bash(command))?;
+            assert!(
+                findings.is_empty(),
+                "{command}: {}",
+                findings
+                    .iter()
+                    .map(|finding| finding.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn github_body_inputs_refuse_unreadable_files_and_unresolved_values() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        for command in [
+            "gh issue comment 3 --body-file missing.md",
+            "gh api repos/a/b/issues/3 --input missing.json",
+            "gh issue comment 3 --body \"$BODY\"",
+            "gh issue comment 3 --body-file -",
+        ] {
+            let event = json!({
+                "tool_name": "Bash", "cwd": directory.path(),
+                "tool_input": {"command": command}
+            })
+            .to_string();
+            let findings = policy_refusals(&event)?;
+            assert!(
+                findings.iter().any(|finding| finding.rule == "hook.prose"
+                    && finding.message.contains("pr-workflow")),
+                "admitted an uninspected body: {command}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn github_prose_checks_every_nested_json_body() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("review.json");
+        let payload = json!({
+            "body": "The review is complete.",
+            "comments": [{
+                "path": "src/lib.rs", "line": 1,
+                "body": "The check passed. The issue is complete."
+            }]
+        });
+        std::fs::write(&path, serde_json::to_vec(&payload)?)?;
+        let event = json!({
+            "tool_name": "Bash", "cwd": directory.path(),
+            "tool_input": {"command": "gh api repos/a/b/pulls/3/reviews --input review.json"}
+        })
+        .to_string();
+        let findings = policy_refusals(&event)?;
+        assert!(
+            findings.iter().any(|finding| finding.rule == "hook.prose"),
+            "admitted a nested body without a sentence break"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn github_unknown_aliases_have_no_checked_body_contract() -> Result<()> {
+        let findings = policy_refusals(&bash("gh publish-saved-body"))?;
+        assert!(
+            findings.iter().any(|finding| finding.rule == "hook.prose"),
+            "admitted an alias with an uninspected body"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn github_file_bodies_follow_the_tool_workdir() -> Result<()> {
+        let session = tempfile::tempdir()?;
+        let execution = tempfile::tempdir()?;
+        std::fs::write(session.path().join("body.md"), "The check passed.\n")?;
+        std::fs::write(
+            execution.path().join("body.md"),
+            "The check passed. The issue is complete.\n",
+        )?;
+        let event = json!({
+            "tool_name": "exec_command", "cwd": session.path(),
+            "tool_input": {
+                "cmd": "gh issue comment 3 --body-file body.md",
+                "workdir": execution.path()
+            }
+        })
+        .to_string();
+        let findings = policy_refusals(&event)?;
+        assert!(
+            findings.iter().any(|finding| finding.rule == "hook.prose"),
+            "checked the session directory instead of the execution directory"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn github_opaque_inputs_never_claim_to_have_checked_body_content() -> Result<()> {
+        for command in [
+            "gh pr create --body \"$(printf 'The checks passed.')\"",
+            "printf 'The checks passed.' | gh issue comment 3 -F -",
+            "gh pr create --body-file missing.md",
+            "bash <<EOF\n$PUBLISH\nEOF",
+        ] {
+            let findings = policy_refusals(&bash(command))?;
+            assert!(
+                findings
+                    .iter()
+                    .any(|finding| finding.message.contains("unavailable")
+                        || finding.message.contains("unresolved")
+                        || finding.message.contains("could not be inspected")
+                        || finding.message.contains("no known execution directory")),
+                "{command}"
+            );
+            assert!(
+                !findings
+                    .iter()
+                    .any(|finding| finding.message.contains("AI attribution")),
+                "{command}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn github_prose_inspection_survives_legacy_script_exceptions() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let excepted = "home/.chezmoitemplates/partials/install-mise-sh";
+        std::fs::create_dir_all(directory.path().join("home/.chezmoitemplates/partials"))?;
+        for path in ["publish.sh", excepted] {
+            std::fs::write(
+                directory.path().join(path),
+                "gh issue close 3 --comment 'The check passed. The issue is complete.'\n",
+            )?;
+        }
+        for command in [
+            "./publish.sh".to_owned(),
+            "bash publish.sh".to_owned(),
+            "DOTFILES_LEGACY_BYPASS='publish.sh: upstream script' bash publish.sh".to_owned(),
+            format!("sh {excepted}"),
+        ] {
+            let event = json!({"tool_name":"Bash", "cwd":directory.path(), "tool_input":{"command":command}}).to_string();
+            assert!(
+                policy_refusals(&event)?
+                    .iter()
+                    .any(|finding| finding.rule == "hook.prose"
+                        && finding.message.contains("SentencePerLine")),
+                "{event}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn github_file_reads_require_a_stable_execution_context() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(directory.path().join("body.md"), "The check passed.\n")?;
+        for command in [
+            "cd elsewhere && gh issue comment 3 -F body.md",
+            "gh issue comment 3 -F body.md > body.md",
+        ] {
+            let event = json!({"tool_name":"Bash", "cwd":directory.path(), "tool_input":{"command":command}}).to_string();
+            assert!(
+                policy_refusals(&event)?
+                    .iter()
+                    .any(|finding| finding.rule == "hook.prose"
+                        && finding.message.contains("uncertain execution context")),
+                "{event}"
+            );
+        }
+        Ok(())
     }
 
     #[test]
@@ -1329,9 +1531,7 @@ mod tests {
                 "gh pr review 3 --approve --body \"{}\"",
                 "gh api repos/a/b/issues/3/comments -f body=\"{}\"",
                 "gh api repos/a/b/issues/3 -X PATCH -F body=\"{}\"",
-                "gh pr create --body \"$(cat <<'EOF'\n{}\nEOF\n)\"",
                 "gh pr create --body-file - <<'EOF'\nBody.\n{}\nEOF",
-                "bat --plain <<'EOF' | gh issue comment 3 -F -\n{}\nEOF",
                 "env -u SSH_AUTH_SOCK gh pr create -R a/b --body \"{}\"",
             ] {
                 let command = template.replace("{}", form);
@@ -1380,7 +1580,6 @@ mod tests {
                 "gh pr comment 3 --body \"{}\"",
                 "gh api repos/a/b/issues/3/comments -f body=\"{}\"",
                 "gh pr create --body-file - <<'EOF'\n{}\nEOF",
-                "bat --plain <<'EOF' | gh issue comment 3 -F -\n{}\nEOF",
             ] {
                 let command = template.replace("{}", text);
                 assert_eq!(
@@ -1444,7 +1643,6 @@ mod tests {
                 "gh pr create --body-file body.md",
                 "gh api repos/a/b/issues/3/comments -F body=@body.md",
                 "gh api repos/a/b/issues/3 -X PATCH --input payload.json",
-                "gh pr create --body-file missing.md",
             ] {
                 assert_eq!(
                     refusal(&event(command))

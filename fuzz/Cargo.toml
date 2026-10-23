@@ -154,3 +154,10 @@ path = "fuzz_targets/generated_attributes.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "github_bodies"
+path = "fuzz_targets/github_bodies.rs"
+test = false
+doc = false
+bench = false

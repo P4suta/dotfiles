@@ -127,6 +127,8 @@ struct Redirect {
     span: Span,
     op: String,
     hdoc: Option<Span>,
+    word: Option<Span>,
+    n: Option<Span>,
 }
 
 pub(super) enum Input<'a> {
@@ -135,6 +137,26 @@ pub(super) enum Input<'a> {
 }
 
 impl Redirect {
+    fn literal_stdin(&self, source: &str, input: &Input<'_>) -> Result<bool> {
+        if let Some(descriptor) = &self.n
+            && descriptor.text(source)? != "0"
+        {
+            return Ok(false);
+        }
+        let Input::Script(body) = input else {
+            return Ok(false);
+        };
+        let Some(word) = &self.word else {
+            return Ok(false);
+        };
+        ensure!(
+            self.span.pos.offset <= word.pos.offset && word.end.offset <= self.span.end.offset,
+            "shell heredoc delimiter lies outside its redirect"
+        );
+        let delimiter = word.text(source)?;
+        Ok(delimiter.contains(['\'', '"', '\\']) || !body.contains(['$', '`', '\\']))
+    }
+
     fn input<'a>(&self, source: &'a str) -> Result<Option<Input<'a>>> {
         match self.op.as_str() {
             "<<" | "<<-" => {
@@ -179,6 +201,8 @@ pub(super) struct Invocation<'a> {
     offset: usize,
     words: Vec<Word<'a>>,
     inputs: Vec<Input<'a>>,
+    literal_stdin: Option<String>,
+    file_inputs_safe: bool,
 }
 
 impl<'a> Invocation<'a> {
@@ -213,16 +237,32 @@ impl<'a> Invocation<'a> {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        let mut inputs = Vec::new();
+        let mut literal_stdin = None;
+        let mut uncertain_stdin = false;
+        for redirect in redirects {
+            if let Some(input) = redirect.input(source)? {
+                if redirect.literal_stdin(source, &input)?
+                    && let Input::Script(body) = &input
+                {
+                    literal_stdin = Some(body.to_string());
+                }
+                inputs.push(input);
+            } else if let Some(descriptor) = &redirect.n
+                && descriptor.text(source)? == "0"
+            {
+                uncertain_stdin = true;
+            }
+        }
+        if inputs.len() != 1 || uncertain_stdin {
+            literal_stdin = None;
+        }
         Ok(Self {
             offset: span.pos.offset,
             words,
-            inputs: redirects
-                .iter()
-                .map(|redirect| redirect.input(source))
-                .collect::<Result<Vec<_>>>()?
-                .into_iter()
-                .flatten()
-                .collect(),
+            inputs,
+            literal_stdin,
+            file_inputs_safe: redirects.is_empty(),
         })
     }
 
@@ -241,11 +281,21 @@ impl<'a> Invocation<'a> {
                 })
                 .collect(),
             inputs: Vec::new(),
+            literal_stdin: None,
+            file_inputs_safe: false,
         }
     }
 
     pub(super) fn inputs(&self) -> &[Input<'_>] {
         &self.inputs
+    }
+
+    pub(super) fn literal_stdin(&self) -> Option<&str> {
+        self.literal_stdin.as_deref()
+    }
+
+    pub(super) const fn file_inputs_safe(&self) -> bool {
+        self.file_inputs_safe
     }
 
     pub(super) fn arguments(&self, start: usize) -> Result<Vec<Argument<'_>>> {
@@ -426,6 +476,35 @@ mod tests {
                 panic!("stdin script missing");
             };
             assert_eq!(body, expected);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn literal_stdin_requires_one_known_standard_input_heredoc() -> Result<()> {
+        for (source, expected) in [
+            (
+                "gh pr comment 3 -F - <<'EOF'\n$literal \\ text\nEOF",
+                Some("$literal \\ text\n"),
+            ),
+            (
+                "gh pr comment 3 -F - <<-EOF\n\tText.\n\tEOF",
+                Some("Text.\n"),
+            ),
+            ("gh pr comment 3 -F - <<EOF\nText.\nEOF", Some("Text.\n")),
+            ("gh pr comment 3 -F - <<EOF\n$expanded\nEOF", None),
+            ("gh pr comment 3 -F - <<EOF\nback\\slash\nEOF", None),
+            ("gh pr comment 3 -F - 3<<'EOF'\nText.\nEOF", None),
+            ("gh pr comment 3 -F - <<'EOF' 0<&3\nText.\nEOF", None),
+            ("gh pr comment 3 -F - <<'EOF' 0>out\nText.\nEOF", None),
+            (
+                "gh pr comment 3 -F - <<'EOF' <<'END'\nOne.\nEOF\nTwo.\nEND",
+                None,
+            ),
+            ("gh pr comment 3 -F - <<< 'Text.'", None),
+        ] {
+            let calls = parse(source)?;
+            assert_eq!(calls[0].literal_stdin(), expected, "{source}");
         }
         Ok(())
     }
