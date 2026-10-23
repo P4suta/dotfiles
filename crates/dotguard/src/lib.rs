@@ -15,6 +15,8 @@ pub mod bypass;
 pub mod clock;
 pub mod git_wrapper;
 pub mod gitargv;
+#[cfg(unix)]
+pub mod herdr;
 pub mod lang;
 pub mod locate;
 pub mod postcommit;

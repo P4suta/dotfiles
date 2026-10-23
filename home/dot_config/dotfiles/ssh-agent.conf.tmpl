@@ -1,0 +1,11 @@
+{{- $agent := includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir ".local/bin/herdr-agent") -}}
+{{- $agent = $agent | replace "\\" "\\\\" | replace "\"" "\\\"" | replace "%" "%%" -}}
+# OpenSSH evaluates these tests for every connection, including daemon requests.
+Match exec "{{ $agent }} route explicit"
+  IdentityAgent $DOTFILES_SSH_AUTH_SOCK
+Match exec "{{ $agent }} route herdr"
+  IdentityAgent "~/.local/state/herdr/agent.sock"
+Match exec "{{ $agent }} route inherited"
+  IdentityAgent SSH_AUTH_SOCK
+Host *
+  IdentityAgent {{ or (dig "ssh_signing" "socket" "" .) (index .ssh_signing (printf "%s_socket" .profile)) | quote }}

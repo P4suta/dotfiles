@@ -1589,6 +1589,34 @@ y = 2
 }
 
 #[test]
+fn herdr_ssh_merging_preserves_host_directives_and_order() -> anyhow::Result<()> {
+    let current = "Include ~/.orbstack/ssh/config\nHost fixture\n  HostName fixture.invalid\nHost *\n  IdentityAgent /old/agent.sock\n";
+    let include = "Include ~/.config/dotfiles/ssh-agent.conf\n";
+    let rendered = current.replace("Host fixture", &format!("{include}Host fixture"));
+    assert!(profiles::keeps_host_keys(
+        ".ssh/config",
+        current,
+        &rendered
+    )?);
+    assert!(!profiles::keeps_host_keys(
+        ".ssh/config",
+        current,
+        &rendered.replace("fixture.invalid", "changed.invalid")
+    )?);
+    assert!(!profiles::keeps_host_keys(
+        ".ssh/config",
+        current,
+        &rendered.replace("  HostName fixture.invalid\n", "")
+    )?);
+    assert!(!profiles::keeps_host_keys(
+        ".ssh/config",
+        current,
+        &format!("{include}{rendered}")
+    )?);
+    Ok(())
+}
+
+#[test]
 fn the_dropped_host_key_refusal_names_the_cause_and_a_runnable_next_action() {
     let message = profiles::dropped_host_key_refusal("wsl", ".claude/settings.json");
     let (cause, action) = message.split_once('\n').unwrap();

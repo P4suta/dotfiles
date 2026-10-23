@@ -175,6 +175,7 @@ fn render_merged_with_mode(
         ".chezmoitemplates/partials/skill_ops_experimental",
         ".chezmoitemplates/partials/claude_settings",
         ".chezmoitemplates/partials/reply_language",
+        ".chezmoidata/signing.toml",
     ] {
         let copy = source.join(file);
         std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
@@ -221,6 +222,74 @@ fn render_merged_with_mode(
     std::fs::write(&path, &first).unwrap();
     assert_eq!(render(), first, "reapplication must be idempotent");
     first
+}
+
+#[test]
+fn herdr_ssh_include_preserves_host_configuration_and_is_idempotent() {
+    let host = "# OrbStack must stay first.\nInclude ~/.orbstack/ssh/config\n\nHost fixture\n  HostName fixture.invalid\nHost *\n  IdentityAgent /old/agent.sock\n";
+    let include = "Include ~/.config/dotfiles/ssh-agent.conf";
+    for profile in ["mac", "linux"] {
+        let rendered = render_merged(profile, "dot_ssh/modify_config", ".ssh/config", host);
+        assert_eq!(rendered.matches(include).count(), 1);
+        assert!(
+            rendered.starts_with("# OrbStack must stay first.\nInclude ~/.orbstack/ssh/config\n")
+        );
+        assert!(rendered.find(include).unwrap() < rendered.find("Host fixture").unwrap());
+        assert_eq!(rendered.replace(&format!("{include}\n"), ""), host);
+    }
+}
+
+#[test]
+fn herdr_ssh_routing_precedes_global_agent_settings_and_other_includes() {
+    for host in [
+        "IdentityAgent /dead/agent.sock\nHost fixture\n",
+        "Include ~/.ssh/other.conf\nHost fixture\n",
+    ] {
+        let rendered = render_merged("linux", "dot_ssh/modify_config", ".ssh/config", host);
+        assert_eq!(
+            rendered,
+            format!("Include ~/.config/dotfiles/ssh-agent.conf\n{host}")
+        );
+    }
+}
+
+#[test]
+fn herdr_codex_configuration_keeps_host_state_and_replaces_stale_command_overrides() {
+    let host = "model = \"owner-model\"\n[projects.\"private-project\"]\ntrust_level = \"trusted\"\n[shell_environment_policy.set]\nGIT_SSH_COMMAND = \"ssh -o IdentityAgent=/dead/agent.sock\"\nSSH_AUTH_SOCK = \"/dead/agent.sock\"\nOWNER_SETTING = \"preserved\"\n";
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered = render_merged(
+            profile,
+            "dot_codex/modify_config.toml",
+            ".codex/config.toml",
+            host,
+        );
+        let config: toml::Value = toml::from_str(&rendered).unwrap();
+        assert_eq!(config["model"].as_str(), Some("owner-model"));
+        assert_eq!(
+            config["projects"]["private-project"]["trust_level"].as_str(),
+            Some("trusted")
+        );
+        let set = &config["shell_environment_policy"]["set"];
+        assert_eq!(set["OWNER_SETTING"].as_str(), Some("preserved"));
+        if matches!(profile, "mac" | "linux") {
+            assert_eq!(set["GIT_SSH_COMMAND"].as_str(), Some("/usr/bin/ssh"));
+            assert!(
+                set["SSH_AUTH_SOCK"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("agent.sock")
+            );
+            assert_ne!(set["SSH_AUTH_SOCK"].as_str(), Some("/dead/agent.sock"));
+        } else {
+            assert_eq!(
+                set["GIT_SSH_COMMAND"].as_str(),
+                Some("ssh -o IdentityAgent=/dead/agent.sock")
+            );
+            assert_eq!(set["SSH_AUTH_SOCK"].as_str(), Some("/dead/agent.sock"));
+        }
+        assert_eq!(config["features"]["memories"].as_bool(), Some(false));
+        assert!(config["notify"].is_array());
+    }
 }
 
 #[test]

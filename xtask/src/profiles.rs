@@ -265,6 +265,11 @@ pub fn fixture(profile: Profile, root: &Path, destination: &Path) -> Result<Valu
 
 /// A host file with one key no template sets, standing in for a key a client writes at run time.
 fn with_host_key(target: &str, contents: &str) -> Result<String> {
+    if matches!(target, ".ssh/config" | ".ssh\\config") {
+        return Ok(format!(
+            "{contents}\nHost dotfiles-host-key\n  HostName fixture.invalid\n"
+        ));
+    }
     match Path::new(target).extension().and_then(|e| e.to_str()) {
         Some("json") => {
             let mut value: Value = serde_json::from_str(contents)?;

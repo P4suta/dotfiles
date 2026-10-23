@@ -45,6 +45,7 @@ pub mod freshness_rules;
 pub mod gate_rules;
 pub mod git_ref_rules;
 pub mod guard_rules;
+pub mod herdr_rules;
 pub mod hook_failure_rules;
 pub mod hook_rules;
 pub mod host_setup_rules;

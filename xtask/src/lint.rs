@@ -89,7 +89,17 @@ impl Stage {
         match self {
             Self::Encoding | Self::Typos => true,
             Self::Rustfmt => extension == "rs",
-            Self::Taplo => extension == "toml",
+            Self::Taplo => {
+                extension == "toml"
+                    && dotfiles::lint_hook_rules::classify(
+                        path,
+                        std::str::from_utf8(head)
+                            .unwrap_or_default()
+                            .lines()
+                            .next()
+                            .unwrap_or_default(),
+                    ) != dotfiles::lint_hook_rules::FileType::Other
+            }
             Self::Yamllint => matches!(extension, "yml" | "yaml") || path == ".yamllint",
             Self::Shellcheck => {
                 extension != "tmpl"
@@ -1207,6 +1217,15 @@ exit 1
         assert!(Stage::Shellcheck.covers("a.sh", b""));
         assert!(!Stage::Shellcheck.covers("a.sh.tmpl", b"#!/bin/sh\n"));
         assert!(!Stage::Shellcheck.covers("notes.txt", b"plain"));
+    }
+
+    #[test]
+    fn the_toml_stage_checks_rendered_modify_templates_instead_of_their_source() {
+        let marker = b"{{- /* chezmoi:modify-template */ -}}\n";
+        assert!(!Stage::Taplo.covers("home/dot_codex/modify_config.toml", marker));
+        assert!(Stage::Taplo.covers("config.toml", marker));
+        assert!(Stage::Taplo.covers("modify_config.toml", b"invalid TOML"));
+        assert!(Stage::Taplo.covers("modify_config.toml", b"[features]\n"));
     }
 
     #[test]

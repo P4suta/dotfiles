@@ -5,11 +5,18 @@ use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
-use std::time::Duration;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 /// How long the Herdr server gets to report that it runs: fifty checks a tenth of a second apart.
+#[cfg(unix)]
 const SERVER_CHECKS: u32 = 50;
+#[cfg(unix)]
 const SERVER_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(unix)]
+const SERVER_START_LIMIT: Duration = Duration::from_secs(5);
+#[cfg(unix)]
+const SSH_PROGRAM: &str = "/usr/bin/ssh";
 
 /// The local sudo authentication file macOS reads beside its own, and the fingerprint module it names.
 const SUDO_LOCAL: &str = "/etc/pam.d/sudo_local";
@@ -45,10 +52,20 @@ fn execute(mut command: Command) -> Result<ExitStatus> {
 /// Builds the session a terminal window runs, choosing Herdr with its server started, else Nushell, else a login shell.
 fn child_command(native: &mut Real, session: Session, arguments: &[OsString]) -> Result<Command> {
     if matches!(session, Session::Herdr) && native.available(Tool::Herdr) {
-        if cfg!(target_os = "macos") {
+        #[cfg(unix)]
+        let managed_agent = matches!(
+            crate::profiles::native_profile()?,
+            crate::profile_rules::Profile::Mac | crate::profile_rules::Profile::Linux
+        );
+        #[cfg(unix)]
+        if managed_agent {
             start_herdr_server(native)?;
         }
         let mut command = native.command(Tool::Herdr);
+        #[cfg(unix)]
+        if managed_agent {
+            command.env("GIT_SSH_COMMAND", SSH_PROGRAM);
+        }
         command.args(arguments);
         return Ok(command);
     }
@@ -70,34 +87,42 @@ fn child_command(native: &mut Real, session: Session, arguments: &[OsString]) ->
 }
 
 /// Starts the Herdr server with its SSH agent unless it already runs, waiting up to five seconds for it.
+#[cfg(unix)]
 fn start_herdr_server(native: &mut Real) -> Result<()> {
+    let (_guard, decision) = crate::herdr::launch_guard(&native.home)?;
     if native.available(Tool::HerdrAgent) {
         platform::cleanup::report(
             native.run(Tool::HerdrAgent, &args(&["ensure"])),
             "start the Herdr SSH agent",
         );
     }
-    let running = |native: &mut Real| -> Result<bool> {
-        let server = native.run(Tool::Herdr, &args(&["status", "server"]))?;
-        Ok(server.success && String::from_utf8_lossy(&server.bytes).contains("status: running"))
-    };
-    if running(native)? {
+    if decision == crate::herdr_rules::Launch::Attach {
         return Ok(());
     }
     native
         .command(Tool::Nohup)
         .args(["herdr", "server"])
+        .env("GIT_SSH_COMMAND", SSH_PROGRAM)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
+    let deadline = Instant::now() + SERVER_START_LIMIT;
     for _ in 0..SERVER_CHECKS {
-        if running(native)? {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
             break;
         }
-        std::thread::sleep(SERVER_CHECK_INTERVAL);
+        if crate::herdr::server_running(&native.home, remaining)? {
+            return Ok(());
+        }
+        std::thread::sleep(
+            SERVER_CHECK_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+        );
     }
-    Ok(())
+    anyhow::bail!(
+        "Herdr server did not become responsive; run `dotfiles herdr health`; no second instance was started"
+    )
 }
 
 /// Opens a terminal window that runs the session, or runs the session itself when invoked as the window's child.

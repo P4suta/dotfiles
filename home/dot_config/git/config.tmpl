@@ -9,6 +9,8 @@
 {{- if eq .profile "wsl" }}
 	# WSL reaches the 1Password SSH agent through the Windows OpenSSH client.
 	sshCommand = ssh.exe
+{{- else if has .profile (list "mac" "linux") }}
+	sshCommand = /usr/bin/ssh
 {{- end }}
 	# Every repository normalizes text to LF unless its own attributes say otherwise.
 	attributesFile = ~/.config/git/attributes

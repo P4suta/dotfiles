@@ -42,7 +42,7 @@ const UNIX: &[Profile] = &[Profile::Mac, Profile::Linux, Profile::Wsl];
 const MAC_AND_LINUX: &[Profile] = &[Profile::Mac, Profile::Linux];
 
 /// The jobs, in registration order.
-pub const JOBS: [Job; 6] = [
+pub const JOBS: [Job; 7] = [
     // Fast-forwards and applies the merged main, converges tools to their reviewed pins, and cleans finished domyjob jobs.
     Job {
         name: "tools-upgrade",
@@ -79,6 +79,12 @@ pub const JOBS: [Job; 6] = [
     Job {
         name: "desktop-refresh",
         systemd: "dotfiles-desktop-refresh.timer",
+        profiles: MAC_AND_LINUX,
+    },
+    // WSL and Windows use Windows OpenSSH and the password manager bridge.
+    Job {
+        name: "herdr-agent",
+        systemd: "herdr-agent.service",
         profiles: MAC_AND_LINUX,
     },
 ];

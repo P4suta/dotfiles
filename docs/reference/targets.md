@@ -19,6 +19,7 @@ A target missing from the first table reaches every profile.
 | `.config/dev-reaper/config` | unix | mac, linux, wsl |
 | `.config/dotfiles-nix` | linux | linux |
 | `.config/dotfiles/signing.toml` | desktop | mac, linux |
+| `.config/dotfiles/ssh-agent.conf` | desktop | mac, linux |
 | `.config/fcitx5` | linux | linux |
 | `.config/fcitx5/config` | linux | linux |
 | `.config/fcitx5/profile` | linux | linux |
@@ -27,8 +28,8 @@ A target missing from the first table reaches every profile.
 | `.config/ghostty` | mac | mac |
 | `.config/ghostty/config` | mac | mac |
 | `.config/herdr` | desktop | mac, linux |
-| `.config/herdr-agent` | mac | mac |
-| `.config/herdr-agent/keys` | mac | mac |
+| `.config/herdr-agent` | desktop | mac, linux |
+| `.config/herdr-agent/keys` | desktop | mac, linux |
 | `.config/herdr/config.toml` | desktop | mac, linux |
 | `.config/homebrew` | mac | mac |
 | `.config/homebrew/Brewfile` | mac | mac |
@@ -58,6 +59,7 @@ A target missing from the first table reaches every profile.
 | `.config/systemd/user/dev-reaper.timer` | systemd | linux, wsl |
 | `.config/systemd/user/dotfiles-desktop-refresh.service` | linux | linux |
 | `.config/systemd/user/dotfiles-desktop-refresh.timer` | linux | linux |
+| `.config/systemd/user/herdr-agent.service` | linux | linux |
 | `.config/systemd/user/session-reaper.service` | systemd | linux, wsl |
 | `.config/systemd/user/session-reaper.timer` | systemd | linux, wsl |
 | `.config/systemd/user/storage-scout.service` | linux | linux |
@@ -86,6 +88,8 @@ A target missing from the first table reaches every profile.
 | `.local/share/applications/kitty-herdr.desktop` | linux | linux |
 | `.local/share/applications/kitty-nu.desktop` | linux | linux |
 | `.profile` | linux | linux |
+| `.ssh` | desktop | mac, linux |
+| `.ssh/config` | desktop | mac, linux |
 | `.zprofile` | mac | mac |
 | `.zshrc` | mac | mac |
 | `AppData` | windows | windows |
@@ -99,6 +103,7 @@ A target missing from the first table reaches every profile.
 | `Library/LaunchAgents/dev.dotfiles.desktop-refresh.plist` | mac | mac |
 | `Library/LaunchAgents/dev.dotfiles.dev-cleanup.plist` | mac | mac |
 | `Library/LaunchAgents/dev.dotfiles.dev-reaper.plist` | mac | mac |
+| `Library/LaunchAgents/dev.dotfiles.herdr-agent.plist` | mac | mac |
 | `Library/LaunchAgents/dev.dotfiles.session-reaper.plist` | mac | mac |
 | `Library/LaunchAgents/dev.dotfiles.storage-scout.plist` | mac | mac |
 | `Library/LaunchAgents/dev.dotfiles.tools-upgrade.plist` | mac | mac |
