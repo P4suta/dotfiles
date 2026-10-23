@@ -62,6 +62,25 @@ pub fn verify_push(
 /// Returns an error when evidence is incomplete or empty, the harness set differs from `expected`, or a completed result contradicts `counterexample`.
 /// A normal run must pass every proof with an assertion, two satisfied cover witnesses, and every property verified, and a counterexample run must fail every harness on an assertion.
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
+    validate_results_reported(value, expected, counterexample, |result, verdict| {
+        let outcome = match verdict {
+            proof_budget_rules::Verdict::Proven => "proved",
+            proof_budget_rules::Verdict::Failed => "refuted",
+            proof_budget_rules::Verdict::Inconclusive => "incomplete",
+        };
+        println!("Kani {}: {outcome}", result["harness_id"]);
+        if let Some(millis) = result["duration_ms"].as_u64() {
+            println!("Kani {}: {millis} ms (advisory)", result["harness_id"]);
+        }
+    })
+}
+
+fn validate_results_reported(
+    value: &Value,
+    expected: &[&str],
+    counterexample: bool,
+    mut report: impl FnMut(&Value, proof_budget_rules::Verdict),
+) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
     let complete = summary["status"] == "completed"
         && summary["executed"].as_u64() == Some(expected.len() as u64)
@@ -89,60 +108,33 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
         results.len() == expected.len() && names == expected.iter().copied().collect(),
         "unexpected, missing, or duplicate proof harness"
     );
-    for result in results {
-        let properties = result["checks"].as_array().filter(|checks| {
-            !checks.is_empty()
-                && checks.iter().all(|check| {
-                    matches!(
-                        check["status"].as_str(),
-                        Some("Success" | "Failure" | "Unreachable" | "Satisfied" | "Unsatisfiable")
-                    )
-                })
-        });
-        let completed_result = match (result["status"].as_str(), properties) {
-            (Some("Success"), Some(_)) => Some(true),
-            (Some("Failure"), Some(checks))
-                if checks.iter().any(|check| check["status"] == "Failure") =>
-            {
-                Some(false)
-            }
-            _ => None,
-        };
-        let verdict = proof_budget_rules::verdict(completed_result);
-        if verdict == proof_budget_rules::Verdict::Inconclusive {
-            report_incomplete(expected);
-        }
-        ensure!(
-            verdict != proof_budget_rules::Verdict::Inconclusive,
-            "proof did not complete: {} (missing evidence, inconclusive)",
-            result["harness_id"]
-        );
-        if let Some(millis) = result["duration_ms"].as_u64() {
-            println!("Kani {}: {millis} ms (advisory)", result["harness_id"]);
-        }
-    }
     let mut checks = Checks::default();
-    if counterexample {
-        checks.run("counterexample summary", || {
-            ensure!(
-                summary["failed"] == expected.len(),
-                "counterexample was not rejected"
-            );
-            Ok(())
-        });
-    } else {
-        checks.run("production summary", || {
-            ensure!(
-                summary["failed"] == 0 && summary["successful"] == expected.len(),
-                "required proof failed"
-            );
-            Ok(())
-        });
+    if results
+        .iter()
+        .all(|result| completed_verdict(result) != proof_budget_rules::Verdict::Inconclusive)
+    {
+        if counterexample {
+            checks.run("counterexample summary", || {
+                ensure!(
+                    summary["failed"] == expected.len(),
+                    "counterexample was not rejected"
+                );
+                Ok(())
+            });
+        } else {
+            checks.run("production summary", || {
+                ensure!(
+                    summary["failed"] == 0 && summary["successful"] == expected.len(),
+                    "required proof failed"
+                );
+                Ok(())
+            });
+        }
     }
     for result in results {
         let name = result["harness_id"].as_str().unwrap_or_default();
         checks.run(&format!("harness {name}"), || {
-            validate_reported_result(result, counterexample)
+            validate_reported_result(result, counterexample, &mut report)
         });
     }
     checks.finish()
@@ -154,20 +146,56 @@ fn report_incomplete(expected: &[&str]) {
     }
 }
 
-fn validate_reported_result(result: &Value, counterexample: bool) -> Result<()> {
-    let validation = if counterexample {
-        validate_counterexample(result)
-    } else {
-        validate_proof(result)
+fn completed_verdict(result: &Value) -> proof_budget_rules::Verdict {
+    let properties = result["checks"].as_array().filter(|checks| {
+        !checks.is_empty()
+            && checks.iter().all(|check| {
+                matches!(
+                    check["status"].as_str(),
+                    Some("Success" | "Failure" | "Unreachable" | "Satisfied" | "Unsatisfiable")
+                )
+            })
+    });
+    let completed = match (result["status"].as_str(), properties) {
+        (Some("Success"), Some(_)) => Some(true),
+        (Some("Failure"), Some(checks))
+            if checks.iter().any(|check| check["status"] == "Failure") =>
+        {
+            Some(false)
+        }
+        _ => None,
     };
+    proof_budget_rules::verdict(completed)
+}
+
+fn validate_reported_result(
+    result: &Value,
+    counterexample: bool,
+    report: &mut impl FnMut(&Value, proof_budget_rules::Verdict),
+) -> Result<()> {
+    let verdict = completed_verdict(result);
+    let validation = (|| {
+        ensure!(
+            verdict != proof_budget_rules::Verdict::Inconclusive,
+            "proof did not complete: {} (missing evidence, inconclusive)",
+            result["harness_id"]
+        );
+        if counterexample {
+            validate_counterexample(result)
+        } else {
+            validate_proof(result)
+        }
+    })();
     let outcome = if validation.is_ok() {
-        if counterexample { "refuted" } else { "proved" }
-    } else if result["status"] == "Failure" && validate_counterexample(result).is_ok() {
-        "refuted"
+        proof_budget_rules::verdict(Some(!counterexample))
+    } else if verdict == proof_budget_rules::Verdict::Failed
+        && validate_counterexample(result).is_ok()
+    {
+        proof_budget_rules::Verdict::Failed
     } else {
-        "incomplete"
+        proof_budget_rules::Verdict::Inconclusive
     };
-    println!("Kani {}: {outcome}", result["harness_id"]);
+    report(result, outcome);
     validation
 }
 
@@ -3066,6 +3094,52 @@ fn execute_rules(prepared: PreparedRules) -> Result<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_incomplete_harness_preserves_every_individual_outcome() {
+        use proof_budget_rules::Verdict;
+
+        let mut value = serde_json::json!({"verification_results": {
+            "summary": {"status": "completed", "executed": 2, "successful": 1, "failed": 0},
+            "results": [
+                {"harness_id": "valid", "status": "Success", "checks": [
+                    {"category": "assertion", "status": "Success"},
+                    {"category": "cover", "status": "Satisfied"},
+                    {"category": "cover", "status": "Satisfied"}
+                ]},
+                {"harness_id": "timed_out", "status": "Timeout", "checks": []}
+            ]
+        }});
+        for reversed in [false, true] {
+            if reversed {
+                value["verification_results"]["results"]
+                    .as_array_mut()
+                    .unwrap()
+                    .reverse();
+            }
+            let mut reported = Vec::new();
+            let error = validate_results_reported(
+                &value,
+                &["valid", "timed_out"],
+                false,
+                |row, verdict| {
+                    reported.push((row["harness_id"].as_str().unwrap().to_owned(), verdict));
+                },
+            )
+            .unwrap_err();
+            assert!(format!("{error:#}").contains("inconclusive"));
+            if reversed {
+                reported.reverse();
+            }
+            assert_eq!(
+                reported,
+                [
+                    ("valid".to_owned(), Verdict::Proven),
+                    ("timed_out".to_owned(), Verdict::Inconclusive)
+                ]
+            );
+        }
+    }
 
     #[test]
     fn a_missing_report_names_every_unvalidated_harness() -> Result<()> {
