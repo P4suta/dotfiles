@@ -422,14 +422,34 @@ fn contents(root: &Path, tree: &Tree, wanted: &[String]) -> Result<BTreeMap<Stri
     let prefix = match tree {
         Tree::Commit(None) => return Ok(BTreeMap::new()),
         Tree::WorkingTree => {
-            return Ok(wanted
-                .iter()
-                .filter_map(|path| {
-                    std::fs::read(root.join(path))
-                        .ok()
-                        .map(|bytes| (path.clone(), bytes))
-                })
-                .collect());
+            let mut found = BTreeMap::new();
+            for path in wanted {
+                let target = root.join(path);
+                let bytes =
+                    if attributes::is_attributes_path(path) {
+                        let metadata = match std::fs::symlink_metadata(&target) {
+                            Ok(metadata) => metadata,
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                            Err(error) => {
+                                return Err(error).with_context(|| {
+                                    format!("read attribute metadata for {}", target.display())
+                                });
+                            }
+                        };
+                        if !metadata.is_file() {
+                            continue;
+                        }
+                        Some(std::fs::read(&target).with_context(|| {
+                            format!("read attributes from {}", target.display())
+                        })?)
+                    } else {
+                        std::fs::read(&target).ok()
+                    };
+                if let Some(bytes) = bytes {
+                    found.insert(path.clone(), bytes);
+                }
+            }
+            return Ok(found);
         }
         Tree::Commit(Some(commit)) => format!("{commit}:"),
         Tree::Index => ":".to_owned(),

@@ -1290,6 +1290,51 @@ fn typescript_catalog_rechecks_source_when_only_generated_metadata_changes() -> 
 }
 
 #[test]
+#[cfg(unix)]
+fn typescript_catalog_matches_git_for_working_tree_attribute_symlinks() -> Result<()> {
+    let catalog = catalog()?;
+    let fixture = Fixture::new()?;
+    let path = "web/client.ts";
+    fixture.write(path, "export function wait(): number { return 30000; }\n")?;
+    fixture.write("attribute-source", "*.ts linguist-generated\n")?;
+    std::os::unix::fs::symlink("attribute-source", fixture.root.join(".gitattributes"))?;
+    let native = fixture.git(&["check-attr", "linguist-generated", "--", path])?;
+    let omitted = native == format!("{path}: linguist-generated: set");
+    let survey = assure::survey(&fixture.root, &catalog, &assure::Tree::WorkingTree, None)?;
+    assert_eq!(survey.gaps.len(), usize::from(!omitted), "{native}");
+    Ok(())
+}
+
+#[test]
+fn typescript_catalog_matches_git_for_index_and_commit_attribute_symlinks() -> Result<()> {
+    let catalog = catalog()?;
+    let fixture = Fixture::new()?;
+    let path = "web/client.ts";
+    fixture.write(path, "export function wait(): number { return 30000; }\n")?;
+    fixture.write(".gitattributes", "*.ts linguist-generated\n")?;
+    fixture.stage()?;
+    let object = fixture.git(&["rev-parse", ":.gitattributes"])?;
+    fixture.git(&[
+        "update-index",
+        "--cacheinfo",
+        &format!("120000,{object},.gitattributes"),
+    ])?;
+    fixture.git(&["commit", "--quiet", "-m", "attribute symlink mode"])?;
+    let commit = fixture.git(&["rev-parse", "HEAD"])?;
+    let native = fixture.git(&["check-attr", "--cached", "linguist-generated", "--", path])?;
+    let omitted = native == format!("{path}: linguist-generated: set");
+    for tree in [assure::Tree::Index, assure::Tree::Commit(Some(commit))] {
+        let survey = assure::survey(&fixture.root, &catalog, &tree, None)?;
+        assert_eq!(
+            survey.gaps.len(),
+            usize::from(!omitted),
+            "{tree:?}: {native}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn this_repository_has_no_gap() -> Result<()> {
     let catalog = catalog()?;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
