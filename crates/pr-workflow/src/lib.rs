@@ -5,6 +5,7 @@ mod evidence;
 mod local;
 mod merge;
 mod review_policy;
+mod work;
 pub use evidence::store_assessment;
 pub use local::Action as LocalAction;
 use merge::{await_result as await_merge, submit as submit_merge};
@@ -158,6 +159,9 @@ pub enum Commands {
         /// Link actual local issue history through this new checked remote authorization.
         #[arg(long, conflicts_with = "adopt_existing")]
         promote_local: bool,
+        /// Declare unrelated work and keep its reason in owner-local state.
+        #[arg(long, value_name = "REASON", value_parser = work::reason)]
+        independent: Option<String>,
     },
     /// Match signed issue contexts to the actual local or CI change.
     ChangeCheck {
@@ -204,6 +208,9 @@ pub enum Commands {
         /// Also keep CodeRabbit-created PRs as drafts.
         #[arg(long)]
         draft: bool,
+        /// Open an independent work unit and keep its reason in owner-local state.
+        #[arg(long, value_name = "REASON", value_parser = work::reason)]
+        independent: Option<String>,
     },
     /// Replace both title and body with one checked document.
     Edit {
@@ -661,26 +668,6 @@ struct Github {
     policy: WorkflowPolicy,
     login: String,
     repositories: RefCell<BTreeMap<String, Repository>>,
-}
-
-/// One open PR as the REST list reports it.
-#[derive(Deserialize)]
-struct ListedPr {
-    number: u64,
-    html_url: String,
-    user: ListedUser,
-    head: ListedHead,
-}
-
-#[derive(Deserialize)]
-struct ListedUser {
-    login: String,
-}
-
-#[derive(Deserialize)]
-struct ListedHead {
-    #[serde(rename = "ref")]
-    name: String,
 }
 
 #[derive(Deserialize)]
@@ -1352,44 +1339,6 @@ impl Github {
         Ok(BranchRequirements { checks, queue })
     }
 
-    /// Refuses a new PR while the authenticated user already has as many open PRs as the work-in-progress limit of the repository permits.
-    fn admit_work_in_progress(&self, target: &Target, head: &str) -> Result<()> {
-        let open: Vec<ListedPr> = self.read(&format!(
-            "repos/{}/pulls?state=open&per_page=100",
-            target.repo
-        ))?;
-        let mine: Vec<&ListedPr> = open
-            .iter()
-            .filter(|pr| pr.user.login.eq_ignore_ascii_case(&self.login) && pr.head.name != head)
-            .collect();
-        let limit = self.policy.work_in_progress.limit(&target.repo);
-        let count = u32::try_from(mine.len()).unwrap_or(u32::MAX);
-        if crate::wip_rules::admits(count, limit) {
-            return Ok(());
-        }
-        let oldest = mine
-            .iter()
-            .min_by_key(|pr| pr.number)
-            .context("a refused limit names an open PR")?;
-        let mut refusal = Refusal::new(
-            "pr.wip",
-            format!(
-                "{} already holds {count} open PR(s) in {}, at its work-in-progress limit of {limit}; add this work to #{} instead of opening another PR",
-                self.login, target.repo, oldest.number
-            ),
-            command(&["git", "switch", &oldest.head.name])
-                + " && "
-                + &command(&["git", "merge", "--no-edit", head])
-                + " && "
-                + &command(&["git", "push"]),
-        );
-        for pr in &mine {
-            refusal =
-                refusal.evidence(format!("#{} {} ({})", pr.number, pr.html_url, pr.head.name));
-        }
-        Err(refusal.into())
-    }
-
     /// Inspect live REST quota headers on each serialized prerequisite request.
     fn read<T: serde::de::DeserializeOwned>(&self, endpoint: &str) -> Result<T> {
         let args = ["api", endpoint, "--hostname", "github.com", "--include"].map(OsString::from);
@@ -1959,6 +1908,7 @@ fn start_implementation(
     paths: &[PathBuf],
     adopt_existing: bool,
     promote_local: bool,
+    independent: Option<&str>,
     rerun: &str,
 ) -> Result<()> {
     target.conventional_required()?;
@@ -1966,6 +1916,15 @@ fn start_implementation(
     let destination = destination(&github, &target.repo)?;
     let gate = inspect_issue(&github, target, destination, None, rerun)?;
     require_issue(gate, target)?;
+    let head = git_output(&["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    let work = work::prepare(
+        &github,
+        target,
+        head.trim(),
+        None,
+        independent,
+        work::Operation::Start,
+    )?;
     context::start(
         &github,
         target,
@@ -1974,6 +1933,7 @@ fn start_implementation(
         adopt_existing,
         promote_local,
     )?;
+    work.started()?;
     println!("Checked implementation context saved ({gate:?})");
     Ok(())
 }
@@ -2004,7 +1964,15 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             paths,
             adopt_existing,
             promote_local,
-        } => start_implementation(&target, &paths, adopt_existing, promote_local, rerun)?,
+            independent,
+        } => start_implementation(
+            &target,
+            &paths,
+            adopt_existing,
+            promote_local,
+            independent.as_deref(),
+            rerun,
+        )?,
         Commands::ChangeCheck { root, base, staged } => {
             check_issue_context(&root, base.as_deref(), staged)?;
         }
@@ -2025,7 +1993,14 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             head,
             base,
             draft,
-        } => create(document, &head, base, draft, rerun)?,
+            independent,
+        } => create(
+            document,
+            &head,
+            base.as_deref(),
+            &Creation::Regular { draft, independent },
+            rerun,
+        )?,
         Commands::Edit { document, pr } => edit(document, pr, rerun)?,
         Commands::Ready { target, pr } => ready_command(&target, pr, rerun)?,
         Commands::Merge {
@@ -2141,11 +2116,60 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
     review_policy::describe(&checked)
 }
 
+enum Creation {
+    Regular {
+        draft: bool,
+        independent: Option<String>,
+    },
+    Stack,
+}
+
+struct CreationStack {
+    parents: Vec<u64>,
+    trunk: String,
+}
+
+impl CreationStack {
+    fn select(target: &Target, work: &work::Plan, creation: &Creation) -> Result<Self> {
+        let (parents, trunk) = if work.stacked() || matches!(creation, Creation::Stack) {
+            chain(&open_prs(target)?, work.base())
+        } else {
+            (Vec::new(), work.base().to_owned())
+        };
+        require(
+            !(work.stacked() || matches!(creation, Creation::Stack)) || !parents.is_empty(),
+            || {
+                Refusal::new(
+                    "pr.stack",
+                    "the selected base has no open stack parent",
+                    command(&["gh", "pr", "list", "--repo", &target.repo]),
+                )
+                .evidence(format!("selected base {}", work.base()))
+            },
+        )?;
+        Ok(Self { parents, trunk })
+    }
+
+    fn published(&self, target: &Target, number: u64) -> Result<()> {
+        if !self.parents.is_empty() {
+            let mut arguments = vec!["link".to_owned(), "--base".to_owned(), self.trunk.clone()];
+            arguments.extend(self.parents.iter().map(u64::to_string));
+            arguments.push(number.to_string());
+            gh_stack(
+                target,
+                None,
+                &arguments.iter().map(String::as_str).collect::<Vec<_>>(),
+            )?;
+        }
+        Ok(())
+    }
+}
+
 fn create(
     document: DocumentArgs,
     head: &str,
-    base: Option<String>,
-    draft: bool,
+    base: Option<&str>,
+    creation: &Creation,
     rerun: &str,
 ) -> Result<()> {
     let body_file = document.body_file.clone();
@@ -2156,8 +2180,21 @@ fn create(
         branch(base)?;
     }
     let github = Github::connect()?;
+    let (draft, independent) = match creation {
+        Creation::Regular { draft, independent } => (*draft, independent.as_deref()),
+        Creation::Stack => (true, None),
+    };
+    let work = work::prepare(
+        &github,
+        &target,
+        head,
+        base,
+        independent,
+        work::Operation::Create,
+    )?;
+    let stack = CreationStack::select(&target, &work, creation)?;
     let checked =
-        review_policy::create_binding(&github, &target, &document.body, head, base.as_deref())?;
+        review_policy::create_binding(&github, &target, &document.body, head, Some(work.base()))?;
     let head = review_policy::qualified_head(&checked, head)?;
     admit_review_request(
         Operation::Create,
@@ -2183,23 +2220,31 @@ fn create(
         issue,
         Checks::Incomplete,
     )?;
-    github.admit_work_in_progress(&target, &head)?;
-    refuse_dependent(&github, &target, &head, base.as_deref(), &title, &body_file)?;
+    refuse_dependent(
+        &github,
+        &target,
+        &head,
+        Some(work.base()),
+        &title,
+        &body_file,
+        &stack.parents,
+    )?;
     let mut args = arguments("create", &target.repo);
     args.extend([OsString::from("--head"), head.into()]);
-    if let Some(base) = base {
-        args.extend([OsString::from("--base"), base.into()]);
-    }
+    args.extend([OsString::from("--base"), work.base().into()]);
     if effect == Effect::CreateDraft
         || checked.route == rules::review_routing_rules::ReviewRoute::Pr
     {
         args.push("--draft".into());
     }
     let _body = write_document(&mut args, &document)?;
+    work.before_publication()?;
     let created = gh(&args)?;
     print!("{created}");
-    evidence::remember(&target.repo, created_number(&created)?, &checked.object)?;
-    Ok(())
+    let number = created_number(&created)?;
+    evidence::remember(&target.repo, number, &checked.object)?;
+    work.published(number)?;
+    stack.published(&target, number)
 }
 
 fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
@@ -3131,11 +3176,13 @@ fn refuse_dependent(
     base: Option<&str>,
     title: &str,
     body_file: &Path,
+    ancestors: &[u64],
 ) -> Result<()> {
     let open = open_prs(target)?;
     let others: Vec<&OpenPr> = open
         .iter()
         .filter(|pr| pr.head_ref_name != head)
+        .filter(|pr| !ancestors.contains(&pr.number))
         .filter(|pr| !report_dependency_skip(pr))
         .collect();
     if others.is_empty() {
@@ -3179,48 +3226,70 @@ fn refuse_dependent(
         let Some(found) = dependency(shared_commits, merge) else {
             continue;
         };
-        let mut next = vec!["pr-workflow", "stack", "create", "--repo", &target.repo];
-        let issue = target.issue.map(|issue| issue.to_string());
-        if let Some(issue) = &issue {
-            next.extend(["--issue", issue]);
+        if !ancestors.is_empty() {
+            return Err(Refusal::new(
+                "pr.dependency",
+                format!(
+                    "{head} depends on #{} outside its parent chain; resolve that dependency before extending the open stack",
+                    other.number
+                ),
+                command(&["gh", "pr", "view", &other.number.to_string(), "--repo", &target.repo]),
+            )
+            .evidence(format!("#{} ({}): {found:?}", other.number, other.head_ref_name))
+            .into());
         }
-        let body_file = body_file.display().to_string();
-        next.extend([
-            "--title",
-            title,
-            "--body-file",
-            &body_file,
-            "--head",
-            head,
-            "--base",
-            &other.head_ref_name,
-        ]);
-        return Err(Refusal::new(
-            "pr.dependency",
-            match found {
-                Dependency::Commits => format!(
-                    "{head} contains commits of #{}, so it depends on that PR; open it as a stack on top of it",
-                    other.number
-                ),
-                Dependency::Conflict => format!(
-                    "{head} conflicts with #{}; open it as a stack on top of that PR",
-                    other.number
-                ),
-            },
-            command(&next),
-        )
-        .evidence(format!(
-            "#{} ({}): {}",
-            other.number,
-            other.head_ref_name,
-            match found {
-                Dependency::Commits => "shared commits",
-                Dependency::Conflict => "git merge-tree --write-tree reports a conflict between the heads",
-            }
-        ))
-        .into());
+        return Err(dependency_refusal(target, head, title, body_file, other, found).into());
     }
     Ok(())
+}
+
+fn dependency_refusal(
+    target: &Target,
+    head: &str,
+    title: &str,
+    body_file: &Path,
+    other: &OpenPr,
+    found: Dependency,
+) -> Refusal {
+    let mut next = vec!["pr-workflow", "stack", "create", "--repo", &target.repo];
+    let issue = target.issue.map(|issue| issue.to_string());
+    if let Some(issue) = &issue {
+        next.extend(["--issue", issue]);
+    }
+    let body_file = body_file.display().to_string();
+    next.extend([
+        "--title",
+        title,
+        "--body-file",
+        &body_file,
+        "--head",
+        head,
+        "--base",
+        &other.head_ref_name,
+    ]);
+    Refusal::new(
+        "pr.dependency",
+        match found {
+            Dependency::Commits => format!(
+                "{head} contains commits of #{}, so it depends on that PR; open it as a stack on top of it",
+                other.number
+            ),
+            Dependency::Conflict => format!(
+                "{head} conflicts with #{}; open it as a stack on top of that PR",
+                other.number
+            ),
+        },
+        command(&next),
+    )
+    .evidence(format!(
+        "#{} ({}): {}",
+        other.number,
+        other.head_ref_name,
+        match found {
+            Dependency::Commits => "shared commits",
+            Dependency::Conflict => "git merge-tree --write-tree reports a conflict between the heads",
+        }
+    ))
 }
 
 /// The PR number at the end of the URL that `gh pr create` printed.
@@ -3235,72 +3304,7 @@ fn created_number(output: &str) -> Result<u64> {
 
 /// Opens a draft PR on top of the open PR whose head names `base`, and links the stack.
 fn create_stacked(document: DocumentArgs, head: &str, base: &str, rerun: &str) -> Result<()> {
-    let body_file = document.body_file.clone();
-    let (target, document) = read_document(document, false)?;
-    branch(head)?;
-    branch(base)?;
-    let github = Github::connect()?;
-    let checked =
-        review_policy::create_binding(&github, &target, &document.body, head, Some(base))?;
-    admit_review_request(
-        Operation::Create,
-        target.generation,
-        &document.body,
-        checked.route,
-        || Ok((true, Exclusion::None)),
-    )?;
-    let destination = destination(&github, &target.repo)?;
-    written_to_standard(destination, PULL_REQUEST, &document)?;
-    let issue = inspect_issue(
-        &github,
-        &target,
-        destination,
-        Some((&document.body, BodySource::File(&body_file))),
-        rerun,
-    )?;
-    planned(
-        Operation::Create,
-        &target,
-        None,
-        true,
-        issue,
-        Checks::Incomplete,
-    )?;
-    let (below, trunk) = chain(&open_prs(&target)?, base);
-    require(!below.is_empty(), || {
-        Refusal::new(
-            "pr.stack",
-            format!("{base} has no open PR to stack on; open the parent PR first"),
-            command(&[
-                "pr-workflow",
-                "create",
-                "--repo",
-                &target.repo,
-                "--head",
-                base,
-                "--title",
-                "<title>",
-                "--body-file",
-                "<body-file>",
-            ]),
-        )
-        .evidence(format!("no open PR has the head {base}"))
-    })?;
-    let mut args = arguments("create", &target.repo);
-    args.extend(["--head", head, "--base", base, "--draft"].map(OsString::from));
-    let _body = write_document(&mut args, &document)?;
-    let created = gh(&args)?;
-    print!("{created}");
-    let number = created_number(&created)?;
-    evidence::remember(&target.repo, number, &checked.object)?;
-    let mut link = vec!["link".to_owned(), "--base".to_owned(), trunk];
-    link.extend(below.iter().map(u64::to_string));
-    link.push(number.to_string());
-    gh_stack(
-        &target,
-        None,
-        &link.iter().map(String::as_str).collect::<Vec<_>>(),
-    )
+    create(document, head, Some(base), &Creation::Stack, rerun)
 }
 
 fn stack(action: StackAction, rerun: &str) -> Result<()> {

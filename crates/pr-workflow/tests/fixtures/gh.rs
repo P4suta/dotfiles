@@ -335,6 +335,19 @@ fn git(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
         command.args(original);
     }
     let status = command.status()?;
+    if status.success()
+        && args.starts_with(&["merge-base".into(), "--is-ancestor".into()])
+        && let Ok(head) = std::env::var("GH_FIXTURE_AFTER_ANCESTRY_HEAD")
+    {
+        let updated = std::process::Command::new(
+            std::env::var_os("PWF_FIXTURE_REAL_GIT").ok_or("real Git missing")?,
+        )
+        .args(["update-ref", "refs/heads/feature", &head])
+        .status()?;
+        if !updated.success() {
+            return Err("owned ancestry-race injection failed".into());
+        }
+    }
     std::process::exit(status.code().unwrap_or(1));
 }
 
