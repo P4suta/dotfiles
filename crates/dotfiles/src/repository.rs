@@ -300,8 +300,10 @@ mod tests {
         "# Fixture\n\nA fixture repository.\n\n## Installation\n\n",
         "```sh\ncargo install fixture\n```\n\n## Usage\n\n",
         "```sh\nfixture --help\n```\n\n## License\n\n",
-        "Licensed under either of the [Apache License, Version 2.0](LICENSE-APACHE) or the [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT), at your option.\n",
-        "You license each contribution you submit under the same two licenses, without other terms, unless you state otherwise.\n",
+        "Licensed under either license:\n\n",
+        "- [Apache License, Version 2.0](LICENSE-APACHE)\n",
+        "- [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT)\n\n",
+        "Contributions use both licenses unless you state other terms.\n",
     );
 
     fn fixture() -> tempfile::TempDir {
