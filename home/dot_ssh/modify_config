@@ -1,0 +1,15 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- $include := "Include ~/.config/dotfiles/ssh-agent.conf" -}}
+{{- $lines := list -}}
+{{- $inserted := false -}}
+{{- range splitList "\n" (trimSuffix "\n" .chezmoi.stdin) -}}
+{{- if ne (trim .) $include -}}
+{{- if and (not $inserted) (ne (trim .) "") (not (hasPrefix "#" (trim .))) (not (regexMatch "(?i)^\\s*Include\\s+\"?~/\\.orbstack/ssh/config\"?\\s*$" .)) -}}
+{{- $lines = append $lines $include -}}
+{{- $inserted = true -}}
+{{- end -}}
+{{- $lines = append $lines . -}}
+{{- end -}}
+{{- end -}}
+{{- if not $inserted -}}{{- $lines = append $lines $include -}}{{- end -}}
+{{ join "\n" $lines }}

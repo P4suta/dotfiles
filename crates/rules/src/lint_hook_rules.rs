@@ -57,6 +57,9 @@ pub enum Admission {
 #[must_use]
 pub fn classify(path: &str, first_line: &str) -> FileType {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    if name.starts_with("modify_") && first_line.trim() == "{{- /* chezmoi:modify-template */ -}}" {
+        return FileType::Other;
+    }
     if let Some(shebang) = first_line.strip_prefix("#!") {
         let mut words = shebang.split_whitespace();
         let interpreter = words.next().unwrap_or_default();
@@ -378,13 +381,24 @@ mod proofs {
 
     #[cfg(kani)]
     #[kani::proof]
-    #[kani::unwind(32)]
+    #[kani::unwind(64)]
     fn classification_preserves_the_registered_file_types() {
         for (path, line, expected) in [
             ("x.sh", "", FileType::Shell),
             ("x.py", "", FileType::Python),
             ("x.md", "", FileType::Other),
             ("x", "#!/bin/zsh", FileType::Zsh),
+            (
+                "modify_x.toml",
+                "{{- /* chezmoi:modify-template */ -}}",
+                FileType::Other,
+            ),
+            (
+                "x.toml",
+                "{{- /* chezmoi:modify-template */ -}}",
+                FileType::Toml,
+            ),
+            ("modify_x.toml", "", FileType::Toml),
         ] {
             assert_eq!(classify(path, line), expected);
         }
@@ -464,6 +478,17 @@ mod tests {
             ("action.yml", "", FileType::Action),
             ("a/action.yaml", "", FileType::Action),
             ("a.toml", "", FileType::Toml),
+            (
+                "home/dot_codex/modify_config.toml",
+                "{{- /* chezmoi:modify-template */ -}}",
+                FileType::Other,
+            ),
+            (
+                "config.toml",
+                "{{- /* chezmoi:modify-template */ -}}",
+                FileType::Toml,
+            ),
+            ("modify_config.toml", "", FileType::Toml),
             ("Dockerfile", "", FileType::Dockerfile),
             ("justfile", "", FileType::Justfile),
             ("a.rs", "", FileType::Other),

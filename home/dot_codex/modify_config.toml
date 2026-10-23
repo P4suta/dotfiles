@@ -9,6 +9,12 @@
 {{- $current = setValueAtPath . false $current -}}
 {{- end -}}
 {{- $tool := joinPath .chezmoi.homeDir ".local/bin/dotfiles" -}}
+{{- if has .profile (list "mac" "linux") -}}
+{{- $socket := or (dig "ssh_signing" "socket" "" .) (index .ssh_signing (printf "%s_socket" .profile)) -}}
+{{- if hasPrefix "~/" $socket -}}{{- $socket = joinPath .chezmoi.homeDir (trimPrefix "~/" $socket) -}}{{- end -}}
+{{- $current = setValueAtPath "shell_environment_policy.set.GIT_SSH_COMMAND" "/usr/bin/ssh" $current -}}
+{{- $current = setValueAtPath "shell_environment_policy.set.SSH_AUTH_SOCK" $socket $current -}}
+{{- end -}}
 {{- if eq .profile "windows" -}}{{- $tool = printf "%s.exe" $tool -}}{{- end -}}
 {{- $previous := dig "notify" (list) $current -}}
 {{- if kindIs "slice" $previous -}}

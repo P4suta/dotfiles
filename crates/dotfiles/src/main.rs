@@ -57,6 +57,12 @@ enum Commands {
         #[arg(last = true)]
         arguments: Vec<OsString>,
     },
+    #[cfg(unix)]
+    /// Inspect Herdr and retire an explicitly selected instance.
+    Herdr {
+        #[command(subcommand)]
+        action: HerdrAction,
+    },
     /// Claude Code `PreToolUse` hook for Bash and PowerShell: refuses recursive disk scans and file writes through inline interpreters, heredocs, and redirects.
     ClaudeBash {
         /// Run an exact modern replacement through the client's input rewrite instead of refusing the legacy command.
@@ -195,6 +201,19 @@ enum RepositoryRequest {
     },
 }
 
+#[cfg(unix)]
+#[derive(Clone, Copy, Subcommand)]
+enum HerdrAction {
+    Health {
+        #[arg(long)]
+        session: bool,
+    },
+    Cleanup {
+        #[arg(long)]
+        pid: u32,
+    },
+}
+
 fn run(mut cli: Cli) -> Result<()> {
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
@@ -227,6 +246,8 @@ fn run(mut cli: Cli) -> Result<()> {
         } => exit(dotfiles::terminal::run(
             emulator, session, child, &arguments,
         )?),
+        #[cfg(unix)]
+        Commands::Herdr { action } => herdr(action)?,
         Commands::ClaudeBash { rewrite } => dotfiles::claude_hook::run(rewrite)?,
         Commands::ClaudeTiming { client } => dotfiles::claude_timing::run(client)?,
         Commands::IssueGuard => std::process::exit(dotfiles::issue_guard::hook()?),
@@ -324,6 +345,20 @@ fn windows(_: Vec<OsString>) -> Result<()> {
     anyhow::bail!("the Windows setup runs only on Windows")
 }
 
+#[cfg(unix)]
+fn herdr(action: HerdrAction) -> Result<()> {
+    let home = platform::home::home().context("native home is unavailable")?;
+    match action {
+        HerdrAction::Health { session: true } => dotfiles::herdr::session_start(&home),
+        HerdrAction::Health { session: false } => anyhow::ensure!(
+            dotfiles::herdr::health(&home)?,
+            "Herdr health reported findings"
+        ),
+        HerdrAction::Cleanup { pid } => dotfiles::herdr::cleanup(&home, pid)?,
+    }
+    Ok(())
+}
+
 /// The verification gate's agent hooks, whose session start first reports the agent hooks that failed since the last one.
 fn assure(
     point: dotfiles::assure::AgentPoint,
@@ -331,6 +366,10 @@ fn assure(
 ) -> Result<()> {
     if point == dotfiles::assure::AgentPoint::Start {
         dotfiles::hook_failures::session_start();
+        #[cfg(unix)]
+        if let Some(home) = platform::home::home() {
+            dotfiles::herdr::session_start(&home);
+        }
     }
     dotfiles::assure::hook(point, reply_language.map(Into::into))
 }

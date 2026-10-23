@@ -6,6 +6,37 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/herdr_rules.rs"
+probes = '''
+#[kani::proof]
+#[kani::unwind(128)]
+fn reject_dropping_an_ssh_host_directive() {
+    assert!(production::ssh_config_preserved("Host local", production::SSH_INCLUDE));
+}
+#[kani::proof]
+fn reject_routing_to_an_empty_agent() {
+    assert!(production::route(production::Context::Local, production::Agent::Empty) == production::Route::Herdr);
+}
+#[kani::proof]
+fn reject_starting_beside_a_frozen_server() {
+    assert!(production::launch(production::Instances { servers: 1, abandoned: 0, responding: false }) == production::Launch::Start);
+}
+#[kani::proof]
+fn reject_hiding_a_dead_daemon_socket() {
+    assert!(!production::health(production::Health { agent: production::Agent::Loaded, instances: production::Launch::Attach, dead_daemon_socket: true }).dead_daemon_socket);
+}
+#[kani::proof]
+fn reject_terminating_without_confirmation() {
+    assert!(production::cleanup(false, true, true) == production::Cleanup::Terminate);
+}
+#[kani::proof]
+fn reject_reusing_a_missing_agent() {
+    assert!(production::ensure(production::Agent::Missing) == production::Ensure::Ready);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/doppler_migration_rules.rs"
 probes = '''
 #[kani::proof]
@@ -980,6 +1011,11 @@ fn reject_blocking_unknown_types() {
 #[kani::proof]
 fn reject_an_xargs_supplied_script() {
     assert!(production::script_argument(true, production::ScriptInput::Missing, false) == production::ScriptArgument::Literal);
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_linting_a_modify_template_as_raw_toml() {
+    assert!(production::classify("modify_x.toml", "{{- /* chezmoi:modify-template */ -}}") == production::FileType::Toml);
 }
 '''
 
