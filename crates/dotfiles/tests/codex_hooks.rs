@@ -67,6 +67,22 @@ fn hook_trace_preserves_success_and_exposes_actual_execution() -> Result<()> {
     assert_eq!(events[1]["name"], "assure-stop");
     assert_eq!(events[1]["code"], 0);
     assert_eq!(events[1]["thread_id"], "payload-session");
+    assert_eq!(
+        events[0]["hook_metadata"]["observed_event_cwd"]["state"],
+        "missing"
+    );
+    assert_eq!(
+        events[0]["hook_metadata"]["tool_input_state"]["state"],
+        "missing"
+    );
+    assert_eq!(
+        events[0]["hook_metadata"]["observed_tool_input_workdir"]["state"],
+        "missing"
+    );
+    assert_eq!(
+        events[0]["hook_metadata"]["derived_execution_directory"]["state"],
+        "unavailable"
+    );
     let logs = runtime(home.path())
         .args(["codex-hooks", "logs", "--limit", "1"])
         .output()?;
@@ -91,7 +107,66 @@ fn hook_trace_preserves_rejection_and_records_its_diagnostic() -> Result<()> {
     assert_eq!(events[1]["phase"], "exited");
     assert_eq!(events[1]["code"], 2);
     assert_eq!(events[1]["stderr"], String::from_utf8(expected.stderr)?);
+    assert!(events[1].get("hook_metadata").is_none());
     assert!(!std::fs::read_to_string(home.path().join(LOG))?.contains("private-hook-input-marker"));
+    Ok(())
+}
+
+#[test]
+fn hook_trace_records_allowlisted_directory_metadata_without_raw_input() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let session = home.path().join("session");
+    let execution = home.path().join("execution");
+    std::fs::create_dir(&session)?;
+    std::fs::create_dir(&execution)?;
+    let event = serde_json::json!({
+        "session_id":"payload-session",
+        "tool_name":"Bash",
+        "cwd":session,
+        "tool_input":{
+            "command":"if (",
+            "workdir":execution,
+            "cwd":7
+        },
+        "api_key":"PRIVATE_TOKEN_SENTINEL"
+    });
+    let output = input(
+        traced(home.path(), "shell-guard", &["claude-bash"]),
+        &serde_json::to_vec(&event)?,
+    )?;
+    assert_eq!(output.status.code(), Some(2));
+
+    let events = records(home.path())?;
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["phase"], "started");
+    assert_eq!(events[1]["phase"], "exited");
+    assert_eq!(events[1]["code"], 2);
+    assert_eq!(events[0]["hook_metadata"], events[1]["hook_metadata"]);
+
+    let metadata = &events[1]["hook_metadata"];
+    assert_eq!(metadata["observed_tool_name"]["state"], "string");
+    assert_eq!(metadata["observed_tool_name"]["value"], "Bash");
+    assert_eq!(
+        metadata["observed_event_cwd"]["value"],
+        session.to_string_lossy().as_ref()
+    );
+    assert_eq!(metadata["tool_input_state"]["state"], "object");
+    assert_eq!(
+        metadata["observed_tool_input_workdir"]["value"],
+        execution.to_string_lossy().as_ref()
+    );
+    assert_eq!(metadata["observed_tool_input_cwd"]["state"], "invalid_type");
+    assert_eq!(metadata["observed_tool_input_cwd"]["value_type"], "number");
+    assert_eq!(metadata["derived_execution_directory"]["state"], "resolved");
+    assert_eq!(
+        metadata["derived_execution_directory"]["value"],
+        execution.to_string_lossy().as_ref()
+    );
+    assert!(metadata.get("command").is_none());
+    assert!(!metadata.to_string().contains("if ("));
+
+    let log = std::fs::read_to_string(home.path().join(LOG))?;
+    assert!(!log.contains("PRIVATE_TOKEN_SENTINEL"));
     Ok(())
 }
 
