@@ -9,6 +9,16 @@ pub struct Project {
     root: PathBuf,
 }
 
+#[derive(Args, Debug)]
+pub struct ImportScope {
+    #[command(flatten)]
+    project: Project,
+    #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+    issue: u64,
+    #[arg(long = "path", required = true)]
+    paths: Vec<PathBuf>,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum Status {
     Open,
@@ -39,6 +49,18 @@ pub enum Action {
         issue: u64,
         #[arg(long = "path", required = true)]
         paths: Vec<PathBuf>,
+    },
+    /// Preview the exact staged artifacts of an unborn local project without granting authority.
+    ImportPreview {
+        #[command(flatten)]
+        scope: ImportScope,
+    },
+    /// Attest the reviewed initial artifacts and grant forward local issue scope.
+    Import {
+        #[command(flatten)]
+        scope: ImportScope,
+        #[arg(long)]
+        snapshot: String,
     },
     /// Read local issues or explicitly change one issue's open or closed state.
     Status {
@@ -89,6 +111,23 @@ pub(super) fn run(action: Action) -> Result<()> {
         } => {
             local::select(&project.root, issue, &paths)?;
             println!("Local issue {issue} scope selected before supported edits");
+        }
+        Action::ImportPreview { scope } => {
+            println!(
+                "{}",
+                serde_json::to_string(&local::import_preview(
+                    &scope.project.root,
+                    scope.issue,
+                    &scope.paths
+                )?)?
+            );
+        }
+        Action::Import { scope, snapshot } => {
+            local::import_initial(&scope.project.root, scope.issue, &scope.paths, &snapshot)?;
+            println!(
+                "Initial artifacts attested; local issue {} authorizes future scoped edits; no earlier issue chronology or publication authority granted",
+                scope.issue
+            );
         }
         Action::Status {
             project,

@@ -91,6 +91,16 @@ pub fn create(root: &Path, head: &str, tree: &str, payload: &[u8]) -> Result<Com
 }
 
 /// # Errors
+/// Returns an error if attesting an initial tree with the normal signing identity fails.
+pub fn create_initial(root: &Path, tree: &str, payload: &[u8]) -> Result<Commit> {
+    let object = git(root, &["commit-tree", "-S", tree], Some(payload))?
+        .trim()
+        .to_owned();
+    let raw = git(root, &["cat-file", "commit", &object], None)?;
+    Ok(Commit { object, raw })
+}
+
+/// # Errors
 /// Returns an error for an invalid object identity, signature, or payload.
 pub fn authenticate(root: &Path, object: &str, raw: &str, signers: &Path) -> Result<Verified> {
     let format = git(root, &["rev-parse", "--show-object-format"], None)?;

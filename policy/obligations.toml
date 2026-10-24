@@ -1826,6 +1826,14 @@ fn reject_a_late_start_adopting_unregistered_dirty_work() {
     assert!(production::initial_change_allowed(true, true, false, false));
 }
 #[kani::proof]
+fn reject_an_initial_import_after_the_baseline_changes() {
+    assert_eq!(production::initial_import(production::InitialImportFacts { local: true, unborn: true, unused: true, open: true, nonempty: true, clean: true, scoped: true, unchanged: false }), production::InitialImport::Ready);
+}
+#[kani::proof]
+fn reject_an_initial_import_of_committed_work() {
+    assert_eq!(production::initial_import(production::InitialImportFacts { local: true, unborn: false, unused: true, open: true, nonempty: true, clean: true, scoped: true, unchanged: true }), production::InitialImport::Ready);
+}
+#[kani::proof]
 fn reject_implementation_without_a_checked_context() {
     assert!(production::context_gate(production::ContextFacts { required: true, present: false, authentic: true, destination: true, branch: true, source: true, open: true, scoped: true }) == production::ContextGate::Accepted);
 }
