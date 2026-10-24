@@ -13,8 +13,12 @@
       }
     },
     "copyright": {
-      "description": "The copyright holder that `LICENSE-MIT` names.",
-      "type": "string"
+      "description": "The copyright holder that the generated MIT license names.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
     },
     "documentation_index": {
       "description": "Link the generated README to `docs/README.md`.",
@@ -26,15 +30,15 @@
       "type": "string"
     },
     "license": {
-      "description": "The license expression, which must read `MIT OR Apache-2.0`.",
-      "type": "string"
+      "description": "The existing license state with no new license claim for `unlicensed`.",
+      "$ref": "#/$defs/License"
     },
     "name": {
       "description": "The project name, which titles the README.",
       "type": "string"
     },
     "preserved_licenses": {
-      "description": "Preserve both reviewed license files at these SHA-256 digests.",
+      "description": "Preserve reviewed existing license assets at these SHA-256 digests.",
       "anyOf": [
         {
           "$ref": "#/$defs/PreservedLicenses"
@@ -65,7 +69,6 @@
     "summary",
     "install",
     "usage",
-    "copyright",
     "license"
   ],
   "$defs": {
@@ -88,24 +91,80 @@
         "evidence"
       ]
     },
-    "PreservedLicenses": {
-      "description": "The reviewed bytes of the existing dual-license assets.",
+    "License": {
+      "description": "The license state the repository already declares or the generator creates.",
+      "oneOf": [
+        {
+          "description": "Generate the owner's existing dual-license files.",
+          "type": "string",
+          "const": "MIT OR Apache-2.0"
+        },
+        {
+          "description": "Preserve the existing Apache-2.0-only license assets.",
+          "type": "string",
+          "const": "Apache-2.0"
+        },
+        {
+          "description": "Preserve the existing Affero General Public License version 3 assets.",
+          "type": "string",
+          "const": "AGPL-3.0-only"
+        },
+        {
+          "description": "Keep the repository unlicensed and make no license claim.",
+          "type": "string",
+          "const": "unlicensed"
+        }
+      ]
+    },
+    "PreservedLicenseAsset": {
+      "description": "One root-level existing license asset whose bytes must stay unchanged.",
       "type": "object",
       "properties": {
-        "apache_sha256": {
-          "description": "The SHA-256 digest of `LICENSE-APACHE`.",
+        "path": {
+          "description": "The root-level path of the existing license file.",
           "type": "string"
         },
-        "mit_sha256": {
-          "description": "The SHA-256 digest of `LICENSE-MIT`.",
+        "sha256": {
+          "description": "The SHA-256 digest of its exact bytes.",
           "type": "string"
         }
       },
       "additionalProperties": false,
       "required": [
-        "mit_sha256",
-        "apache_sha256"
+        "path",
+        "sha256"
       ]
+    },
+    "PreservedLicenses": {
+      "description": "The reviewed bytes of existing license assets.",
+      "type": "object",
+      "properties": {
+        "apache_sha256": {
+          "description": "The SHA-256 digest of `LICENSE-APACHE` for the existing dual-license format.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "assets": {
+          "description": "Root-level existing license files with their reviewed SHA-256 digests.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PreservedLicenseAsset"
+          }
+        },
+        "mit_sha256": {
+          "description": "The SHA-256 digest of `LICENSE-MIT` for the existing dual-license format.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
     }
   }
 }
