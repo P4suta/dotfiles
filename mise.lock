@@ -974,9 +974,9 @@ backend = "cargo:gungraun-runner"
 specifiers = ["0.20.0"]
 
 [[tools."cargo:https://github.com/P4suta/OComment"]]
-version = "rev:f8dbfbb67fc7178aa22a44f572d332b7d9b17d0d"
+version = "rev:552c8d0c340d25bc0557ba8988eaa231a67408d0"
 backend = "cargo:https://github.com/P4suta/OComment"
-specifiers = ["rev:f8dbfbb67fc7178aa22a44f572d332b7d9b17d0d"]
+specifiers = ["rev:552c8d0c340d25bc0557ba8988eaa231a67408d0"]
 
 [tools."cargo:https://github.com/P4suta/OComment".options]
 crate = "ocomment"

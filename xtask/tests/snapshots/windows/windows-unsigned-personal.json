@@ -118,7 +118,7 @@
     {"mode":"0644","path":".agents/skills/nas/tools.toml","sha256":"0b81f022e2840065ea68e75b8cb6ab289d9f9be13225b68bf9d08559fdf4fb3a","type":"file"},
     {"mode":"0755","path":".agents/skills/ocomment","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/ocomment/SKILL.md","sha256":"db9d8c1a18071d5b7d220b1fbc1a32b9ef657c40e4c671f302f1ed5ef4343453","type":"file"},
-    {"mode":"0644","path":".agents/skills/ocomment/tools.toml","sha256":"4795222eb4cccea132179bd27dae580f56462074084887aae0d5376237ce36bd","type":"file"},
+    {"mode":"0644","path":".agents/skills/ocomment/tools.toml","sha256":"c984d9683cfc0f477190a02fb271c2769b92568ed3caa4f79668273a787f6f14","type":"file"},
     {"mode":"0755","path":".agents/skills/oss-readme","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/oss-readme/SKILL.md","sha256":"03e3a84d959089dbc589389c54cc337e602e1181eb2b59f7b4a493c349f759c7","type":"file"},
     {"mode":"0644","path":".agents/skills/oss-readme/tools.toml","sha256":"a3876fb1d309475e33277a54816c460d18d394b6b875ae9cd3d32fce082c72ce","type":"file"},

@@ -1,7 +1,7 @@
 {
-  "revision": "a6041d4fd0965340f81c57e551952d47b97bb7814ccf9eb3538c532b565ecd6a",
+  "revision": "b2cbea3901e615c30e342b52d98203e6dea91343c280061cba6c183883a19543",
   "outcome": "implemented",
-  "reason": "Bind the project checker to the public source revision that supports the existing policy mode and flat scan positions.\nThe native installation still uses its setup provider, so the reviewed binding covers that selector and the immutable project pin.\nThe skill's check, explain, staging, and preservation procedures apply to both providers, and the inventory gate rejects an unreviewed version.",
+  "reason": "Adopt the merged source revision for consecutive kept comment blocks, Biome suppressions, generic arrows in .tsx files, and pinned Action annotations.\nThe existing check, explain, staging, and preservation procedures apply to the native setup provider and the immutable project pin.\nThe installed binaries on macOS, Linux, and Windows pass the embedded CLI corpus, while API-only cases remain outside that self-test.\nThe tool inventory rejects an unreviewed version binding.",
   "evidence": [
     "home/dot_agents/skills/ocomment/SKILL.md",
     "home/dot_agents/skills/ocomment/tools.toml",
