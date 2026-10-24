@@ -3655,31 +3655,42 @@ mod tests {
             },
         )
     }
+    #[cfg(not(target_os = "windows"))]
+    fn declared_inventory(root: &Path, source: &str, probes: &str) -> Result<(usize, usize)> {
+        let production = obligations::module(&fs::read_to_string(root.join(source))?)?;
+        let rejecting = obligations::probe_harnesses(probes)?;
+        ensure!(
+            !production.harnesses.is_empty() && !rejecting.is_empty(),
+            "a subject regression requires production and rejecting harnesses"
+        );
+        Ok((production.harnesses.len(), rejecting.len()))
+    }
+
     #[test]
     #[ignore = "requires the installed pinned Kani"]
     #[cfg(not(target_os = "windows"))]
     fn shape_decisions_and_their_counterexamples_verify_against_production() -> Result<()> {
-        const EXPECTED: (usize, usize) = (10, 10);
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let manifest = obligations::manifest(root)?;
+        let source = "crates/rules/src/shape_rules.rs";
+        let probes = manifest
+            .obligations
+            .iter()
+            .find_map(|obligation| match obligation {
+                Obligation::Kani {
+                    source: candidate,
+                    probes,
+                    ..
+                } if candidate == source => Some(probes),
+                _ => None,
+            })
+            .context("shape decisions have a registered proof obligation")?;
+        let expected = declared_inventory(root, source, probes)?;
         crate::phase_evidence::run(
             root,
             "shape subject regression",
-            EXPECTED.0 + EXPECTED.1,
+            expected.0 + expected.1,
             || {
-                let manifest = obligations::manifest(root)?;
-                let source = "crates/rules/src/shape_rules.rs";
-                let probes = manifest
-                    .obligations
-                    .iter()
-                    .find_map(|obligation| match obligation {
-                        Obligation::Kani {
-                            source: candidate,
-                            probes,
-                            ..
-                        } if candidate == source => Some(probes),
-                        _ => None,
-                    })
-                    .context("shape decisions have a registered proof obligation")?;
                 kani_environment_version(root)?;
                 verify_kani_driver(root)?;
                 let verifier_hash =
@@ -3694,7 +3705,7 @@ mod tests {
                     &engine_hash,
                 )?;
                 ensure!(
-                    result == EXPECTED,
+                    result == expected,
                     "shape proof inventory differs: {result:?}"
                 );
                 Ok(())
@@ -4076,7 +4087,6 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     fn assure_inputs_and_their_counterexamples_verify_against_production() -> Result<()> {
         const SOURCE: &str = "crates/rules/src/shape_rules.rs";
-        const EXPECTED: (usize, usize) = (10, 10);
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .context("the proof test has a workspace root")?;
@@ -4094,6 +4104,7 @@ mod tests {
                 _ => None,
             })
             .context("assure decisions have a registered proof obligation")?;
+        let expected = declared_inventory(root, SOURCE, probes)?;
         kani_environment_version(root)?;
         verify_kani_driver(root)?;
         let verifier_hash = crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
@@ -4107,7 +4118,7 @@ mod tests {
             &engine_hash,
         )?;
         ensure!(
-            result == EXPECTED,
+            result == expected,
             "assure proof inventory differs: {result:?}"
         );
         ensure!(
