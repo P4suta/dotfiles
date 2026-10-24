@@ -578,8 +578,7 @@ impl CodeEnvironment {
     ///
     /// # Errors
     ///
-    /// Returns an error for a missing or inactive installation, a mismatched version or source,
-    /// a nonabsolute tool directory, or an unsuccessful resolution command.
+    /// Returns an error for a missing or inactive installation, a mismatched version or source, a nonabsolute tool directory, or an unsuccessful resolution command.
     pub fn prepare(root: &Path, installed: &Installations) -> Result<CodePreparation> {
         Self::prepare_scope(root, installed, tempfile::tempdir()?)
     }

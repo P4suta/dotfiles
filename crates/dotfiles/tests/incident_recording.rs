@@ -98,6 +98,7 @@ fn unavailable_inspection_keeps_later_refusals_blocking_in_both_modes() -> Resul
         for finding in [
             "could not finish",
             "broken.sh",
+            "cannot lint script",
             "`ls` is a legacy command",
             "`wc` is a legacy command",
         ] {
@@ -115,7 +116,7 @@ fn unavailable_inspection_keeps_later_refusals_blocking_in_both_modes() -> Resul
                 .collect::<Result<std::collections::BTreeSet<_>>>()?;
             assert_eq!(
                 rules,
-                ["hook.inspection", "hook.legacy"]
+                ["hook.inspection", "hook.legacy", "hook.lint", "hook.prose"]
                     .map(str::to_owned)
                     .into_iter()
                     .collect()

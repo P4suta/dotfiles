@@ -52,6 +52,7 @@ pub enum Tool {
     AstGrep,
     Atuin,
     Bash,
+    Biome,
     Brew,
     Bun,
     Cabal,
@@ -88,6 +89,7 @@ pub enum Tool {
     Go,
     Gpg,
     Gsettings,
+    Hadolint,
     Herdr,
     HerdrAgent,
     Hlint,
@@ -113,11 +115,13 @@ pub enum Tool {
     Opencode,
     Pwsh,
     Raco,
+    Ruff,
     Rustc,
     Rustfmt,
     Rustup,
     Sh,
     Shellcheck,
+    Shfmt,
     Ssh,
     SshKeygen,
     Starship,
@@ -145,13 +149,14 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 96] = [
+    pub const ALL: [Self; 100] = [
         Self::Actionlint,
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
         Self::AstGrep,
         Self::Atuin,
         Self::Bash,
+        Self::Biome,
         Self::Brew,
         Self::Bun,
         Self::Cabal,
@@ -188,6 +193,7 @@ impl Tool {
         Self::Go,
         Self::Gpg,
         Self::Gsettings,
+        Self::Hadolint,
         Self::Herdr,
         Self::HerdrAgent,
         Self::Hlint,
@@ -213,11 +219,13 @@ impl Tool {
         Self::Opencode,
         Self::Pwsh,
         Self::Raco,
+        Self::Ruff,
         Self::Rustc,
         Self::Rustfmt,
         Self::Rustup,
         Self::Sh,
         Self::Shellcheck,
+        Self::Shfmt,
         Self::Ssh,
         Self::SshKeygen,
         Self::Starship,
@@ -246,8 +254,16 @@ impl Tool {
 
     /// The program name, or the absolute path where the provider installs it outside PATH.
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the exhaustive registry names every executable without hiding variant coverage"
+    )]
     pub fn program(self) -> &'static str {
         match self {
+            Self::Biome => "biome",
+            Self::Hadolint => "hadolint",
+            Self::Ruff => "ruff",
+            Self::Shfmt => "shfmt",
             Self::Actionlint => "actionlint",
             Self::CargoDeny => "cargo-deny",
             Self::Zizmor => "zizmor",
@@ -350,8 +366,16 @@ impl Tool {
     }
 
     #[must_use]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the exhaustive registry records every provider without hiding variant coverage"
+    )]
     pub fn provision(self) -> Provision {
         match self {
+            Self::Biome => Provision::Pinned("biome"),
+            Self::Hadolint => Provision::Pinned("hadolint"),
+            Self::Ruff => Provision::Pinned("ruff"),
+            Self::Shfmt => Provision::Pinned("shfmt"),
             Self::AnsibleGalaxy | Self::AnsiblePlaybook => Provision::Pinned("pypi:ansible-core"),
             Self::Actionlint => Provision::Pinned("actionlint"),
             Self::AstGrep => Provision::Pinned("ast-grep"),
@@ -362,7 +386,6 @@ impl Tool {
             Self::Typos => Provision::Pinned("typos"),
             Self::Yamllint => Provision::Pinned("yamllint"),
             Self::Chezmoi => Provision::Pinned("chezmoi"),
-            Self::GhStack => Provision::Pinned("github:github/gh-stack"),
             Self::Ocomment => Provision::Pinned(OCOMMENT_PIN),
             Self::Njutest => NJUTEST_PROVISION,
             Self::Gitleaks => Provision::Pinned("gitleaks"),
@@ -398,6 +421,7 @@ impl Tool {
             | Self::Whoami
             | Self::Wslpath => Provision::Host,
             Self::Atuin
+            | Self::GhStack
             | Self::Cabal
             | Self::Carapace
             | Self::Doppler
@@ -533,6 +557,56 @@ pub use crate::process::GIT_LOCAL_ENVIRONMENT;
 #[must_use]
 pub fn external(program: impl AsRef<std::ffi::OsStr>) -> Command {
     crate::process::command(program)
+}
+
+/// Resolves and checks the owner's shared gh-stack installation outside the target repository.
+///
+/// # Errors
+/// Returns an error for a missing installation or an unexpected executable version.
+pub fn owner_gh_stack() -> anyhow::Result<Command> {
+    use anyhow::{Context as _, ensure};
+    const KEY: &str = "github:github/gh-stack";
+    let versions = model::data::parse(
+        "versions.toml",
+        include_str!("../../../home/.chezmoidata/versions.toml"),
+    )
+    .map_err(anyhow::Error::msg)?;
+    let version = versions
+        .shared_tools
+        .and_then(|shared| shared.versions)
+        .and_then(|mut pins| pins.remove(KEY))
+        .context("owner gh-stack pin missing")?;
+    let home = crate::home::home().context("owner home missing for gh-stack")?;
+    let output = Tool::Mise
+        .command()
+        .current_dir(&home)
+        .args(["which", "--tool", &format!("{KEY}@{version}"), "gh-stack"])
+        .env("MISE_AUTO_INSTALL", "false")
+        .output()
+        .context("resolve owner-provisioned gh-stack; apply the shared mise tools")?;
+    ensure!(
+        output.status.success(),
+        "owner-provisioned gh-stack is unavailable; apply the shared mise tools: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    let program = std::path::PathBuf::from(String::from_utf8(output.stdout)?.trim());
+    ensure!(
+        program.is_absolute() && program.is_file(),
+        "owner gh-stack resolution needs an installed absolute executable"
+    );
+    let output = external(&program).args(["--version"]).output()?;
+    let actual = String::from_utf8(output.stdout)?;
+    ensure!(
+        output.status.success()
+            && actual
+                .trim()
+                .strip_prefix("gh stack version ")
+                .is_some_and(|actual| actual.strip_prefix('v').unwrap_or(actual)
+                    == version.strip_prefix('v').unwrap_or(&version)),
+        "owner gh-stack version differs from {version}: {}",
+        actual.trim()
+    );
+    Ok(external(program))
 }
 
 #[cfg(test)]

@@ -787,6 +787,16 @@ fn report_gate(
     offered: &str,
     report: &serde_json::Value,
 ) -> Output {
+    report_gate_on(repository, base, offered, report, "main")
+}
+
+fn report_gate_on(
+    repository: &Repository,
+    base: &str,
+    offered: &str,
+    report: &serde_json::Value,
+    branch: &str,
+) -> Output {
     let file = repository.scope.join("fixture-report.json");
     std::fs::write(&file, serde_json::to_vec(report).unwrap()).unwrap();
     let mut variables = renovate_variables(repository);
@@ -804,10 +814,189 @@ fn report_gate(
         .collect();
     repository.dotguard_with(
         &["renovate-gate", "origin", RENOVATE_REMOTE],
-        &format!("refs/heads/main {offered} refs/heads/main {base}\n"),
+        &format!("refs/heads/{branch} {offered} refs/heads/{branch} {base}\n"),
         &[],
         &values,
     )
+}
+
+fn integrated_manifest_fixture(
+    name: &str,
+    published_default: bool,
+) -> (Repository, String, String) {
+    let (repository, _, initial) = renovate_fixture(name);
+    let start = changed_file(
+        &repository,
+        "Cargo.toml",
+        &RENOVATE_MANIFEST.replace("1.0.1", "1.0.0"),
+        &initial,
+    );
+    let published = repository.commit("branch", &[&start]);
+    repository.git(&["read-tree", &start]);
+    let default = changed_file(&repository, "Cargo.toml", RENOVATE_MANIFEST, &start);
+    let tree = repository.git(&["merge-tree", "--write-tree", &published, &default]);
+    let merged = repository.git(&[
+        "commit-tree",
+        &tree,
+        "-p",
+        &published,
+        "-p",
+        &default,
+        "-m",
+        "merge default history",
+    ]);
+    repository.git(&["read-tree", &tree]);
+    let offered = changed_file(
+        &repository,
+        "Cargo.toml",
+        &format!("{RENOVATE_MANIFEST}# independent manifest edit\n"),
+        &merged,
+    );
+    repository.git(&["update-ref", "refs/heads/dependency", &offered]);
+    repository.git(&[
+        "update-ref",
+        "refs/heads/main",
+        if published_default { &default } else { &start },
+    ]);
+    repository.git(&["update-ref", "refs/remotes/origin/main", &default]);
+    let origin = repository.scope.join("origin.git");
+    let origin = origin.to_str().unwrap();
+    repository.git(&["clone", "--quiet", "--bare", "--no-hardlinks", ".", origin]);
+    repository.git(&["remote", "add", "origin", origin]);
+    (repository, published, offered)
+}
+
+#[test]
+fn renovate_excludes_dependencies_imported_from_the_actual_default_branch() {
+    let (repository, base, offered) =
+        integrated_manifest_fixture("renovate-integrated-default", true);
+    let mut report = current_renovate_report();
+    report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0]["updates"] =
+        serde_json::json!([{"updateType":"patch","newValue":"1.0.2"}]);
+    let output = report_gate_on(&repository, &base, &offered, &report, "dependency");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(repository.scope.join("arguments").exists());
+}
+
+#[test]
+fn renovate_keeps_unpublished_parents_in_scope_despite_a_cached_default_ref() {
+    let (repository, base, offered) =
+        integrated_manifest_fixture("renovate-unpublished-default", false);
+    let mut report = current_renovate_report();
+    report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0]["updates"] =
+        serde_json::json!([{"updateType":"patch","newValue":"1.0.2"}]);
+    let output = report_gate_on(&repository, &base, &offered, &report, "dependency");
+    assert_eq!(refusal(&output).rule, "push.dependencies");
+}
+
+#[test]
+fn renovate_checks_new_dependency_edits_after_an_integrated_merge_and_on_new_branches() {
+    let (repository, base, merged) =
+        integrated_manifest_fixture("renovate-authored-after-merge", true);
+    repository.git(&["symbolic-ref", "HEAD", "refs/heads/dependency"]);
+    let offered = changed_file(
+        &repository,
+        "Cargo.toml",
+        &RENOVATE_MANIFEST.replace("1.0.1", "1.0.2"),
+        &merged,
+    );
+    let mut report = current_renovate_report();
+    let dependency = &mut report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0];
+    dependency["currentValue"] = "1.0.2".into();
+    dependency["updates"] = serde_json::json!([{"updateType":"patch","newValue":"1.0.3"}]);
+    for published in [&base, ZERO] {
+        let output = report_gate_on(&repository, published, &offered, &report, "dependency");
+        assert_eq!(refusal(&output).rule, "push.dependencies");
+    }
+}
+
+#[test]
+fn renovate_refuses_an_unavailable_default_before_lookup_for_an_integrated_push() {
+    let (repository, base, offered) = integrated_manifest_fixture("renovate-missing-default", true);
+    let missing = repository.scope.join("missing.git");
+    repository.git(&["remote", "set-url", "origin", missing.to_str().unwrap()]);
+    let output = report_gate_on(
+        &repository,
+        &base,
+        &offered,
+        &current_renovate_report(),
+        "dependency",
+    );
+    assert_eq!(refusal(&output).rule, "push.evidence");
+    assert!(!repository.scope.join("arguments").exists());
+}
+
+#[test]
+fn renovate_attributes_resolved_manifest_conflicts_to_the_selected_source() {
+    for (version, accepted) in [("1.0.3", true), ("1.0.4", false)] {
+        let (repository, base, initial) =
+            integrated_manifest_fixture(&format!("renovate-resolved-{version}"), true);
+        let previous_default = repository.git(&["rev-parse", "refs/heads/main"]);
+        repository.git(&["read-tree", &previous_default]);
+        let default = changed_file(
+            &repository,
+            "Cargo.toml",
+            &RENOVATE_MANIFEST.replace("1.0.1", "1.0.3"),
+            &previous_default,
+        );
+        repository.git(&[
+            "push",
+            "--quiet",
+            "origin",
+            &format!("{default}:refs/heads/main"),
+        ]);
+        repository.git(&["read-tree", &initial]);
+        repository.git(&["symbolic-ref", "HEAD", "refs/heads/dependency"]);
+        let own = changed_file(
+            &repository,
+            "Cargo.toml",
+            &RENOVATE_MANIFEST.replace("1.0.1", "1.0.2"),
+            &initial,
+        );
+        let conflict = repository
+            .command("git")
+            .args(["merge-tree", "--write-tree", &own, &default])
+            .output()
+            .unwrap();
+        assert_eq!(conflict.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&conflict.stdout).contains("CONFLICT"));
+        std::fs::write(
+            repository.path().join("Cargo.toml"),
+            RENOVATE_MANIFEST.replace("1.0.1", version),
+        )
+        .unwrap();
+        repository.git(&["add", "Cargo.toml"]);
+        let tree = repository.git(&["write-tree"]);
+        let offered = repository.git(&[
+            "commit-tree",
+            &tree,
+            "-p",
+            &own,
+            "-p",
+            &default,
+            "-m",
+            "resolve manifest",
+        ]);
+        let mut report = current_renovate_report();
+        let dependency =
+            &mut report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0];
+        dependency["currentValue"] = version.into();
+        dependency["updates"] = serde_json::json!([{"updateType":"patch","newValue":"1.0.5"}]);
+        let output = report_gate_on(&repository, &base, &offered, &report, "dependency");
+        if accepted {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        } else {
+            assert_eq!(refusal(&output).rule, "push.dependencies");
+        }
+    }
 }
 
 const WORKSPACE_MANIFEST: &str = "[workspace]\nmembers = [\"member\"]\nexclude = [\"dependency\"]\nresolver = \"3\"\n[workspace.dependencies]\nrenamed = { package = \"actual-fixture\", version = \"1.0.1\" }\n[patch.crates-io]\nactual-fixture = { path = \"dependency\" }\n";
@@ -1290,6 +1479,17 @@ fn backend_report(
     }}}})
 }
 
+fn unlocked_backend_report(backend: (&str, &str, &str, &str)) -> serde_json::Value {
+    let mut report = backend_report(backend);
+    let diagnostic = report["repositories"]["local"]["packageFiles"]["mise"][0]["deps"][0]
+        .as_object_mut()
+        .unwrap();
+    diagnostic.remove("lockedVersion");
+    diagnostic.insert("depType".to_owned(), "tools".into());
+    diagnostic.insert("packageName".to_owned(), backend.0.into());
+    report
+}
+
 fn regex_counterpart(report: &mut serde_json::Value) -> &mut serde_json::Value {
     &mut report["repositories"]["local"]["packageFiles"]["regex"][0]["deps"][0]
 }
@@ -1536,6 +1736,99 @@ fn renovate_accepts_only_verified_backend_duplicates_and_still_checks_their_upda
 }
 
 #[test]
+fn renovate_unlocked_backend_uses_the_offered_literal_source() {
+    let (repository, _, initial) = renovate_fixture("renovate-unlocked-backend");
+    let mut rejected = Vec::new();
+    for backend in MISE_BACKENDS {
+        let (name, _, _, version) = backend;
+        let manifest = format!("[tools]\n{name:?} = {version:?}\n");
+        let offered = changed_file(&repository, "mise.toml", &manifest, &initial);
+        let report = unlocked_backend_report(backend);
+        std::fs::write(
+            repository.path().join("mise.toml"),
+            "working tree differs\n",
+        )
+        .unwrap();
+        let output = report_gate(&repository, &initial, &offered, &report);
+        if !output.status.success() {
+            rejected.push((name, String::from_utf8_lossy(&output.stderr).into_owned()));
+        }
+    }
+    assert!(
+        rejected.is_empty(),
+        "verified unlocked pins rejected: {rejected:?}"
+    );
+}
+
+#[test]
+fn renovate_unlocked_backends_reject_other_declarations_and_version_claims() {
+    let (repository, _, initial) = renovate_fixture("renovate-unlocked-source-refusals");
+    let backend = MISE_BACKENDS[4];
+    let report = unlocked_backend_report(backend);
+    for manifest in [
+        "[tools]\ndotnet = \"10.0.301\"\n",
+        "[other]\ndotnet = \"10.0.300\"\n",
+        "[tools]\nother = \"10.0.300\"\n",
+        "[tools]\ndotnet = { version = \"10.0.300\" }\n",
+        "invalid TOML",
+    ] {
+        let offered = changed_file(&repository, "mise.toml", manifest, &initial);
+        std::fs::write(
+            repository.path().join("mise.toml"),
+            "[tools]\ndotnet = \"10.0.300\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            refusal(&report_gate(&repository, &initial, &offered, &report)).rule,
+            "push.evidence",
+            "{manifest}"
+        );
+    }
+    let offered = changed_file(
+        &repository,
+        "mise.toml",
+        "[tools]\ndotnet = \"10.0.300\"\n",
+        &initial,
+    );
+    for (field, value) in [
+        ("depType", serde_json::json!("other")),
+        ("packageName", serde_json::json!("other")),
+        ("currentValue", serde_json::json!("10.0.301")),
+        ("currentVersion", serde_json::json!("10.0.301")),
+        ("currentDigest", serde_json::json!("unexpected")),
+        ("lockedVersion", serde_json::json!("10.0.301")),
+        ("lockedVersion", serde_json::json!("")),
+    ] {
+        let mut malformed = report.clone();
+        malformed["repositories"]["local"]["packageFiles"]["mise"][0]["deps"][0][field] = value;
+        assert_eq!(
+            refusal(&report_gate(&repository, &initial, &offered, &malformed)).rule,
+            "push.evidence",
+            "{field}"
+        );
+    }
+    let mut conflicting = report;
+    regex_counterpart(&mut conflicting)["currentVersion"] = "10.0.301".into();
+    assert_eq!(
+        refusal(&report_gate(&repository, &initial, &offered, &conflicting)).rule,
+        "push.evidence"
+    );
+}
+
+#[test]
+fn renovate_unlocked_backend_still_blocks_a_touched_outdated_pin() {
+    let (repository, base, offered) = renovate_fixture("renovate-unlocked-outdated");
+    let mut report = unlocked_backend_report(MISE_BACKENDS[0]);
+    regex_counterpart(&mut report)["updates"] = serde_json::json!([{
+        "updateType":"patch","newValue":"0.116.1","isBreaking":false
+    }]);
+    assert_eq!(
+        refusal(&report_gate(&repository, &base, &offered, &report)).rule,
+        "push.dependencies"
+    );
+}
+
+#[test]
 fn renovate_refuses_missing_mismatched_or_failed_backend_counterparts() {
     let (repository, base, offered) = renovate_fixture("renovate-bad-backend-coverage");
     let mut reports = Vec::new();
@@ -1586,8 +1879,24 @@ fn renovate_refuses_missing_mismatched_or_failed_backend_counterparts() {
         backend_report(("unknown", "crate", "unknown", "1.0.0")),
     ));
     for (name, report) in reports {
-        let output = report_gate(&repository, &base, &offered, &report);
-        assert_eq!(refusal(&output).rule, "push.evidence", "{name}");
+        for unlocked in [false, true] {
+            let mut report = report.clone();
+            if unlocked {
+                let diagnostic = report["repositories"]["local"]["packageFiles"]["mise"][0]["deps"]
+                    [0]
+                .as_object_mut()
+                .unwrap();
+                diagnostic.remove("lockedVersion");
+                diagnostic.insert("depType".to_owned(), "tools".into());
+                diagnostic.insert("packageName".to_owned(), MISE_BACKENDS[0].0.into());
+            }
+            let output = report_gate(&repository, &base, &offered, &report);
+            assert_eq!(
+                refusal(&output).rule,
+                "push.evidence",
+                "{name}, unlocked={unlocked}"
+            );
+        }
     }
 }
 

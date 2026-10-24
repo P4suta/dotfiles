@@ -26,6 +26,9 @@
 {{- $_ := set $hooks "PreToolUse" (concat $pre (list $own_pre)) -}}
 {{- $post := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PostToolUse" (list) $hooks) "suffixes" (list (printf " %s" $timed))) | fromJson -}}
 {{- $_ := set $hooks "PostToolUse" (concat $post (list (dict "matcher" $shells "hooks" (list $timing)))) -}}
+{{- $lint := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "lint-hook" "trace" true) | fromJson -}}
+{{- $post := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PostToolUse" (list) $hooks) "suffixes" (list " lint-hook")) | fromJson -}}
+{{- $_ := set $hooks "PostToolUse" (concat $post (list (dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list $lint)))) -}}
 {{- $edit := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "issue-guard" "trace" true) | fromJson -}}
 {{- $issue := dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list $edit) -}}
 {{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list $issue)) -}}
@@ -39,6 +42,12 @@
 {{-   if eq $event "Stop" -}}{{- $arguments = printf "%s --reply-language %s" $arguments (includeTemplate "partials/reply_language" $) -}}{{- end -}}
 {{-   $own = append $own (includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" $arguments "trace" true) | fromJson) -}}
 {{-   $_ := set $hooks $event (concat $groups (list (dict "hooks" $own))) -}}
+{{- end -}}
+{{- range $event, $point := dict "UserPromptSubmit" "begin" "Stop" "stop" -}}
+{{- $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list (printf " answer %s" $point))) | fromJson -}}
+{{- $answer := includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" (printf "answer %s" $point) "trace" true) | fromJson -}}
+{{- $_ := set $answer "timeout" 10 -}}
+{{- $_ := set $hooks $event (concat $groups (list (dict "hooks" (list $answer)))) -}}
 {{- end -}}
 {{- if eq (includeTemplate "partials/skill_ops_experimental" .) "true" -}}
 {{- $observe := dict "type" "command" "command" "skill-ops observe --client codex" "timeout" 10 -}}

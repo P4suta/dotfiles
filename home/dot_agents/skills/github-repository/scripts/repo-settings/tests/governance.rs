@@ -1,6 +1,8 @@
 use anyhow::{Result, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use repo_settings::{
-    Api, Environment, Operation, Profile, Repository, Snapshot, State, apply, plan,
+    Api, Environment, Operation, OwnerType, Profile, Repository, Snapshot, State, Workflow, apply,
+    plan,
 };
 use serde_json::{Value, json};
 use std::cell::{Cell, RefCell};
@@ -13,6 +15,7 @@ fn state() -> State {
             id: 7,
             full_name: "owner/project".into(),
             owner_id: 9,
+            owner_type: OwnerType::Organization,
             default_branch: "main".into(),
             archived: false,
             fork: false,
@@ -27,12 +30,17 @@ fn state() -> State {
                     {"type":"required_linear_history"},{"type":"pull_request","parameters":{
                         "required_approving_review_count":2,"dismiss_stale_reviews_on_push":true,
                         "require_code_owner_review":true,"required_review_thread_resolution":true}},
-                    {"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"actual-ci","integration_id":15368}]}}]}),
+                    {"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"actual-ci","integration_id":15368}],"strict_required_status_checks_policy":false}},
+                    {"type":"merge_queue","parameters":{"merge_method":"SQUASH"}}]}),
             json!({"id":2,"name":"tags","target":"tag","enforcement":"active","bypass_actors":[],
                 "conditions":{"ref_name":{"include":["refs/tags/v*"],"exclude":[]}},
                 "rules":[{"type":"update"},{"type":"deletion"},{"type":"non_fast_forward"}]}),
         ],
         environments: Vec::new(),
+        workflows: vec![Workflow {
+            path: QUEUE_WORKFLOW.into(),
+            yaml: "on: [pull_request, merge_group]\njobs:\n  actual-ci: {}\n".into(),
+        }],
         workflow_permissions: json!({"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}),
         security: json!({"secret_scanning":{"status":"enabled"},"secret_scanning_push_protection":{"status":"enabled"}}),
         actions: json!({"enabled":true,"allowed_actions":"selected","sha_pinning_required":true}),
@@ -105,6 +113,7 @@ fn applying_the_security_scope_verifies_each_setting() -> Result<()> {
     let api = MemoryApi {
         current: RefCell::new(previous.clone()),
         remove_required_check_on_enable: false,
+        ruleset_update_fault: None,
     };
     apply(&api, &planned, |_| Ok(()))?;
     let after = api.current.borrow();
@@ -133,6 +142,268 @@ fn snapshot(state: State) -> Snapshot {
         schema_version: 1,
         repositories: vec![state],
     }
+}
+
+const QUEUE_WORKFLOW: &str = ".github/workflows/ci.yml";
+const SECOND_WORKFLOW: &str = ".github/workflows/secondary.yaml";
+
+fn queue_state(workflows: &[(&str, &str)]) -> Result<State> {
+    let mut value = serde_json::to_value(state())?;
+    value["workflows"] = json!(
+        workflows
+            .iter()
+            .map(|(path, yaml)| { json!({"path": path, "yaml": yaml}) })
+            .collect::<Vec<_>>()
+    );
+    value["rulesets"][0]["rules"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|rule| rule["type"] != "merge_queue");
+    value["rulesets"][0]["rules"][5]["parameters"]["strict_required_status_checks_policy"] =
+        json!(true);
+    Ok(serde_json::from_value(value)?)
+}
+
+fn ready_queue_state() -> Result<State> {
+    queue_state(&[(
+        QUEUE_WORKFLOW,
+        "on: [pull_request, merge_group]\njobs:\n  actual-ci:\n    runs-on: ubuntu-latest\n    steps: []\n",
+    )])
+}
+
+fn queue_updates(planned: &repo_settings::Plan) -> Result<Vec<Value>> {
+    Ok(planned
+        .changes
+        .iter()
+        .map(|change| serde_json::to_value(&change.operation))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|operation| operation["kind"] == "update_ruleset")
+        .collect())
+}
+
+#[test]
+fn queue_without_required_checks_is_never_planned() -> Result<()> {
+    let mut original = ready_queue_state()?;
+    original.rulesets[0]["rules"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|rule| rule["type"] != "required_status_checks");
+    let planned = plan(snapshot(original), Profile::baseline()?)?;
+    assert!(planned.changes.is_empty());
+    assert!(
+        planned
+            .findings
+            .iter()
+            .any(|finding| finding.message.contains("never invents a check name"))
+    );
+    Ok(())
+}
+
+#[test]
+fn queue_requires_the_trigger_in_every_reporting_workflow() -> Result<()> {
+    let original = queue_state(&[
+        (
+            QUEUE_WORKFLOW,
+            "on: pull_request\njobs:\n  test:\n    name: actual-ci\n",
+        ),
+        (
+            SECOND_WORKFLOW,
+            "on: [push, pull_request]\njobs:\n  actual-ci: {}\n",
+        ),
+    ])?;
+    let planned = plan(snapshot(original), Profile::baseline()?)?;
+    assert!(planned.changes.is_empty());
+    for path in [QUEUE_WORKFLOW, SECOND_WORKFLOW] {
+        assert!(
+            planned
+                .findings
+                .iter()
+                .any(|finding| finding.message.contains(path)
+                    && finding.message.contains("merge_group")),
+            "missing trigger finding for {path}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn user_owned_repositories_keep_strict_checks_without_queue_findings() -> Result<()> {
+    for yaml in [
+        "on: [pull_request, merge_group]\njobs:\n  actual-ci: {}\n",
+        "on: pull_request\njobs:\n  actual-ci: {}\n",
+        "on: [invalid yaml",
+    ] {
+        for required_checks in [true, false] {
+            let mut previous = queue_state(&[(QUEUE_WORKFLOW, yaml)])?;
+            if !required_checks {
+                previous.rulesets[0]["rules"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|rule| rule["type"] != "required_status_checks");
+            }
+            let mut api = ReadOnlyApi::new(&previous);
+            api.responses.get_mut("repos/owner/project").unwrap()["owner"]["type"] = json!("User");
+            let original = repo_settings::audit(&api, "owner/project")?;
+            let planned = plan(snapshot(original.clone()), Profile::baseline()?)?;
+            assert!(planned.changes.is_empty(), "{:#?}", planned.changes);
+            assert!(planned.findings.is_empty(), "{:#?}", planned.findings);
+            assert_eq!(planned.snapshot.repositories[0], original);
+            assert_eq!(api.writes.get(), 0);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn legacy_snapshots_default_to_user_owned_and_skip_queue_planning() -> Result<()> {
+    let mut value = serde_json::to_value(snapshot(ready_queue_state()?))?;
+    value["repositories"][0]["repository"]
+        .as_object_mut()
+        .unwrap()
+        .remove("owner_type");
+    let original: Snapshot = serde_json::from_value(value)?;
+    assert_eq!(
+        original.repositories[0].repository.owner_type,
+        OwnerType::User
+    );
+    let planned = plan(original.clone(), Profile::baseline()?)?;
+    assert!(planned.changes.is_empty(), "{:#?}", planned.changes);
+    assert!(planned.findings.is_empty(), "{:#?}", planned.findings);
+    assert_eq!(planned.snapshot, original);
+    Ok(())
+}
+
+#[test]
+fn audit_records_the_owner_type() -> Result<()> {
+    for owner_type in ["User", "Organization"] {
+        let mut api = ReadOnlyApi::new(&ready_queue_state()?);
+        api.responses.get_mut("repos/owner/project").unwrap()["owner"]["type"] = json!(owner_type);
+        let audited = repo_settings::audit(&api, "owner/project")?;
+        assert_eq!(
+            serde_json::to_value(audited.repository)?["owner_type"],
+            owner_type
+        );
+        assert_eq!(api.writes.get(), 0);
+    }
+    Ok(())
+}
+
+#[test]
+fn audit_rejects_missing_or_unknown_owner_types() -> Result<()> {
+    for owner_type in [None, Some(json!("Bot")), Some(Value::Null)] {
+        let mut api = ReadOnlyApi::new(&ready_queue_state()?);
+        let owner = api.responses.get_mut("repos/owner/project").unwrap()["owner"]
+            .as_object_mut()
+            .unwrap();
+        if let Some(owner_type) = owner_type {
+            owner.insert("type".into(), owner_type);
+        } else {
+            owner.remove("type");
+        }
+        assert!(repo_settings::audit(&api, "owner/project").is_err());
+        assert_eq!(api.writes.get(), 0);
+    }
+    Ok(())
+}
+
+#[test]
+fn organization_owned_queue_ready_workflows_plan_one_squash_update_and_drop_strict_checks()
+-> Result<()> {
+    let api = ReadOnlyApi::new(&ready_queue_state()?);
+    let original = repo_settings::audit(&api, "owner/project")?;
+    let planned = plan(snapshot(original.clone()), Profile::baseline()?)?;
+    assert!(planned.findings.is_empty());
+    assert_eq!(planned.changes.len(), 1);
+    let updates = queue_updates(&planned)?;
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0]["id"], original.rulesets[0]["id"]);
+    assert_eq!(updates[0]["before"]["rules"], original.rulesets[0]["rules"]);
+    let rules = updates[0]["after"]["rules"].as_array().unwrap();
+    let queue = rules
+        .iter()
+        .find(|rule| rule["type"] == "merge_queue")
+        .unwrap();
+    assert_eq!(
+        queue["parameters"],
+        json!({
+            "merge_method": "SQUASH", "grouping_strategy": "ALLGREEN",
+            "max_entries_to_build": 1, "min_entries_to_merge": 1, "max_entries_to_merge": 1,
+            "min_entries_to_merge_wait_minutes": 0, "check_response_timeout_minutes": 60
+        })
+    );
+    let checks = rules
+        .iter()
+        .find(|rule| rule["type"] == "required_status_checks")
+        .unwrap();
+    assert_eq!(
+        checks["parameters"]["strict_required_status_checks_policy"],
+        false
+    );
+    Ok(())
+}
+
+#[test]
+fn queue_already_present_is_left_unchanged() -> Result<()> {
+    let mut original = ready_queue_state()?;
+    original.rulesets[0]["rules"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type": "merge_queue", "parameters": {"merge_method": "SQUASH"}}));
+    let planned = plan(snapshot(original), Profile::baseline()?)?;
+    assert!(planned.changes.is_empty());
+    assert!(planned.findings.is_empty());
+    Ok(())
+}
+
+#[test]
+fn queue_does_not_create_a_second_baseline_ruleset() -> Result<()> {
+    let original = ready_queue_state()?;
+    let planned = plan(snapshot(original), Profile::baseline()?)?;
+    assert!(
+        planned
+            .changes
+            .iter()
+            .all(|change| !matches!(change.operation, Operation::CreateRuleset { .. }))
+    );
+    assert_eq!(queue_updates(&planned)?.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn queue_update_preserves_the_complete_live_ruleset() -> Result<()> {
+    let mut original = ready_queue_state()?;
+    let protection = original.rulesets[0].clone();
+    original.rulesets[0]["name"] = json!("custom protected branch");
+    original.rulesets[0]["conditions"]["ref_name"]["include"] =
+        json!(["~DEFAULT_BRANCH", "refs/heads/stable/*"]);
+    original.rulesets[0]["bypass_actors"] =
+        json!([{"actor_id": 9, "actor_type": "Integration", "bypass_mode": "pull_request"}]);
+    original.rulesets.push(protection);
+    original.rulesets[0]["id"] = json!(3);
+    original.rulesets[0]["rules"].as_array_mut().unwrap().push(json!({
+        "type": "commit_message_pattern", "parameters": {"operator": "starts_with", "pattern": "feat"}
+    }));
+    original.rulesets[0]["created_at"] = json!("2026-10-01T00:00:00Z");
+    let planned = plan(snapshot(original.clone()), Profile::baseline()?)?;
+    let updates = queue_updates(&planned)?;
+    let update = updates
+        .iter()
+        .find(|update| update["id"] == original.rulesets[0]["id"])
+        .unwrap();
+    let mut expected = update["before"].clone();
+    assert_eq!(expected, original.rulesets[0]);
+    expected["rules"][5]["parameters"]["strict_required_status_checks_policy"] = json!(false);
+    let added_queue = update["after"]["rules"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(added_queue["type"], "merge_queue");
+    expected["rules"].as_array_mut().unwrap().push(added_queue);
+    assert_eq!(update["after"], expected);
+    Ok(())
 }
 
 #[test]
@@ -267,6 +538,8 @@ struct ReadOnlyApi {
     writes: Cell<usize>,
     repository_reads: Cell<usize>,
     change_identity_after_preflight: bool,
+    request_counts: RefCell<BTreeMap<String, usize>>,
+    response_changes: BTreeMap<String, (usize, Value)>,
 }
 
 impl ReadOnlyApi {
@@ -275,7 +548,7 @@ impl ReadOnlyApi {
         let mut raw = serde_json::to_value(&state.repository.settings).unwrap();
         raw["id"] = json!(state.repository.id);
         raw["full_name"] = json!(state.repository.full_name);
-        raw["owner"] = json!({"id":state.repository.owner_id});
+        raw["owner"] = json!({"id":state.repository.owner_id,"type":state.repository.owner_type});
         raw["default_branch"] = json!(state.repository.default_branch);
         raw["archived"] = json!(state.repository.archived);
         raw["fork"] = json!(state.repository.fork);
@@ -301,6 +574,37 @@ impl ReadOnlyApi {
             ),
             (format!("{root}/actions/permissions"), state.actions.clone()),
         ]);
+        let branch = repo_settings::encode_segment(&state.repository.default_branch);
+        responses.insert(
+            format!("{root}/contents?ref={branch}"),
+            json!([{"type":"dir","path":".github"}]),
+        );
+        responses.insert(
+            format!("{root}/contents/.github?ref={branch}"),
+            json!([{"type":"dir","path":".github/workflows"}]),
+        );
+        responses.insert(
+            format!("{root}/contents/.github/workflows?ref={branch}"),
+            json!(
+                state
+                    .workflows
+                    .iter()
+                    .map(|workflow| { json!({"type":"file", "path":workflow.path}) })
+                    .collect::<Vec<_>>()
+            ),
+        );
+        for workflow in &state.workflows {
+            let path = workflow
+                .path
+                .split('/')
+                .map(repo_settings::encode_segment)
+                .collect::<Vec<_>>()
+                .join("/");
+            responses.insert(
+                format!("{root}/contents/{path}?ref={branch}"),
+                json!({"encoding":"base64", "content":STANDARD.encode(&workflow.yaml)}),
+            );
+        }
         for rule in &state.rulesets {
             responses.insert(format!("{root}/rulesets/{}", rule["id"]), rule.clone());
         }
@@ -320,6 +624,8 @@ impl ReadOnlyApi {
             writes: Cell::new(0),
             repository_reads: Cell::new(0),
             change_identity_after_preflight: false,
+            request_counts: RefCell::new(BTreeMap::new()),
+            response_changes: BTreeMap::new(),
         }
     }
 }
@@ -334,6 +640,14 @@ impl Api for ReadOnlyApi {
             .get(endpoint)
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("unconfigured request {endpoint}"))?;
+        let mut counts = self.request_counts.borrow_mut();
+        let count = counts.entry(endpoint.to_owned()).or_default();
+        *count += 1;
+        if let Some((after, changed)) = self.response_changes.get(endpoint)
+            && *count >= *after
+        {
+            response = changed.clone();
+        }
         if endpoint == "repos/owner/project" {
             self.repository_reads.set(self.repository_reads.get() + 1);
             if self.change_identity_after_preflight && self.repository_reads.get() > 1 {
@@ -385,6 +699,8 @@ fn edited_plan_is_rejected_before_network_calls() {
         writes: Cell::new(0),
         repository_reads: Cell::new(0),
         change_identity_after_preflight: false,
+        request_counts: RefCell::new(BTreeMap::new()),
+        response_changes: BTreeMap::new(),
     };
     assert!(
         apply(&api, &planned, |_| Ok(()))
@@ -453,6 +769,14 @@ fn absent_ci_is_a_finding_and_never_an_invented_required_check() {
 struct MemoryApi {
     current: RefCell<State>,
     remove_required_check_on_enable: bool,
+    ruleset_update_fault: Option<RulesetUpdateFault>,
+}
+
+#[derive(Clone, Copy)]
+enum RulesetUpdateFault {
+    Ignore,
+    DropRequiredCheck,
+    WrongIdentity,
 }
 
 #[test]
@@ -484,6 +808,7 @@ fn environment_scope_preserves_merge_settings_rulesets_and_immutability() -> Res
     let api = MemoryApi {
         current: RefCell::new(previous.clone()),
         remove_required_check_on_enable: true,
+        ruleset_update_fault: None,
     };
     apply(&api, &planned, |_| Ok(()))?;
     let after = api.current.borrow();
@@ -531,6 +856,7 @@ fn immutability_scope_cannot_change_repository_or_approval_gates() -> Result<()>
     let api = MemoryApi {
         current: RefCell::new(previous.clone()),
         remove_required_check_on_enable: false,
+        ruleset_update_fault: None,
     };
     apply(&api, &planned, |_| Ok(()))?;
     let after = api.current.borrow();
@@ -567,6 +893,7 @@ fn applying_merge_defaults_verifies_only_that_scope_and_preserves_other_gates() 
     let api = MemoryApi {
         current: RefCell::new(previous.clone()),
         remove_required_check_on_enable: false,
+        ruleset_update_fault: None,
     };
     apply(&api, &planned, |_| Ok(()))?;
     let after = api.current.borrow();
@@ -590,7 +917,16 @@ impl Api for MemoryApi {
         Ok(self.current.borrow().metadata.clone())
     }
     fn read(&self, endpoint: &str) -> Result<Value> {
-        ReadOnlyApi::new(&self.current.borrow()).read(endpoint)
+        let state = self.current.borrow();
+        if matches!(
+            self.ruleset_update_fault,
+            Some(RulesetUpdateFault::WrongIdentity)
+        ) && endpoint == "repos/owner/project/rulesets/1"
+            && state.rulesets[0]["id"] != 1
+        {
+            return Ok(state.rulesets[0].clone());
+        }
+        ReadOnlyApi::new(&state).read(endpoint)
     }
 
     fn write(&self, mutation: repo_settings::Mutation<'_>) -> Result<Value> {
@@ -621,6 +957,32 @@ impl Api for MemoryApi {
                 Ok(Value::Null)
             }
             Mutation::CreateRuleset { .. } => bail!("unexpected ruleset creation"),
+            Mutation::UpdateRuleset {
+                id, before, after, ..
+            } => {
+                let ruleset = state
+                    .rulesets
+                    .iter_mut()
+                    .find(|ruleset| ruleset["id"] == id)
+                    .unwrap();
+                assert_eq!(ruleset, before);
+                match self.ruleset_update_fault {
+                    None => *ruleset = after.clone(),
+                    Some(RulesetUpdateFault::Ignore) => {}
+                    Some(RulesetUpdateFault::DropRequiredCheck) => {
+                        *ruleset = after.clone();
+                        ruleset["rules"]
+                            .as_array_mut()
+                            .unwrap()
+                            .retain(|rule| rule["type"] != "required_status_checks");
+                    }
+                    Some(RulesetUpdateFault::WrongIdentity) => {
+                        *ruleset = after.clone();
+                        ruleset["id"] = json!(id + 1);
+                    }
+                }
+                Ok(ruleset.clone())
+            }
             Mutation::SecretScanning { .. } => {
                 state.security["secret_scanning"]["status"] = json!("enabled");
                 state.security["secret_scanning_push_protection"]["status"] = json!("enabled");
@@ -656,6 +1018,7 @@ fn apply_verifies_settings_and_preserves_existing_gates() {
     let api = MemoryApi {
         current: RefCell::new(previous.clone()),
         remove_required_check_on_enable: false,
+        ruleset_update_fault: None,
     };
     let mut phases = Vec::new();
     apply(&api, &planned, |event| {
@@ -696,6 +1059,7 @@ fn final_verification_detects_a_lost_ci_gate_even_when_the_baseline_passes() {
     let api = MemoryApi {
         current: RefCell::new(previous),
         remove_required_check_on_enable: true,
+        ruleset_update_fault: None,
     };
     let error = apply(&api, &planned, |_| Ok(())).unwrap_err();
     assert!(error.to_string().contains("existing protections changed"));
@@ -721,4 +1085,176 @@ fn failed_mutation_is_reported_and_never_recorded_as_verified() {
         .is_err()
     );
     assert_eq!(phases, ["applying", "failed"]);
+}
+
+#[test]
+fn applying_queue_update_preserves_state_and_verifies_the_complete_ruleset() -> Result<()> {
+    for update_settings_first in [false, true] {
+        let mut previous = ready_queue_state()?;
+        if update_settings_first {
+            previous
+                .repository
+                .settings
+                .insert("allow_update_branch".into(), json!(false));
+            previous.immutable["enabled"] = json!(false);
+        }
+        let planned = plan(snapshot(previous.clone()), Profile::baseline()?)?;
+        let Operation::UpdateRuleset {
+            after: expected, ..
+        } = &planned.changes.last().unwrap().operation
+        else {
+            panic!("expected ruleset update");
+        };
+        let api = MemoryApi {
+            current: RefCell::new(previous.clone()),
+            remove_required_check_on_enable: false,
+            ruleset_update_fault: None,
+        };
+        let mut events = Vec::new();
+        apply(&api, &planned, |event| {
+            events.push(serde_json::to_value(event)?);
+            Ok(())
+        })?;
+        assert_eq!(events.len(), planned.changes.len() * 2);
+        for (events, change) in events.as_chunks::<2>().0.iter().zip(&planned.changes) {
+            assert_eq!(events[0]["phase"], "applying");
+            assert_eq!(events[1]["phase"], "verified");
+            assert_eq!(events[0]["change"], serde_json::to_value(change)?);
+            assert_eq!(events[1]["change"], serde_json::to_value(change)?);
+        }
+        let after = api.current.borrow();
+        previous.rulesets[0] = expected.clone();
+        previous.repository.settings = Profile::baseline()?.repository;
+        previous.immutable["enabled"] = json!(true);
+        assert_eq!(*after, previous);
+    }
+    Ok(())
+}
+
+#[test]
+fn queue_update_write_failure_is_reported_without_verification() -> Result<()> {
+    let previous = ready_queue_state()?;
+    let planned = plan(snapshot(previous.clone()), Profile::baseline()?)?;
+    let api = ReadOnlyApi::new(&previous);
+    let mut events = Vec::new();
+    let error = apply(&api, &planned, |event| {
+        events.push(serde_json::to_value(event)?);
+        Ok(())
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("unexpected write"));
+    assert_eq!(api.writes.get(), 1);
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["phase"], "applying");
+    assert_eq!(events[1]["phase"], "failed");
+    assert_eq!(events[1]["change"]["operation"]["kind"], "update_ruleset");
+    assert!(
+        events[1]["error"]
+            .as_str()
+            .unwrap()
+            .contains("unexpected write")
+    );
+    Ok(())
+}
+
+#[test]
+fn queue_update_refuses_a_stale_ruleset_or_workflow_before_any_write() -> Result<()> {
+    let previous = ready_queue_state()?;
+    let planned = plan(snapshot(previous.clone()), Profile::baseline()?)?;
+    for workflow_changed in [false, true] {
+        let mut live = previous.clone();
+        if workflow_changed {
+            live.workflows[0].yaml = "on: pull_request\njobs:\n  actual-ci: {}\n".into();
+        } else {
+            live.rulesets[0]["bypass_actors"] = json!([{"actor_id": 9, "actor_type": "Integration", "bypass_mode": "pull_request"}]);
+        }
+        let api = ReadOnlyApi::new(&live);
+        let mut events = Vec::new();
+        let error = apply(&api, &planned, |event| {
+            events.push(serde_json::to_value(event)?);
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("settings changed since audit"));
+        assert_eq!(api.writes.get(), 0);
+        assert!(events.is_empty());
+    }
+    Ok(())
+}
+
+#[test]
+fn queue_update_rechecks_workflows_and_rulesets_immediately_before_writing() -> Result<()> {
+    let previous = ready_queue_state()?;
+    let planned = plan(snapshot(previous.clone()), Profile::baseline()?)?;
+    let workflow_endpoint = format!("repos/owner/project/contents/{QUEUE_WORKFLOW}?ref=main");
+    let ruleset_endpoint = "repos/owner/project/rulesets/1";
+    let mut changed_ruleset = previous.rulesets[0].clone();
+    changed_ruleset["name"] = json!("changed since preflight");
+    for (endpoint, after, response, expected_error) in [
+        (
+            workflow_endpoint.as_str(),
+            2,
+            json!({"encoding":"base64", "content":STANDARD.encode("on: pull_request\njobs:\n  actual-ci: {}\n")}),
+            "settings or workflows changed before ruleset update",
+        ),
+        (
+            ruleset_endpoint,
+            2,
+            changed_ruleset.clone(),
+            "settings or workflows changed before ruleset update",
+        ),
+        (
+            ruleset_endpoint,
+            3,
+            changed_ruleset,
+            "ruleset changed before write",
+        ),
+    ] {
+        let mut api = ReadOnlyApi::new(&previous);
+        api.response_changes
+            .insert(endpoint.into(), (after, response));
+        let mut events = Vec::new();
+        let error = apply(&api, &planned, |event| {
+            events.push(serde_json::to_value(event)?);
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains(expected_error), "{error:#}");
+        assert_eq!(api.writes.get(), 0);
+        assert!(events.is_empty());
+    }
+    Ok(())
+}
+
+#[test]
+fn queue_update_verification_rejects_an_ignored_or_damaged_ruleset() -> Result<()> {
+    let previous = ready_queue_state()?;
+    let planned = plan(snapshot(previous.clone()), Profile::baseline()?)?;
+    for fault in [
+        RulesetUpdateFault::Ignore,
+        RulesetUpdateFault::DropRequiredCheck,
+        RulesetUpdateFault::WrongIdentity,
+    ] {
+        let api = MemoryApi {
+            current: RefCell::new(previous.clone()),
+            remove_required_check_on_enable: false,
+            ruleset_update_fault: Some(fault),
+        };
+        let mut events = Vec::new();
+        let error = apply(&api, &planned, |event| {
+            events.push(serde_json::to_value(event)?);
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["phase"], "applying");
+        assert_eq!(events[1]["phase"], "failed");
+        assert!(
+            error
+                .to_string()
+                .contains("ruleset update verification failed"),
+            "{error:#}"
+        );
+    }
+    Ok(())
 }

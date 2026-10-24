@@ -17,6 +17,10 @@ dotfiles-prepend-path
 $env.DOTFILES_NU_SESSION = "1"
 
 let onepassword_agent = (($env.HOME? | default $nu.home-dir) | path join ".1password" "agent.sock")
-if (($env.SSH_CONNECTION? | default "") | is-empty) and ($onepassword_agent | path exists) {
+let explicit_agent = ($env.DOTFILES_SSH_AUTH_SOCK? | default "")
+$env.GIT_SSH_COMMAND = "/usr/bin/ssh"
+if ($explicit_agent | is-not-empty) and ($explicit_agent | path exists) {
+  $env.SSH_AUTH_SOCK = $explicit_agent
+} else if (($env.SSH_CONNECTION? | default "") | is-empty) {
   $env.SSH_AUTH_SOCK = $onepassword_agent
 }

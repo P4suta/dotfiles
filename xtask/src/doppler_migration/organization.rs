@@ -8,10 +8,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+mod audit;
 mod cutover;
 mod model;
 mod prepare;
 mod retire;
+mod unused_sync;
 mod workflows;
 
 const IDENTITY_LIMIT: usize = 50;
@@ -49,17 +51,23 @@ pub struct Request {
     verification_run: Option<u64>,
     #[arg(long)]
     verification_attempt: Option<u64>,
+    #[arg(long)]
+    sync: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 enum Phase {
     Plan,
+    /// Inspect GitHub sync metadata without reading secret values or changing delivery.
+    Audit,
     Prepare,
     StopSourceSyncs,
     Workflows,
     Verify,
     Cleanup,
     RetireConsumer,
+    /// Preview or disconnect one unused registry mirror while preserving stored credentials.
+    RetireUnusedSync,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -251,7 +259,10 @@ fn read_report(request: &Request) -> Result<Report> {
             repository.directory.parent() == Some(request.checkouts.as_path()),
             "repository escaped the checkout scope"
         );
-        if request.phase != Phase::RetireConsumer {
+        if !matches!(
+            request.phase,
+            Phase::RetireConsumer | Phase::RetireUnusedSync
+        ) {
             model::verify_repository(repository)?;
         }
     }
@@ -262,23 +273,43 @@ fn read_report(request: &Request) -> Result<Report> {
 /// Refuses identity drift, unexpected resources, missing consumer evidence, and writes without `--apply`.
 pub fn run(request: &Request) -> Result<()> {
     ensure!(
+        matches!(
+            request.phase,
+            Phase::RetireConsumer | Phase::RetireUnusedSync
+        ) || request.consumer.is_none(),
+        "consumer selection requires a retirement phase"
+    );
+    ensure!(
         request.phase == Phase::RetireConsumer
-            || request.consumer.is_none()
-                && request.verification_run.is_none()
-                && request.verification_attempt.is_none(),
+            || request.verification_run.is_none() && request.verification_attempt.is_none(),
         "consumer verification arguments require --phase retire-consumer"
+    );
+    ensure!(
+        request.phase == Phase::RetireUnusedSync || request.sync.is_none(),
+        "sync selection requires --phase retire-unused-sync"
+    );
+    ensure!(
+        request.phase != Phase::RetireUnusedSync
+            || request
+                .consumer
+                .as_deref()
+                .is_some_and(|name| !name.is_empty())
+                && request.sync.as_deref().is_some_and(|slug| !slug.is_empty()),
+        "one consumer and sync are required for unused sync retirement"
     );
     ensure!(
         request.checkouts.is_absolute() && request.report.is_absolute(),
         "absolute organization paths required"
     );
     ensure!(
-        request.phase == Phase::RetireConsumer
-            || request.apply
-                == matches!(
-                    request.phase,
-                    Phase::Prepare | Phase::StopSourceSyncs | Phase::Workflows | Phase::Cleanup
-                ),
+        matches!(
+            request.phase,
+            Phase::RetireConsumer | Phase::RetireUnusedSync
+        ) || request.apply
+            == matches!(
+                request.phase,
+                Phase::Prepare | Phase::StopSourceSyncs | Phase::Workflows | Phase::Cleanup
+            ),
         "mutation phases require --apply; read-only phases refuse it"
     );
     let session = Session::open(
@@ -299,12 +330,14 @@ pub fn run(request: &Request) -> Result<()> {
     let report = read_report(request)?;
     match request.phase {
         Phase::Plan => {}
+        Phase::Audit => audit::run(&session, &report.workplace)?,
         Phase::Prepare => prepare::run(&session, &report)?,
         Phase::StopSourceSyncs => retire::stop_source(request, &session, &report)?,
         Phase::Workflows => workflows::rewrite(&report)?,
         Phase::Verify => prepare::verify(&session, &report)?,
         Phase::Cleanup => retire::cleanup(request, &session, &report)?,
         Phase::RetireConsumer => cutover::run(request, &session, &report)?,
+        Phase::RetireUnusedSync => unused_sync::run(request, &session, &report)?,
     }
     Ok(())
 }

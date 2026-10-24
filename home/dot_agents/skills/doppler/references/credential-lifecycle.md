@@ -5,6 +5,9 @@
 Read project and config metadata, secret names, GitHub consumers, environment protections, OIDC subjects, and machine-local selections.
 Read no secret values for inventory or readiness.
 Record what each consumer needs and whether it uses native workload identity, an active stored credential, a retired credential, or an unresolved input.
+Check production feature availability for the actual account and package before treating native identity as a migration prerequisite.
+Documentation and implementation source establish a supported design, while an available registration path and matching provider configuration establish readiness.
+Record an owner's explicit token choice as the active design, with permission, lifetime, rotation, and delivery requirements.
 Investigate retirement when the owner reports revoking a key.
 Keep private values, tokens, local paths, and machine identities out of shared skills and tracked reports.
 
@@ -47,6 +50,9 @@ Keep authentication verification in a manual workflow with no publishing or sign
 Keep existing environment protection, and name the workflow and requested operation before any approval.
 Leave a human gate pending when the owner hasn't delegated that exact approval.
 Distinguish metadata, authentication, signing, notarization, and publication results.
+Fetching a nonempty token establishes delivery.
+Provider permissions, lifetime, and revocation need their own evidence.
+Use a read-only provider check when it supports the token's narrow permissions, and state what the check leaves unverified.
 
 ## Migrate and retire
 

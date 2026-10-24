@@ -2,6 +2,31 @@ use std::io::Write;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if std::env::current_exe()?.file_stem() == Some(std::ffi::OsStr::new("mise")) {
+        if std::env::current_dir()?.canonicalize()?
+            != std::path::PathBuf::from(std::env::var_os("HOME").ok_or("owner home missing")?)
+                .canonicalize()?
+        {
+            return Err("gh-stack must resolve outside the target repository".into());
+        }
+        if args
+            != [
+                "which",
+                "--tool",
+                "github:github/gh-stack@v0.2.1",
+                "gh-stack",
+            ]
+        {
+            return Err(format!("unexpected owner tool resolution: {args:?}").into());
+        }
+        println!(
+            "{}",
+            std::env::current_exe()?
+                .with_file_name(format!("gh-stack{}", std::env::consts::EXE_SUFFIX))
+                .display()
+        );
+        return Ok(());
+    }
     if std::env::current_exe()?.file_stem() == Some(std::ffi::OsStr::new("git")) {
         return git(args);
     }
@@ -26,6 +51,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(index) = args.iter().position(|arg| arg == "--body-file") {
         writeln!(log, "body:\n{}", std::fs::read_to_string(&args[index + 1])?)?;
     }
+    if let Some(index) = args.iter().position(|arg| arg == "--input") {
+        writeln!(
+            log,
+            "input:\n{}",
+            std::fs::read_to_string(&args[index + 1])?
+        )?;
+    }
     if std::env::var("GH_FIXTURE_FAILURE").ok().as_ref() == args.get(1) {
         eprintln!("injected gh failure");
         std::process::exit(42);
@@ -37,7 +69,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .or_else(|_| std::env::var("GH_FIXTURE_HEADERS"))
                 .unwrap_or_else(|_| format!("HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 4990\nX-Ratelimit-Reset: 1800000000\nX-Ratelimit-Resource: {}", if variable == "GH_FIXTURE_GRAPHQL" { "graphql" } else { "core" }))
         };
-        let variable = if endpoint == "graphql" {
+        let variable = if endpoint.contains("/merge-async") {
+            "GH_FIXTURE_ASYNC"
+        } else if endpoint == "graphql" {
             "GH_FIXTURE_GRAPHQL"
         } else if endpoint.contains("/branches/") && !endpoint.contains("/rules/") {
             "GH_FIXTURE_BRANCH"
@@ -61,11 +95,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GH_FIXTURE_REPOSITORY"
         };
         if args.iter().any(|arg| arg == "--include") {
-            println!("{}\n", headers(variable));
+            if variable == "GH_FIXTURE_ASYNC" && endpoint.contains("/merge-async/") {
+                println!(
+                    "HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 4990\nX-Ratelimit-Reset: 1800000000\nX-Ratelimit-Resource: core\n"
+                );
+            } else {
+                println!("{}\n", headers(variable));
+            }
+        }
+        if endpoint.contains("/pulls/")
+            && let Ok(pulls) = std::env::var("GH_FIXTURE_LINK_PULLS")
+        {
+            let number = endpoint
+                .rsplit('/')
+                .next()
+                .ok_or("link PR number missing")?;
+            let states = states::parse(&pulls)?;
+            let states = states.get(number).ok_or("link PR states missing")?;
+            let reads = std::fs::read_to_string(&log_path)?
+                .matches("issue-link-read\n")
+                .count();
+            writeln!(log, "issue-link-read")?;
+            if args.iter().any(|argument| argument == "PATCH")
+                && std::env::var_os("GH_FIXTURE_LINK_WRITE_FAILURE").is_some()
+            {
+                eprintln!("injected uncertain issue-link write");
+                std::process::exit(42);
+            }
+            println!("{}", states[reads.min(states.len() - 1)]);
+            return Ok(());
+        }
+        if variable == "GH_FIXTURE_BRANCH"
+            && let Ok(branches) = std::env::var("GH_FIXTURE_LINK_BRANCHES")
+        {
+            let branches = states::parse(&branches)?;
+            if let Some(states) = branches.get(&endpoint) {
+                let marker = format!("issue-link-branch {endpoint}");
+                let reads = std::fs::read_to_string(&log_path)?
+                    .lines()
+                    .filter(|line| *line == marker)
+                    .count();
+                writeln!(log, "{marker}")?;
+                println!("{}", states[reads.min(states.len() - 1)]);
+                return Ok(());
+            }
         }
         let responses = match variable {
             "GH_FIXTURE_REPOSITORY" => Some("GH_FIXTURE_REPOSITORIES"),
             "GH_FIXTURE_BRANCH" => Some("GH_FIXTURE_BRANCHES"),
+            "GH_FIXTURE_ISSUE" => Some("GH_FIXTURE_ISSUES"),
             _ => None,
         };
         if let Some(responses) = responses
@@ -74,7 +152,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{response}");
             return Ok(());
         }
-        if variable == "GH_FIXTURE_GRAPHQL" {
+        if variable == "GH_FIXTURE_ASYNC" {
+            let variable = if endpoint.contains("/merge-async/") {
+                "GH_FIXTURE_ASYNC_POLL"
+            } else {
+                variable
+            };
+            println!(
+                "{}",
+                std::env::var(variable).unwrap_or_else(|_| {
+                    r#"{"status":"enqueued","details":{"message":"queued"}}"#.into()
+                })
+            );
+        } else if variable == "GH_FIXTURE_GRAPHQL" {
+            if let Some(index) = args.iter().position(|arg| arg == "--input")
+                && std::fs::read_to_string(&args[index + 1])?.contains("mergeQueueEntry")
+            {
+                let input = std::fs::read_to_string(&args[index + 1])?;
+                let number = input
+                    .split("\"number\":")
+                    .nth(1)
+                    .ok_or("queue PR missing")?
+                    .trim_start()
+                    .chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>();
+                let views = states::parse(&std::env::var("GH_FIXTURE_QUEUE")?)?;
+                let states = views.get(&number).ok_or("queue states missing")?;
+                let reads = std::fs::read_to_string(&log_path)?
+                    .matches(&format!("queue-read {number}\n"))
+                    .count();
+                writeln!(log, "queue-read {number}")?;
+                println!("{}", states[reads.min(states.len() - 1)]);
+                return Ok(());
+            }
             let head = current_graph_head(&args, &log_path)?;
             println!("{}", std::env::var(variable).unwrap_or_else(|_| format!("{{\"data\":{{\"repository\":{{\"pullRequest\":{{\"headRefOid\":\"{head}\",\"reviewThreads\":{{\"pageInfo\":{{\"hasNextPage\":false,\"endCursor\":null}},\"nodes\":[]}}}}}}}}}}")));
         } else if variable == "GH_FIXTURE_BRANCH" {
@@ -185,8 +296,57 @@ fn endpoint_response(
 }
 
 fn git(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let original = args;
+    let args: Vec<String> = original
+        .iter()
+        .skip_while(|arg| arg.as_str() == "--no-replace-objects")
+        .cloned()
+        .collect();
     let real = std::env::var_os("PWF_FIXTURE_REAL_GIT").ok_or("real fixture Git missing")?;
     let mut command = std::process::Command::new(real);
+    if args.starts_with(&["fetch".into(), "--quiet".into()])
+        && args.len() > 3
+        && let Some(bare) = std::env::var_os("PWF_FIXTURE_FETCH_BARE")
+    {
+        let checkout =
+            std::env::var_os("PWF_FIXTURE_FETCH_CHECKOUT").ok_or("owned fetch checkout missing")?;
+        if std::env::current_dir()?.canonicalize()?
+            != std::path::Path::new(&checkout).canonicalize()?
+        {
+            return Err("fixture fetch escaped its declared checkout".into());
+        }
+        command
+            .args(["fetch", "--quiet"])
+            .arg(bare)
+            .args(&args[3..]);
+        let output = command.output()?;
+        std::io::stdout().write_all(&output.stdout)?;
+        std::io::stderr().write_all(&output.stderr)?;
+        std::process::exit(output.status.code().unwrap_or(1));
+    }
+    if args.starts_with(&["fetch".into(), "--quiet".into()])
+        && args.len() > 3
+        && std::env::var_os("PWF_FIXTURE_FETCH_BARE").is_none()
+    {
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(std::env::var_os("GH_FIXTURE_LOG").ok_or("log missing")?)?;
+        writeln!(log, "git {}", args.join(" "))?;
+        for reference in &args[3..] {
+            if !command
+                .args(["rev-parse", "--verify", reference])
+                .status()?
+                .success()
+            {
+                return Err("the isolated fetch has no source for this object".into());
+            }
+            command = std::process::Command::new(
+                std::env::var_os("PWF_FIXTURE_REAL_GIT").ok_or("real Git missing")?,
+            );
+        }
+        return Ok(());
+    }
     if args == ["fetch", "--quiet", "origin"] {
         let checkout =
             std::env::var_os("PWF_FIXTURE_FETCH_CHECKOUT").ok_or("owned fetch checkout missing")?;
@@ -209,9 +369,22 @@ fn git(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
             .arg(bare)
             .arg("+refs/heads/*:refs/remotes/origin/*");
     } else {
-        command.args(args);
+        command.args(original);
     }
     let status = command.status()?;
+    if status.success()
+        && args.starts_with(&["merge-base".into(), "--is-ancestor".into()])
+        && let Ok(head) = std::env::var("GH_FIXTURE_AFTER_ANCESTRY_HEAD")
+    {
+        let updated = std::process::Command::new(
+            std::env::var_os("PWF_FIXTURE_REAL_GIT").ok_or("real Git missing")?,
+        )
+        .args(["update-ref", "refs/heads/feature", &head])
+        .status()?;
+        if !updated.success() {
+            return Err("owned ancestry-race injection failed".into());
+        }
+    }
     std::process::exit(status.code().unwrap_or(1));
 }
 

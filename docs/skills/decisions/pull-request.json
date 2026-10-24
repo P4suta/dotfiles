@@ -1,8 +1,17 @@
 {
-  "revision": "56d93472723a395928c71783db6abedec8150377acb1679bf3954896fb8771c8",
+  "revision": "649c4c2f12876be21f487aca6ef79788a04654f97422a715c1f1072f2b37e1ec",
   "outcome": "implemented",
-  "reason": "PR creation derives independence from an in-memory merge of overlapping heads.\nShared commits and conflicts require a stack, Git execution failures stop creation, and no caller override bypasses the decision.",
+  "reason": "Repository owners link open issues to existing PRs through live numeric owner and repository-network checks.\nThe operation preserves the original body prefix and review metadata, sends one body-only update, and checks its acknowledgement and readback.\nUnknown write outcomes stop without retrying, and unobserved concurrent edits remain an external assumption.\nNormal preparation and creation use the owner's open stack tip.\nOne stack counts as one work unit, and each declared independent PR adds one unit.\nIndependent declarations bind the owner-local reason to the repository identities, login, branch, issue, starting history, and created PR number.\nThe reason stays out of the public PR body.\nCreation checks dependencies on every PR outside the selected parent chain, including for a new stack member.\nIt reports and skips PRs opened by bots and stale PRs that already conflict with their own base.\nFor every remaining PR, shared commits and conflicts from an in-memory merge of overlapping heads require a stack or resolution before extending the open stack.\nGit execution failures stop creation, and no caller override bypasses the dependency decision.\nMerge commands fetch the verified heads, carry signed assessments only across unchanged diffs and identities, and wait for running checks.\nActive merge queue rules select queue admission, whose eventual result remains bound to the verified heads.\nEvery repository uses the owner's shared gh-stack installation at its pinned version.\nPersisted prose and replies keep one sentence per line in English and Japanese.\nSplit long sentences into shorter ones when a channel limits line length.\nThe shell guard checks available GitHub publication bodies with the matching prose channel.\nStatic word decoding preserves argument bytes, and unavailable or ambiguous inputs block the command.\nStructured name-and-email metadata keeps its spelling without making an identity claim.",
   "evidence": [
+    "crates/pr-workflow/src/link_issue.rs",
+    "docs/adr/link-issues-with-repository-owner-authority.md",
+    "crates/pr-workflow/src/work.rs",
+    "docs/adr/keep-independent-work-reasons-owner-local.md",
+    "crates/pr-workflow/src/merge.rs",
+    "crates/rules/src/pr_merge_rules.rs",
+    "crates/platform/src/tool.rs",
+    "home/.chezmoidata/tools.toml",
+    "home/.chezmoidata/versions.toml",
     "docs/adr/decide-pr-independence-from-merge-results.md",
     "policy/obligations.toml",
     "docs/adr/keep-workflow-evidence-local.md",
@@ -39,7 +48,18 @@
     "crates/rules/src/wip_rules.rs",
     "home/dot_agents/skills/pull-request/assets/workflow-policy.json",
     "home/dot_agents/skills/pull-request/tools.toml",
-    "xtask/tests/tool_inventory.rs"
+    "xtask/tests/tool_inventory.rs",
+    "crates/prose/tests/prose.rs",
+    "crates/dotfiles/tests/reply_language.rs",
+    "crates/dotfiles/src/claude_hook.rs",
+    "crates/dotfiles/src/claude_hook/github.rs",
+    "crates/dotfiles/src/legacy.rs",
+    "crates/dotfiles/src/legacy/syntax.rs",
+    "crates/dotfiles/tests/github_bodies.rs",
+    "crates/rules/src/body_rules.rs",
+    "fuzz/fuzz_targets/github_bodies.rs",
+    "fuzz/corpus/github_bodies/arguments",
+    "fuzz/corpus/github_bodies/nested-json"
   ],
   "revisit": null
 }

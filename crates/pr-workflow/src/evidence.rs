@@ -26,7 +26,7 @@ struct Verified {
     object: String,
 }
 
-fn home() -> Result<PathBuf> {
+pub(super) fn home() -> Result<PathBuf> {
     platform::home::home().context("the owner home for local workflow evidence is unavailable")
 }
 
@@ -40,7 +40,7 @@ fn plain(part: &str) -> bool {
 }
 
 /// The directory of `repository` for the evidence `kind`, such as `assessments/p4suta__dotfiles`.
-fn directory(home: &Path, kind: &str, repository: &str) -> Result<PathBuf> {
+pub(super) fn directory(home: &Path, kind: &str, repository: &str) -> Result<PathBuf> {
     let (owner, name) = repository
         .split_once('/')
         .context("local evidence needs an OWNER/REPO repository")?;
@@ -63,7 +63,7 @@ fn hexadecimal(value: &str) -> Result<&str> {
     Ok(value)
 }
 
-fn write(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(super) fn write(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("local evidence has no parent")?;
     fs::create_dir_all(parent)?;
     ensure!(

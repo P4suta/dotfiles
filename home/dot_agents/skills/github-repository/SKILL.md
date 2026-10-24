@@ -12,6 +12,16 @@ Use the Rust `repo-settings` CLI in [scripts/repo-settings](scripts/repo-setting
 Its audit checks the remote default branch with `dotfiles repository check --remote OWNER/REPO`, so install the reviewed `dotfiles` checker first.
 Resolve metadata, README, description, and license drift through `repository.toml` and `dotfiles repository generate --remote OWNER/REPO`.
 The [baseline](assets/baseline.json) defines the personal convention: squash-only merges, PR-title commits, an empty default commit body, branch cleanup, signed linear protected default branches, and protected version tags.
+The baseline requires a squash merge queue only for organization-owned repositories whose active default-branch rulesets require status checks.
+Audit records the repository owner's type as `User` or `Organization`, and older snapshots without that field default to `User`.
+For user-owned repositories, plan no queue change, preserve the strict check policy, and report no queue findings.
+Personal repositories rely on stacked pull requests, which merge atomically, and keep strict required checks.
+Audit reads workflow YAML from the default branch and identifies the jobs that report each required check.
+Every reporting workflow must include the `merge_group` trigger before the plan adds a queue.
+Resolve findings that name a missing trigger or an unverified check reporter before enabling the queue.
+The queue uses ALLGREEN grouping and tests one entry at a time, with no batching wait and a 60-minute check timeout.
+With the queue, set `strict_required_status_checks_policy` to false because the queue tests each change on the current base.
+Update the existing ruleset and preserve its other fields, rules, and bypass actors.
 Web signoff differs from cryptographic commit signing.
 
 Install the helper without publishing a package:

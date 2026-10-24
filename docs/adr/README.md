@@ -101,5 +101,16 @@
 | [2026-10-22 Assurance follows change provenance](assurance-follows-change-provenance.md) | proposed |  |
 | [2026-10-22 Decide PR independence from merge results](decide-pr-independence-from-merge-results.md) | proposed |  |
 | [2026-10-22 First push requires an empty remote advertisement](first-push-requires-an-empty-remote-advertisement.md) | accepted |  |
+| [2026-10-22 Lint agent writes and script invocations through one runtime](lint-agent-writes-and-script-invocations.md) | proposed |  |
 | [2026-10-22 Run heavy verification at the release gate](run-heavy-verification-at-the-release-gate.md) | accepted |  |
 | [2026-10-22 Scope a legacy bypass to one script invocation](script-scoped-legacy-bypass.md) | accepted |  |
+| [2026-10-22 Make one stack the unit of open work and merge it through a merge queue](stack-first-pull-requests-through-a-merge-queue.md) | amended | [2026-10-23](keep-independent-work-reasons-owner-local.md) |
+| [2026-10-23 Bind answer evidence to the current request and draft](bind-answer-evidence-to-the-current-request-and-draft.md) | proposed |  |
+| [2026-10-23 Keep independent work reasons in owner-local state](keep-independent-work-reasons-owner-local.md) | accepted |  |
+| [2026-10-23 Limit merge queues to organization-owned repositories](limit-merge-queues-to-organization-repositories.md) | accepted |  |
+| [2026-10-23 Link issues with repository owner authority](link-issues-with-repository-owner-authority.md) | accepted |  |
+| [2026-10-23 Resolve SSH agents at use time](resolve-ssh-agents-at-use-time.md) | proposed |  |
+| [2026-10-24 Prefer the supported native Windows sandbox](prefer-native-windows-sandbox.md) | proposed |  |
+| [2026-10-24 Preserve shell argument source spellings](preserve-shell-argument-source-spellings.md) | proposed |  |
+| [2026-10-24 Preserve reviewed repository license assets](preserved-repository-license-assets.md) | proposed |  |
+| [2026-10-24 Use plan delimiters as proposal context](use-plan-delimiters-as-proposal-context.md) | proposed |  |

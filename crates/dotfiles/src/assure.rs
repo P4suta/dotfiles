@@ -3,6 +3,8 @@
 //! The installed catalog and repository owner maps live under `~/.config/assure/`.
 //! An exemption sits in the comment block before the site it exempts.
 
+pub mod attributes;
+
 use crate::refusal::Refusal;
 use crate::reply_language_rules::{self, Language};
 use crate::shape_rules::{
@@ -420,14 +422,34 @@ fn contents(root: &Path, tree: &Tree, wanted: &[String]) -> Result<BTreeMap<Stri
     let prefix = match tree {
         Tree::Commit(None) => return Ok(BTreeMap::new()),
         Tree::WorkingTree => {
-            return Ok(wanted
-                .iter()
-                .filter_map(|path| {
-                    std::fs::read(root.join(path))
-                        .ok()
-                        .map(|bytes| (path.clone(), bytes))
-                })
-                .collect());
+            let mut found = BTreeMap::new();
+            for path in wanted {
+                let target = root.join(path);
+                let bytes =
+                    if attributes::is_attributes_path(path) {
+                        let metadata = match std::fs::symlink_metadata(&target) {
+                            Ok(metadata) => metadata,
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                            Err(error) => {
+                                return Err(error).with_context(|| {
+                                    format!("read attribute metadata for {}", target.display())
+                                });
+                            }
+                        };
+                        if !metadata.is_file() {
+                            continue;
+                        }
+                        Some(std::fs::read(&target).with_context(|| {
+                            format!("read attributes from {}", target.display())
+                        })?)
+                    } else {
+                        std::fs::read(&target).ok()
+                    };
+                if let Some(bytes) = bytes {
+                    found.insert(path.clone(), bytes);
+                }
+            }
+            return Ok(found);
         }
         Tree::Commit(Some(commit)) => format!("{commit}:"),
         Tree::Index => ":".to_owned(),
@@ -520,7 +542,7 @@ pub struct Gap {
 pub struct Survey {
     pub gaps: Vec<Gap>,
     budgets: BTreeMap<String, (Bound, u64)>,
-    /// The owners file and every file and corpus an owner names, which decide sites outside their own file.
+    /// Owner inputs and repository attributes that decide sites outside their own file.
     owning: BTreeSet<String>,
     owner_input: String,
 }
@@ -674,6 +696,13 @@ fn survey_with(
     let scanned = scanned(catalog, &all, scope);
     let mut wanted = candidates.clone();
     wanted.extend(scanned.iter().cloned());
+    for path in all
+        .iter()
+        .filter(|path| attributes::is_attributes_path(path))
+    {
+        result.owning.insert(path.clone());
+        wanted.push(path.clone());
+    }
     for owner in &owners.owners {
         result.owning.insert(owner.by.clone());
         wanted.push(owner.by.clone());
@@ -784,9 +813,9 @@ fn anti_patterns(
         .into());
     }
     let scratch = tempfile::tempdir()?;
-    for path in scanned {
-        if let Some(bytes) = files.get(path) {
-            let target = scratch.path().join(path);
+    for path in attributes::source_paths(scratch.path(), scanned, files)? {
+        if let Some(bytes) = files.get(&path) {
+            let target = scratch.path().join(&path);
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -1071,7 +1100,7 @@ pub fn describe(catalog: &Catalog, gap: &Gap) -> String {
     )
 }
 
-/// The paths that decide the change from `before` to `after`: the changed paths, or every path once an owner changed.
+/// The changed paths, or every path once owner inputs or repository attributes changed.
 fn scope(
     root: &Path,
     catalog: &Catalog,
@@ -1683,6 +1712,16 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                     .context("the stop hook input is invalid")?
             };
             let mut reasons = Vec::new();
+            if language.is_some() {
+                let reply = prose::Input::new(
+                    "reply",
+                    input.last_assistant_message.as_deref().unwrap_or_default(),
+                    false,
+                );
+                for finding in prose::sentence_per_line(&reply) {
+                    reasons.push(format!("Reply line {}: {}", finding.line, finding.message));
+                }
+            }
             if let Some(language) = language
                 && reply_language_rules::check(
                     language,

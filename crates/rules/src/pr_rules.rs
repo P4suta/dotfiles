@@ -49,6 +49,47 @@ pub enum IssueGate {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IssueLinkDecision {
+    NotOwner,
+    ClosedPull,
+    ClosedIssue,
+    Unchanged,
+    Append,
+}
+
+#[must_use]
+pub const fn issue_link(
+    authenticated: u64,
+    owner: u64,
+    open_pull: bool,
+    open_issue: bool,
+    linked: bool,
+) -> IssueLinkDecision {
+    if authenticated == 0 || owner == 0 || authenticated != owner {
+        IssueLinkDecision::NotOwner
+    } else if !open_pull {
+        IssueLinkDecision::ClosedPull
+    } else if !open_issue {
+        IssueLinkDecision::ClosedIssue
+    } else if linked {
+        IssueLinkDecision::Unchanged
+    } else {
+        IssueLinkDecision::Append
+    }
+}
+
+#[must_use]
+pub const fn issue_reference_gap(empty: bool, newline: bool, blank_line: bool) -> &'static str {
+    if empty || blank_line {
+        ""
+    } else if newline {
+        "\n"
+    } else {
+        "\n\n"
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceRelation {
     Same,
     ForkNetwork,
@@ -386,6 +427,37 @@ pub enum Dependency {
     Conflict,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DependencySkip {
+    Bot,
+    BaseConflict,
+}
+
+const APP_AUTHOR_PREFIX: &str = "app/";
+const BOT_AUTHOR_SUFFIX: &str = "[bot]";
+const BOT_AUTHOR_TYPE: &str = "Bot";
+const CONFLICTING_MERGEABILITY: &str = "CONFLICTING";
+
+#[must_use]
+pub fn dependency_skip(
+    login: &str,
+    author_type: Option<&str>,
+    is_bot: bool,
+    mergeable: Option<&str>,
+) -> Option<DependencySkip> {
+    if is_bot
+        || author_type == Some(BOT_AUTHOR_TYPE)
+        || login.starts_with(APP_AUTHOR_PREFIX)
+        || login.ends_with(BOT_AUTHOR_SUFFIX)
+    {
+        Some(DependencySkip::Bot)
+    } else if mergeable == Some(CONFLICTING_MERGEABILITY) {
+        Some(DependencySkip::BaseConflict)
+    } else {
+        None
+    }
+}
+
 /// A branch that shares commits with another open PR opens only stacked on that PR.
 /// Overlapping paths require a stack only when merging the two heads conflicts.
 #[must_use]
@@ -435,6 +507,63 @@ pub fn plan(
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_issue_link(authenticated: u64, owner: u64, flags: [bool; 3]) {
+        let [open_pull, open_issue, linked] = flags;
+        let decision = issue_link(authenticated, owner, open_pull, open_issue, linked);
+        let owns = authenticated != 0 && owner != 0 && authenticated == owner;
+        assert_eq!(decision == IssueLinkDecision::NotOwner, !owns);
+        assert_eq!(
+            decision == IssueLinkDecision::ClosedPull,
+            owns && !open_pull
+        );
+        assert_eq!(
+            decision == IssueLinkDecision::ClosedIssue,
+            owns && open_pull && !open_issue
+        );
+        assert_eq!(
+            decision == IssueLinkDecision::Unchanged,
+            owns && open_pull && open_issue && linked
+        );
+        assert_eq!(
+            decision == IssueLinkDecision::Append,
+            owns && open_pull && open_issue && !linked
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_the_numeric_owner_links_an_open_issue_to_an_open_pull() {
+        let authenticated = kani::any();
+        let owner = kani::any();
+        let flags = kani::any();
+        spec_issue_link(authenticated, owner, flags);
+        let decision = issue_link(authenticated, owner, flags[0], flags[1], flags[2]);
+        kani::cover!(decision == IssueLinkDecision::Append);
+        kani::cover!(decision == IssueLinkDecision::Unchanged);
+        kani::cover!(decision == IssueLinkDecision::NotOwner);
+        kani::cover!(decision == IssueLinkDecision::ClosedPull);
+        kani::cover!(decision == IssueLinkDecision::ClosedIssue);
+    }
+
+    pub fn spec_issue_reference_gap(flags: [bool; 3]) {
+        let [empty, newline, blank_line] = flags;
+        let gap = issue_reference_gap(empty, newline, blank_line);
+        assert_eq!(gap.is_empty(), empty || blank_line);
+        assert_eq!(gap == "\n", !empty && !blank_line && newline);
+        assert_eq!(gap == "\n\n", !empty && !blank_line && !newline);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn closing_reference_gaps_match_the_observed_paragraph_state() {
+        let flags = kani::any();
+        spec_issue_reference_gap(flags);
+        let gap = issue_reference_gap(flags[0], flags[1], flags[2]);
+        kani::cover!(gap.is_empty());
+        kani::cover!(gap == "\n");
+        kani::cover!(gap == "\n\n");
+    }
 
     pub fn spec_source_relation(identities: RepositoryIdentities) {
         let relation = source_relation(identities);
@@ -663,6 +792,52 @@ mod proofs {
         );
     }
 
+    pub fn spec_dependency_skip(
+        login: &str,
+        author_type: Option<&str>,
+        is_bot: bool,
+        mergeable: Option<&str>,
+    ) {
+        let bytes = login.as_bytes();
+        let bot = is_bot
+            || author_type == Some("Bot")
+            || bytes.get(..APP_AUTHOR_PREFIX.len()) == Some(APP_AUTHOR_PREFIX.as_bytes())
+            || bytes.get(bytes.len().saturating_sub(BOT_AUTHOR_SUFFIX.len())..)
+                == Some(BOT_AUTHOR_SUFFIX.as_bytes());
+        let skip = dependency_skip(login, author_type, is_bot, mergeable);
+        assert_eq!(skip == Some(DependencySkip::Bot), bot);
+        assert_eq!(
+            skip == Some(DependencySkip::BaseConflict),
+            !bot && mergeable == Some("CONFLICTING")
+        );
+        assert_eq!(skip.is_none(), !bot && mergeable != Some("CONFLICTING"));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn dependency_skips_only_bots_and_prs_conflicting_with_their_base() {
+        const LOGIN_BYTES: usize = 16;
+        let bytes: [u8; LOGIN_BYTES] = kani::any();
+        let length: usize = kani::any();
+        kani::assume(length <= bytes.len());
+        let Ok(login) = core::str::from_utf8(&bytes[..length]) else {
+            return;
+        };
+        let author_type = if kani::any() { Some("Bot") } else { None };
+        let is_bot = kani::any();
+        let mergeable = if kani::any() {
+            Some("CONFLICTING")
+        } else {
+            None
+        };
+        spec_dependency_skip(login, author_type, is_bot, mergeable);
+        let skip = dependency_skip(login, author_type, is_bot, mergeable);
+        kani::cover!(skip == Some(DependencySkip::Bot));
+        kani::cover!(skip == Some(DependencySkip::BaseConflict));
+        kani::cover!(skip.is_none());
+    }
+
     /// No operation requests a paused PR review, and an edit requests one only by removing the exclusion of a ready PR.
     pub fn spec_review(operation: Operation, generation: Generation, flags: [bool; 4]) {
         let [draft, was_excluded, excluded, paused] = flags;
@@ -820,6 +995,66 @@ mod proofs {
 mod tests {
     use super::*;
     use crate::domain::flags;
+
+    #[test]
+    fn issue_links_require_the_numeric_owner_and_open_resources_without_duplicates() {
+        for authenticated in [0, 1, 2, u64::MAX] {
+            for owner in [0, 1, 2, u64::MAX] {
+                for state in flags() {
+                    proofs::spec_issue_link(authenticated, owner, state);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn closing_reference_gaps_meet_every_boundary() {
+        for state in flags() {
+            proofs::spec_issue_reference_gap(state);
+        }
+    }
+
+    #[test]
+    fn dependency_skips_preserve_all_other_candidates() {
+        for (login, bot_login) in [
+            ("", false),
+            ("contributor", false),
+            ("app/p4suta-release-plz", true),
+            ("release-plz[bot]", true),
+            ("app/", true),
+            ("[bot]", true),
+            ("app", false),
+            ("App/release-plz", false),
+            ("myapp/release-plz", false),
+            ("release-plz[bot]-human", false),
+            ("release-plz[Bot]", false),
+            ("日本語", false),
+        ] {
+            for author_type in [None, Some("Bot"), Some("User"), Some("bot")] {
+                for is_bot in [false, true] {
+                    for mergeable in [
+                        None,
+                        Some("MERGEABLE"),
+                        Some("UNKNOWN"),
+                        Some("CONFLICTING"),
+                    ] {
+                        let expected = if bot_login || is_bot || author_type == Some("Bot") {
+                            Some(DependencySkip::Bot)
+                        } else if mergeable == Some("CONFLICTING") {
+                            Some(DependencySkip::BaseConflict)
+                        } else {
+                            None
+                        };
+                        assert_eq!(
+                            dependency_skip(login, author_type, is_bot, mergeable),
+                            expected
+                        );
+                        proofs::spec_dependency_skip(login, author_type, is_bot, mergeable);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn repository_identity_requires_a_known_common_network() {

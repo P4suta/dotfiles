@@ -235,7 +235,7 @@ fn separates(c: char, chars: &[char], index: usize, started: bool) -> bool {
 /// The words of each simple command in `command`, in order, each up to its first redirect.
 ///
 /// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
-/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::standard_input_bodies_include_heredocs_and_piped_words`.
+/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::shell_segments_preserve_literal_words_and_nested_scripts`.
 /// Reconsider when a cargo-fuzz target owns this function.
 #[must_use]
 pub fn segments(command: &str) -> Vec<Vec<String>> {
@@ -436,12 +436,6 @@ fn statement_redirects(statement: &str) -> bool {
     false
 }
 
-/// The words a flag and its separate value take.
-const FLAG_WITH_VALUE: usize = 2;
-
-/// The words of a `gh` subcommand: its group and its verb.
-const SUBCOMMAND_WORDS: usize = 2;
-
 fn writes_to(target: Option<&Token>) -> bool {
     match target {
         Some(Token::Word { text, .. }) => !matches!(text.as_str(), DISCARD | STDOUT | STDERR),
@@ -459,168 +453,6 @@ fn segment_words(segment: &[Token]) -> Vec<&str> {
             _ => None,
         })
         .collect()
-}
-
-/// Where the text of a body sent to GitHub comes from.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Source {
-    /// The command line carries the body.
-    Inline(String),
-    /// The command reads the body from a file that the command line names.
-    File(String),
-    /// The request payload comes from a JSON file, and the command sends its `body` string.
-    Json(String),
-    /// The body arrives on standard input: heredocs and the words of the rest of the command.
-    Stdin(String),
-}
-
-/// The `gh` subcommands that send a body, as `(group, verb)`.
-const BODY_COMMANDS: [(&str, &str); 7] = [
-    ("pr", "create"),
-    ("pr", "edit"),
-    ("pr", "comment"),
-    ("pr", "review"),
-    ("issue", "create"),
-    ("issue", "edit"),
-    ("issue", "comment"),
-];
-
-fn flag_value<'a>(arguments: &[&'a str], index: usize, names: &[&str]) -> Option<(&'a str, usize)> {
-    let argument = *arguments.get(index)?;
-    for name in names {
-        if argument == *name {
-            return arguments
-                .get(index + 1)
-                .map(|value| (*value, FLAG_WITH_VALUE));
-        }
-        let joined = argument
-            .strip_prefix(name)
-            .and_then(|rest| rest.strip_prefix('='))
-            .filter(|_| name.starts_with("--"));
-        if let Some(value) = joined {
-            return Some((value, 1));
-        }
-    }
-    None
-}
-
-fn file_source(path: &str) -> Source {
-    if path == "-" {
-        Source::Stdin(String::new())
-    } else {
-        Source::File(path.to_owned())
-    }
-}
-
-/// The value of a `key=value` field when the key names a body.
-fn body_value(field: &str) -> Option<&str> {
-    field
-        .split_once('=')
-        .filter(|(key, _)| *key == "body" || key.ends_with("[body]"))
-        .map(|(_, value)| value)
-}
-
-/// The words after the one at `index`.
-fn following<'a, 'b>(words: &'b [&'a str], index: usize) -> &'b [&'a str] {
-    words
-        .get(index..)
-        .and_then(<[&str]>::split_first)
-        .map_or(&[], |(_, rest)| rest)
-}
-
-/// The arguments after the `used` words a flag took, always at least the flag itself.
-fn after_flag<'a, 'b>(arguments: &'b [&'a str], used: usize) -> &'b [&'a str] {
-    arguments.get(used.max(1)..).unwrap_or_default()
-}
-
-fn api_sources(mut arguments: &[&str], sources: &mut Vec<Source>) {
-    while !arguments.is_empty() {
-        let mut used = 1;
-        if let Some((value, taken)) = flag_value(arguments, 0, &["-f", "--raw-field"]) {
-            if let Some(text) = body_value(value) {
-                sources.push(Source::Inline(text.to_owned()));
-            }
-            used = taken;
-        } else if let Some((value, taken)) = flag_value(arguments, 0, &["-F", "--field"]) {
-            if let Some(text) = body_value(value) {
-                sources.push(match text.strip_prefix('@') {
-                    Some(path) => file_source(path),
-                    None => Source::Inline(text.to_owned()),
-                });
-            }
-            used = taken;
-        } else if let Some((value, taken)) = flag_value(arguments, 0, &["--input"]) {
-            sources.push(match value {
-                "-" => Source::Stdin(String::new()),
-                path => Source::Json(path.to_owned()),
-            });
-            used = taken;
-        }
-        arguments = after_flag(arguments, used);
-    }
-}
-
-fn command_sources(mut arguments: &[&str], sources: &mut Vec<Source>) {
-    while !arguments.is_empty() {
-        let mut used = 1;
-        if let Some((value, taken)) = flag_value(arguments, 0, &["-b", "--body"]) {
-            sources.push(Source::Inline(value.to_owned()));
-            used = taken;
-        } else if let Some((value, taken)) = flag_value(arguments, 0, &["-F", "--body-file"]) {
-            sources.push(file_source(value));
-            used = taken;
-        }
-        arguments = after_flag(arguments, used);
-    }
-}
-
-/// Every place the bodies of the `gh` writes in a command come from.
-///
-/// This function resolves standard input because it knows the command text.
-/// Standard input covers the heredoc bodies and the words of every other command in the line.
-/// It also covers `echo "$text" | gh pr comment --body-file -`.
-///
-/// Exempt as disproportionate: a shell parser over unbounded text needs fuzzing, which no verifier here owns yet.
-/// Evidence: `crates/rules/src/shell_write_rules.rs::tests::gh_body_arguments_are_collected_from_every_spelling`.
-/// Reconsider when a cargo-fuzz target owns this function.
-pub fn body_sources(command: &str) -> Vec<Source> {
-    let scan = scan(command);
-    let segments: Vec<Vec<&str>> = scan
-        .tokens
-        .split(|token| *token == Token::Separator)
-        .map(segment_words)
-        .collect();
-    let mut sources = Vec::new();
-    for (position, words) in segments.iter().enumerate() {
-        let Some(gh) = words.iter().position(|word| program(word) == "gh") else {
-            continue;
-        };
-        let rest = following(words, gh);
-        let before = sources.len();
-        if let Some(api) = rest.iter().position(|word| *word == "api") {
-            api_sources(following(rest, api), &mut sources);
-        } else if BODY_COMMANDS.iter().any(|(group, verb)| {
-            rest.windows(SUBCOMMAND_WORDS)
-                .any(|pair| pair == [*group, *verb])
-        }) {
-            command_sources(rest, &mut sources);
-        }
-        let mut stdin = scan.heredocs.join("");
-        for (other, words) in segments.iter().enumerate() {
-            if other != position {
-                for word in words {
-                    stdin.push_str(word);
-                    stdin.push('\n');
-                }
-            }
-        }
-        for source in sources.iter_mut().skip(before) {
-            if matches!(source, Source::Stdin(_)) {
-                *source = Source::Stdin(stdin.clone());
-            }
-        }
-    }
-    sources
 }
 
 /// The two detections behind the verdict.
@@ -1240,88 +1072,6 @@ mod tests {
         }
     }
 
-    fn inline(text: &str) -> Source {
-        Source::Inline(text.to_owned())
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore = "Miri takes seconds over every spelling")]
-    fn gh_body_arguments_are_collected_from_every_spelling() {
-        for (command, expected) in [
-            ("gh pr create --title t --body 'a\nb'", vec![inline("a\nb")]),
-            ("gh pr create -b text", vec![inline("text")]),
-            ("gh issue create --body=text", vec![inline("text")]),
-            (
-                "gh pr edit 3 --body-file notes.md",
-                vec![Source::File("notes.md".into())],
-            ),
-            (
-                "env -u SSH_AUTH_SOCK gh -R a/b pr comment 3 -F notes.md",
-                vec![Source::File("notes.md".into())],
-            ),
-            (
-                "gh issue comment 3 --body-file=notes.md",
-                vec![Source::File("notes.md".into())],
-            ),
-            (
-                "gh api repos/a/b/issues/3/comments -f body=text",
-                vec![inline("text")],
-            ),
-            (
-                "gh api repos/a/b/issues/3 -X PATCH -F body=@notes.md",
-                vec![Source::File("notes.md".into())],
-            ),
-            (
-                "gh api repos/a/b/issues -F body=literal@text",
-                vec![inline("literal@text")],
-            ),
-            (
-                "gh api x --raw-field body=@notes.md",
-                vec![inline("@notes.md")],
-            ),
-            (
-                "gh api x --input payload.json",
-                vec![Source::Json("payload.json".into())],
-            ),
-            ("gh api x -f comment[body]=text", vec![inline("text")]),
-        ] {
-            assert_eq!(body_sources(command), expected, "{command}");
-        }
-    }
-
-    #[cfg_attr(not(miri), test)]
-    fn standard_input_bodies_include_heredocs_and_piped_words() {
-        assert_eq!(
-            body_sources("gh pr create --body-file - <<'EOF'\nline one\nline two\nEOF"),
-            vec![Source::Stdin("line one\nline two\n".into())]
-        );
-        assert_eq!(
-            body_sources("echo \"hello\" | gh pr comment 3 -F -"),
-            vec![Source::Stdin("echo\nhello\n".into())]
-        );
-        assert_eq!(
-            body_sources("gh api x --input - <<EOF\n{\"body\":\"b\"}\nEOF"),
-            vec![Source::Stdin("{\"body\":\"b\"}\n".into())]
-        );
-    }
-
-    #[cfg_attr(not(miri), test)]
-    fn commands_that_send_no_body_have_no_sources() {
-        for command in [
-            "gh pr view 3 --json body",
-            "gh pr create --fill",
-            "gh pr list --search body",
-            "gh issue view 3 --comments",
-            "gh api repos/a/b/issues/3",
-            "gh api x -f title=text",
-            "git commit -F msg.txt",
-            "echo --body text",
-            "",
-        ] {
-            assert!(body_sources(command).is_empty(), "{command}");
-        }
-    }
-
     #[cfg_attr(not(miri), test)]
     fn a_program_name_drops_its_directory_case_and_suffixes() {
         assert_eq!(program("/usr/bin/Python3.12"), "python");
@@ -1532,87 +1282,15 @@ mod tests {
         assert_eq!(inspect("tee log"), Verdict::Refuse(Reason::FileRedirect));
     }
 
-    #[cfg_attr(not(miri), test)]
-    fn api_and_command_bodies_come_from_every_flag_form() {
-        let mut sources = Vec::new();
-        api_sources(
-            &[
-                "repos/x",
-                "-f",
-                "body=a",
-                "-f",
-                "title=t",
-                "--raw-field=body=b",
-                "-F",
-                "body=@f.md",
-                "-F",
-                "body=c",
-                "--field",
-                "body=@-",
-                "--input",
-                "p.json",
-                "--input=-",
-                "-f",
-            ],
-            &mut sources,
+    #[test]
+    fn shell_segments_preserve_literal_words_and_nested_scripts() {
+        assert_eq!(
+            segments("gh pr create --body 'a\nb'"),
+            [vec!["gh", "pr", "create", "--body", "a\nb"]]
         );
         assert_eq!(
-            sources,
-            [
-                Source::Inline("a".to_owned()),
-                Source::Inline("b".to_owned()),
-                Source::File("f.md".to_owned()),
-                Source::Inline("c".to_owned()),
-                Source::Stdin(String::new()),
-                Source::Json("p.json".to_owned()),
-                Source::Stdin(String::new()),
-            ]
+            segments("sh <<'EOF'\ngrep x f\nEOF"),
+            [vec!["sh"], vec!["grep", "x", "f"]]
         );
-        let mut sources = Vec::new();
-        command_sources(
-            &[
-                "pr",
-                "create",
-                "-b",
-                "x",
-                "--body=y",
-                "--body-file",
-                "-",
-                "-F",
-                "f.md",
-                "--body",
-            ],
-            &mut sources,
-        );
-        assert_eq!(
-            sources,
-            [
-                Source::Inline("x".to_owned()),
-                Source::Inline("y".to_owned()),
-                Source::Stdin(String::new()),
-                Source::File("f.md".to_owned()),
-            ]
-        );
-        assert_eq!(flag_value(&["-b"], 0, &["-b"]), None);
-        assert_eq!(flag_value(&["-bx"], 0, &["-b"]), None);
-        assert_eq!(flag_value(&["--body=v"], 0, &["--body"]), Some(("v", 1)));
-        assert_eq!(flag_value(&["x", "-b", "v"], 1, &["-b"]), Some(("v", 2)));
-    }
-
-    #[cfg_attr(not(miri), test)]
-    fn standard_input_takes_the_words_of_every_other_command() {
-        assert_eq!(
-            body_sources("echo hello | env gh pr comment --body-file -"),
-            [Source::Stdin("echo\nhello\n".to_owned())]
-        );
-        assert_eq!(
-            body_sources("env gh api x -f body=a"),
-            [Source::Inline("a".to_owned())]
-        );
-        assert_eq!(
-            body_sources("gh repo api x -f body=a"),
-            [Source::Inline("a".to_owned())]
-        );
-        assert_eq!(body_sources("gh pr list --body x"), []);
     }
 }

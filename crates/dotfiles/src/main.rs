@@ -16,6 +16,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Check sources and formal arguments for the exact answer draft.
+    Answer {
+        #[command(subcommand)]
+        action: dotfiles::answer::Action,
+    },
     /// Run unbounded verification only inside a container with policy limits.
     Bounded {
         #[command(subcommand)]
@@ -57,6 +62,12 @@ enum Commands {
         #[arg(last = true)]
         arguments: Vec<OsString>,
     },
+    #[cfg(unix)]
+    /// Inspect Herdr and retire an explicitly selected instance.
+    Herdr {
+        #[command(subcommand)]
+        action: HerdrAction,
+    },
     /// Claude Code `PreToolUse` hook for Bash and PowerShell: refuses recursive disk scans and file writes through inline interpreters, heredocs, and redirects.
     ClaudeBash {
         /// Run an exact modern replacement through the client's input rewrite instead of refusing the legacy command.
@@ -72,6 +83,8 @@ enum Commands {
     },
     /// Refuse supported implementation edits without a checked issue context.
     IssueGuard,
+    /// Lint files written by an agent, reading its hook payload from standard input.
+    LintHook,
     /// Execute Codex hooks with local evidence or inspect their recent results.
     CodexHooks {
         #[command(subcommand)]
@@ -193,10 +206,24 @@ enum RepositoryRequest {
     },
 }
 
+#[cfg(unix)]
+#[derive(Clone, Copy, Subcommand)]
+enum HerdrAction {
+    Health {
+        #[arg(long)]
+        session: bool,
+    },
+    Cleanup {
+        #[arg(long)]
+        pid: u32,
+    },
+}
+
 fn run(mut cli: Cli) -> Result<()> {
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
     match cli.command {
+        Commands::Answer { action } => dotfiles::answer::execute(action)?,
         Commands::Bounded { action } => dotfiles::bounded::execute(action)?,
         Commands::MiseInstall { arguments } => {
             let home = platform::home::home().context("native home is unavailable")?;
@@ -207,17 +234,7 @@ fn run(mut cli: Cli) -> Result<()> {
             );
         }
         Commands::GithubToken => github_token()?,
-        Commands::Repository { request } => match request {
-            RepositoryRequest::Generate { remote } => {
-                dotfiles::repository::write(&cli.root)?;
-                if let Some(remote) = remote {
-                    dotfiles::repository::write_description(&cli.root, &remote)?;
-                }
-            }
-            RepositoryRequest::Check { remote } => {
-                dotfiles::repository::check(&cli.root, remote.as_deref())?;
-            }
-        },
+        Commands::Repository { request } => repository(&cli.root, request)?,
         Commands::Agent {
             agent,
             config,
@@ -235,9 +252,12 @@ fn run(mut cli: Cli) -> Result<()> {
         } => exit(dotfiles::terminal::run(
             emulator, session, child, &arguments,
         )?),
+        #[cfg(unix)]
+        Commands::Herdr { action } => herdr(action)?,
         Commands::ClaudeBash { rewrite } => dotfiles::claude_hook::run(rewrite)?,
         Commands::ClaudeTiming { client } => dotfiles::claude_timing::run(client)?,
         Commands::IssueGuard => std::process::exit(dotfiles::issue_guard::hook()?),
+        Commands::LintHook => std::process::exit(dotfiles::lint_hook::run()?),
         Commands::CodexHooks { request } => std::process::exit(codex_hooks::run(request)?),
         Commands::Notifications { action } => dotfiles::notifications::run(action)?,
         Commands::Assure { point, language } => assure(point, language)?,
@@ -296,6 +316,21 @@ fn run(mut cli: Cli) -> Result<()> {
     Ok(())
 }
 
+fn repository(root: &Path, request: RepositoryRequest) -> Result<()> {
+    match request {
+        RepositoryRequest::Generate { remote } => {
+            dotfiles::repository::write(root)?;
+            if let Some(remote) = remote {
+                dotfiles::repository::write_description(root, &remote)?;
+            }
+        }
+        RepositoryRequest::Check { remote } => {
+            dotfiles::repository::check(root, remote.as_deref())?;
+        }
+    }
+    Ok(())
+}
+
 fn github_token() -> Result<()> {
     let host =
         std::env::var_os("MISE_CREDENTIAL_HOST").context("mise credential host unavailable")?;
@@ -316,6 +351,20 @@ fn windows(_: Vec<OsString>) -> Result<()> {
     anyhow::bail!("the Windows setup runs only on Windows")
 }
 
+#[cfg(unix)]
+fn herdr(action: HerdrAction) -> Result<()> {
+    let home = platform::home::home().context("native home is unavailable")?;
+    match action {
+        HerdrAction::Health { session: true } => dotfiles::herdr::session_start(&home),
+        HerdrAction::Health { session: false } => anyhow::ensure!(
+            dotfiles::herdr::health(&home)?,
+            "Herdr health reported findings"
+        ),
+        HerdrAction::Cleanup { pid } => dotfiles::herdr::cleanup(&home, pid)?,
+    }
+    Ok(())
+}
+
 /// The verification gate's agent hooks, whose session start first reports the agent hooks that failed since the last one.
 fn assure(
     point: dotfiles::assure::AgentPoint,
@@ -323,6 +372,10 @@ fn assure(
 ) -> Result<()> {
     if point == dotfiles::assure::AgentPoint::Start {
         dotfiles::hook_failures::session_start();
+        #[cfg(unix)]
+        if let Some(home) = platform::home::home() {
+            dotfiles::herdr::session_start(&home);
+        }
     }
     dotfiles::assure::hook(point, reply_language.map(Into::into))
 }
@@ -354,6 +407,7 @@ fn agent_hook() -> Option<&'static str> {
         "claude-bash" => Some("claude-bash"),
         "claude-timing" => Some("claude-timing"),
         "issue-guard" => Some("issue-guard"),
+        "lint-hook" => Some("lint-hook"),
         "notifications" => Some("notifications"),
         "assure" => Some("assure"),
         "health" if session => Some("health"),

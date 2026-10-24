@@ -175,6 +175,7 @@ fn render_merged_with_mode(
         ".chezmoitemplates/partials/skill_ops_experimental",
         ".chezmoitemplates/partials/claude_settings",
         ".chezmoitemplates/partials/reply_language",
+        ".chezmoidata/signing.toml",
     ] {
         let copy = source.join(file);
         std::fs::create_dir_all(copy.parent().unwrap()).unwrap();
@@ -221,6 +222,138 @@ fn render_merged_with_mode(
     std::fs::write(&path, &first).unwrap();
     assert_eq!(render(), first, "reapplication must be idempotent");
     first
+}
+
+#[test]
+fn herdr_ssh_include_preserves_host_configuration_and_is_idempotent() {
+    let host = "# OrbStack must stay first.\nInclude ~/.orbstack/ssh/config\n\nHost fixture\n  HostName fixture.invalid\nHost *\n  IdentityAgent /old/agent.sock\n";
+    let include = "Include ~/.config/dotfiles/ssh-agent.conf";
+    for profile in ["mac", "linux"] {
+        let rendered = render_merged(profile, "dot_ssh/modify_config", ".ssh/config", host);
+        assert_eq!(rendered.matches(include).count(), 1);
+        assert!(
+            rendered.starts_with("# OrbStack must stay first.\nInclude ~/.orbstack/ssh/config\n")
+        );
+        assert!(rendered.find(include).unwrap() < rendered.find("Host fixture").unwrap());
+        assert_eq!(rendered.replace(&format!("{include}\n"), ""), host);
+    }
+}
+
+#[test]
+fn herdr_ssh_routing_precedes_global_agent_settings_and_other_includes() {
+    for host in [
+        "IdentityAgent /dead/agent.sock\nHost fixture\n",
+        "Include ~/.ssh/other.conf\nHost fixture\n",
+    ] {
+        let rendered = render_merged("linux", "dot_ssh/modify_config", ".ssh/config", host);
+        assert_eq!(
+            rendered,
+            format!("Include ~/.config/dotfiles/ssh-agent.conf\n{host}")
+        );
+    }
+}
+
+#[test]
+fn herdr_codex_configuration_keeps_host_state_and_replaces_stale_command_overrides() {
+    let host = "model = \"owner-model\"\n[projects.\"private-project\"]\ntrust_level = \"trusted\"\n[shell_environment_policy.set]\nGIT_SSH_COMMAND = \"ssh -o IdentityAgent=/dead/agent.sock\"\nSSH_AUTH_SOCK = \"/dead/agent.sock\"\nOWNER_SETTING = \"preserved\"\n";
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered = render_merged(
+            profile,
+            "dot_codex/modify_config.toml",
+            ".codex/config.toml",
+            host,
+        );
+        let config: toml::Value = toml::from_str(&rendered).unwrap();
+        assert_eq!(config["model"].as_str(), Some("owner-model"));
+        assert_eq!(
+            config["projects"]["private-project"]["trust_level"].as_str(),
+            Some("trusted")
+        );
+        let set = &config["shell_environment_policy"]["set"];
+        assert_eq!(set["OWNER_SETTING"].as_str(), Some("preserved"));
+        if matches!(profile, "mac" | "linux") {
+            assert_eq!(set["GIT_SSH_COMMAND"].as_str(), Some("/usr/bin/ssh"));
+            assert!(
+                set["SSH_AUTH_SOCK"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("agent.sock")
+            );
+            assert_ne!(set["SSH_AUTH_SOCK"].as_str(), Some("/dead/agent.sock"));
+        } else {
+            assert_eq!(
+                set["GIT_SSH_COMMAND"].as_str(),
+                Some("ssh -o IdentityAgent=/dead/agent.sock")
+            );
+            assert_eq!(set["SSH_AUTH_SOCK"].as_str(), Some("/dead/agent.sock"));
+        }
+        assert_eq!(config["features"]["memories"].as_bool(), Some(false));
+        assert!(config["notify"].is_array());
+    }
+}
+
+#[test]
+fn claude_application_keeps_existing_preferences_and_enforces_managed_policy() {
+    let preferences = json!({
+        "model": "owner-primary",
+        "advisorModel": "fable",
+        "language": "English",
+        "theme": "dark",
+        "skipDangerousModePermissionPrompt": false,
+        "skipAutoPermissionPrompt": false,
+        "enabledPlugins": {"rust-analyzer-lsp@claude-plugins-official": false, "owner-plugin": true}
+    });
+    let mut host = preferences.clone();
+    host["autoMemoryEnabled"] = json!(true);
+    host["permissions"] = json!({"deny": ["Bash(owner)"], "defaultMode": "auto"});
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered: Value = serde_json::from_str(&render_merged(
+            profile,
+            "dot_claude/modify_settings.json",
+            ".claude/settings.json",
+            &host.to_string(),
+        ))
+        .unwrap();
+        for (key, value) in preferences.as_object().unwrap() {
+            assert_eq!(&rendered[key], value, "{profile}: {key}");
+        }
+        assert_eq!(rendered["autoMemoryEnabled"], json!(false));
+        assert_eq!(rendered["permissions"]["defaultMode"], json!("auto"));
+        assert!(
+            rendered["permissions"]["deny"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Bash(sudo:*)"))
+        );
+        assert!(
+            !rendered["permissions"]["deny"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Bash(owner)"))
+        );
+        assert!(rendered["hooks"]["PreToolUse"].is_array());
+    }
+}
+
+#[test]
+fn claude_application_supplies_missing_preference_defaults() {
+    for profile in ["mac", "linux", "windows", "wsl"] {
+        let rendered: Value = serde_json::from_str(&render_merged(
+            profile,
+            "dot_claude/modify_settings.json",
+            ".claude/settings.json",
+            "{}",
+        ))
+        .unwrap();
+        assert_eq!(rendered["advisorModel"], json!("opus"));
+        assert_eq!(rendered["theme"], json!("auto"));
+        assert_eq!(rendered["skipAutoPermissionPrompt"], json!(true));
+        assert_eq!(rendered["language"], json!("Japanese"));
+        assert_eq!(
+            rendered["enabledPlugins"]["rust-analyzer-lsp@claude-plugins-official"],
+            json!(true)
+        );
+    }
 }
 
 #[test]
@@ -338,9 +471,8 @@ fn codex_runtime_hooks_have_native_windows_commands() {
             .flat_map(|group| group["hooks"].as_array().unwrap())
             .filter(|hook| hook["command"].as_str().is_some_and(runs_the_runtime))
             .collect();
-        // The shell guard, the edit guard, the timing hook before and after each command, and the start and stop reports.
         // Windows adds the process-start probe at session start.
-        let expected = if profile == "windows" { 7 } else { 6 };
+        let expected = if profile == "windows" { 10 } else { 9 };
         assert_eq!(handlers.len(), expected, "{profile}: {rendered}");
         for handler in handlers {
             assert_eq!(

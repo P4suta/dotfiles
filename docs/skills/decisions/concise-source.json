@@ -1,11 +1,12 @@
 {
-  "revision": "783a57fe70ff1e7bf1c3570d235c2f30e01968ecbe4e8d11fb0bc55ea421d645",
+  "revision": "782d754e4717572d3d70cf63b8141a32d7111a82395da34e7368122b60bef0f3",
   "outcome": "implemented",
-  "reason": "Prose cut to the minimum without changing the skill's instructions.",
+  "reason": "Comments keep one sentence per line in English and Japanese.\nSplit long sentences into shorter ones when a channel limits line length.",
   "evidence": [
     "home/dot_agents/skills/concise-source/SKILL.md",
     "docs/adr/0016-one-writing-standard.md",
-    "crates/prose/tests/prose.rs"
+    "crates/prose/tests/prose.rs",
+    "crates/rules/src/prose_rules.rs"
   ],
   "revisit": null
 }

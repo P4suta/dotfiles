@@ -1,14 +1,18 @@
 {
-  "revision": "4131d7c8b7d30937a010d7c9cc3566e70d861538b4add5f8e9d62e5e0e5480c5",
+  "revision": "d87ff6b6db775961746a9ba706505967dc7527faeb8f904a9e0a42b8ac955335",
   "outcome": "implemented",
-  "reason": "Preserve repository governance behavior while adopting the merged libc, syn, and unicode-ident lockfile maintenance and refreshing the managed skill's catalog identity.",
+  "reason": "Gate queue updates and findings on audited organization ownership, preserve personal strict checks and legacy snapshots, and enumerate all sixteen queue decisions with audit and plan regressions.",
   "evidence": [
     "home/dot_agents/skills/github-repository/SKILL.md",
     "home/dot_agents/skills/github-repository/assets/baseline.json",
     "home/dot_agents/skills/github-repository/scripts/repo-settings/Cargo.lock",
+    "home/dot_agents/skills/github-repository/scripts/repo-settings/src/merge_queue_rules.rs",
+    "home/dot_agents/skills/github-repository/scripts/repo-settings/src/queue.rs",
+    "home/dot_agents/skills/github-repository/scripts/repo-settings/src/lib.rs",
     "home/dot_agents/skills/github-repository/scripts/repo-settings/tests/governance.rs",
-    "crates/dotfiles/src/repository.rs",
-    "docs/adr/repository-metadata-and-generated-artifacts.md"
+    "docs/adr/stack-first-pull-requests-through-a-merge-queue.md",
+    "docs/adr/limit-merge-queues-to-organization-repositories.md",
+    "policy/github.toml"
   ],
   "revisit": null
 }

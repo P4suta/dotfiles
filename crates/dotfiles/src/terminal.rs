@@ -5,11 +5,18 @@ use std::ffi::OsString;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
-use std::time::Duration;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 /// How long the Herdr server gets to report that it runs: fifty checks a tenth of a second apart.
+#[cfg(unix)]
 const SERVER_CHECKS: u32 = 50;
+#[cfg(unix)]
 const SERVER_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(unix)]
+const SERVER_START_LIMIT: Duration = Duration::from_secs(5);
+#[cfg(unix)]
+const SSH_PROGRAM: &str = "/usr/bin/ssh";
 
 /// The local sudo authentication file macOS reads beside its own, and the fingerprint module it names.
 const SUDO_LOCAL: &str = "/etc/pam.d/sudo_local";
@@ -42,62 +49,64 @@ fn execute(mut command: Command) -> Result<ExitStatus> {
     }
 }
 
-/// Builds the session a terminal window runs, choosing Herdr with its server started, else Nushell, else a login shell.
-fn child_command(native: &mut Real, session: Session, arguments: &[OsString]) -> Result<Command> {
-    if matches!(session, Session::Herdr) && native.available(Tool::Herdr) {
-        if cfg!(target_os = "macos") {
-            start_herdr_server(native)?;
-        }
-        let mut command = native.command(Tool::Herdr);
+fn child_command(
+    native: &Real,
+    program: Tool,
+    arguments: &[OsString],
+    ssh_program: Option<&str>,
+) -> Command {
+    let mut command = native.command(program);
+    if matches!(program, Tool::Herdr | Tool::Nu) {
         command.args(arguments);
-        return Ok(command);
-    }
-    if native.available(Tool::Nu) {
-        let mut command = native.command(Tool::Nu);
-        command.args(arguments);
-        return Ok(command);
-    }
-    let mut command = native.command(if cfg!(target_os = "macos") {
-        Tool::Zsh
     } else {
-        Tool::Bash
-    });
+        command
+            .arg("-l")
+            .env("DOTFILES_NO_NU", "1")
+            .env("DOTFILES_BASH_ONLY", "1");
+    }
+    if let Some(ssh_program) = ssh_program {
+        command.env("GIT_SSH_COMMAND", ssh_program);
+    }
     command
-        .arg("-l")
-        .env("DOTFILES_NO_NU", "1")
-        .env("DOTFILES_BASH_ONLY", "1");
-    Ok(command)
 }
 
 /// Starts the Herdr server with its SSH agent unless it already runs, waiting up to five seconds for it.
+#[cfg(unix)]
 fn start_herdr_server(native: &mut Real) -> Result<()> {
+    let (_guard, decision) = crate::herdr::launch_guard(&native.home)?;
     if native.available(Tool::HerdrAgent) {
         platform::cleanup::report(
             native.run(Tool::HerdrAgent, &args(&["ensure"])),
             "start the Herdr SSH agent",
         );
     }
-    let running = |native: &mut Real| -> Result<bool> {
-        let server = native.run(Tool::Herdr, &args(&["status", "server"]))?;
-        Ok(server.success && String::from_utf8_lossy(&server.bytes).contains("status: running"))
-    };
-    if running(native)? {
+    if decision == crate::herdr_rules::Launch::Attach {
         return Ok(());
     }
     native
         .command(Tool::Nohup)
         .args(["herdr", "server"])
+        .env("GIT_SSH_COMMAND", SSH_PROGRAM)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
+    let deadline = Instant::now() + SERVER_START_LIMIT;
     for _ in 0..SERVER_CHECKS {
-        if running(native)? {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
             break;
         }
-        std::thread::sleep(SERVER_CHECK_INTERVAL);
+        if crate::herdr::server_running(&native.home, remaining)? {
+            return Ok(());
+        }
+        std::thread::sleep(
+            SERVER_CHECK_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+        );
     }
-    Ok(())
+    anyhow::bail!(
+        "Herdr server did not become responsive; run `dotfiles herdr health`; no second instance was started"
+    )
 }
 
 /// Opens a terminal window that runs the session, or runs the session itself when invoked as the window's child.
@@ -112,23 +121,39 @@ pub fn run(
     child: bool,
     arguments: &[OsString],
 ) -> Result<ExitStatus> {
-    let child = child
-        || arguments
-            .first()
-            .is_some_and(|argument| argument == "--child");
-    let arguments = if arguments
-        .first()
-        .is_some_and(|argument| argument == "--child")
-    {
-        &arguments[1..]
-    } else {
-        arguments
+    let (child, arguments) = match arguments {
+        [first, remaining @ ..] if first == "--child" => (true, remaining),
+        _ => (child, arguments),
     };
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .context("native home is unavailable")?;
-    let mut native = Real::new(Path::new(&home))?;
+    let native = Real::new(Path::new(&home))?;
+    #[cfg(unix)]
+    let mut native = native;
     if child {
-        return execute(child_command(&mut native, session, arguments)?);
+        let (program, ssh_program) =
+            if matches!(session, Session::Herdr) && native.available(Tool::Herdr) {
+                #[cfg(unix)]
+                let ssh_program = if matches!(
+                    crate::profiles::native_profile()?,
+                    crate::profile_rules::Profile::Mac | crate::profile_rules::Profile::Linux
+                ) {
+                    start_herdr_server(&mut native)?;
+                    Some(SSH_PROGRAM)
+                } else {
+                    None
+                };
+                #[cfg(not(unix))]
+                let ssh_program = None;
+                (Tool::Herdr, ssh_program)
+            } else if native.available(Tool::Nu) {
+                (Tool::Nu, None)
+            } else if cfg!(target_os = "macos") {
+                (Tool::Zsh, None)
+            } else {
+                (Tool::Bash, None)
+            };
+        return execute(child_command(&native, program, arguments, ssh_program));
     }
     let title = if matches!(session, Session::Herdr) {
         "Herdr"

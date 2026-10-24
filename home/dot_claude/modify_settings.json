@@ -1,7 +1,7 @@
 {{- /* chezmoi:modify-template */ -}}
 {{- /*
   Claude Code rewrites this file at runtime.
-  Each profile sets the keys here over the current file, treats an array as one value, and keeps every other key the client wrote.
+  Each profile enforces its hooks and policy while supplying only missing client preferences.
   Persistent agent memory stays off.
   docs/agent-memory-migration.md records where its former content lives.
 */ -}}
@@ -27,6 +27,11 @@ The tool events keep every group another installer added and replace only their 
 {{- $_ := set $hooks "PreToolUse" (concat $pre (list (dict "matcher" "Bash|PowerShell" "hooks" (list $hook $timing)))) -}}
 {{- $issue := dict "type" "command" "command" (printf "%s issue-guard" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) "onFailure" "block" -}}
 {{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list (dict "matcher" "Edit|Write|MultiEdit|apply_patch" "hooks" (list $issue)))) -}}
+{{- range $event, $point := dict "UserPromptSubmit" "begin" "Stop" "stop" -}}
+{{- $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list (printf " answer %s" $point))) | fromJson -}}
+{{- $answer := dict "type" "command" "onFailure" "block" "timeout" 10 "command" (printf "%s answer %s" (includeTemplate "partials/sh_quote" (joinPath $.chezmoi.homeDir $tool)) $point) -}}
+{{- $_ := set $hooks $event (concat $groups (list (dict "hooks" (list $answer)))) -}}
+{{- end -}}
 {{- range $event := list "PostToolUse" "PostToolUseFailure" -}}
 {{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " claude-timing")) | fromJson -}}
 {{-   $_ := set $hooks $event (concat $groups (list (dict "matcher" "Bash|PowerShell" "hooks" (list $timing)))) -}}
@@ -39,6 +44,9 @@ It also checks the final reply's prose in the owner's language, with at most one
 Both events keep every group another installer added and replace only these.
 Unrelated handlers remain in their existing groups.
 */ -}}
+{{- $lint := dict "type" "command" "command" (printf "%s lint-hook" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool))) "onFailure" "block" -}}
+{{- $post := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig "PostToolUse" (list) $hooks) "suffixes" (list " lint-hook")) | fromJson -}}
+{{- $_ := set $hooks "PostToolUse" (concat $post (list (dict "matcher" "Edit|Write|MultiEdit|apply_patch" "hooks" (list $lint)))) -}}
 {{- $session := list -}}
 {{- if eq .profile "windows" -}}
 {{-   $session = append $session (dict "type" "command" "command" (printf "%s health --session" (includeTemplate "partials/sh_quote" (joinPath .chezmoi.homeDir $tool)))) -}}
@@ -65,6 +73,12 @@ Unrelated handlers remain in their existing groups.
 {{- $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " notifications agent claude")) | fromJson -}}
 {{- $_ := set $hooks $event (concat $groups (list (dict "hooks" (list $notify)))) -}}
 {{- end -}}
-{{- $managed = mergeOverwrite $managed (includeTemplate "partials/claude_settings" . | fromJson) -}}
+{{- range $key, $value := (includeTemplate "partials/claude_settings" . | fromJson) -}}
+{{-   if or (eq $key "permissions") (eq $key "autoMemoryEnabled") -}}
+{{-     $_ := set $managed $key $value -}}
+{{-   else if not (hasKey $current $key) -}}
+{{-     $_ := set $current $key $value -}}
+{{-   end -}}
+{{- end -}}
 {{ mergeOverwrite $current $managed | toPrettyJson "  " | trim }}
 

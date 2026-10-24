@@ -8,7 +8,15 @@ metadata:
   ruleset: ESLint no-magic-numbers
 ignores:
   - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/*.d.ts"
+  - "**/*.d.mts"
+  - "**/*.d.cts"
   - "**/tests/**"
+  - "**/__tests__/**"
+  - "**/__stubs__/**"
+  - "**/fixtures/**"
+  - "**/__fixtures__/**"
 rule:
   kind: number
   not:

@@ -162,7 +162,7 @@ pub fn resource_arguments() -> Vec<OsString> {
         .resource_arguments()
 }
 
-fn pinned(image: &str) -> bool {
+pub(crate) fn pinned(image: &str) -> bool {
     let digest = image
         .strip_prefix(DIGEST_PREFIX)
         .or_else(|| image.rsplit_once("@sha256:").map(|(_, digest)| digest));
@@ -299,7 +299,35 @@ fn exit_status(code: i32) -> Result<ExitStatus> {
 ///
 /// Refuses mutable images and invalid plans, reports Docker failures, and leaves limit stops inconclusive.
 pub fn run(arguments: &[OsString], image: &str) -> Result<Output> {
-    run_with(&Policy::load(None)?, arguments, image, false)
+    run_with_policy(&Policy::load(None)?, arguments, image)
+}
+
+/// Execute a project plan under an explicit validated policy without changing the installed policy.
+///
+/// # Errors
+///
+/// Refuses invalid plans and mutable images, and reports resource stops as inconclusive.
+pub fn run_with_policy(policy: &Policy, arguments: &[OsString], image: &str) -> Result<Output> {
+    run_with(policy, arguments, image, false)
+}
+
+/// Run a proof campaign with its inventory-derived safety cap and the installed resource limits.
+///
+/// # Errors
+///
+/// Refuses an empty, invalid, or overflowing inventory and propagates container failures.
+pub fn run_campaign(
+    arguments: &[OsString],
+    image: &str,
+    harnesses: u32,
+    parallelism: u16,
+    overhead: u32,
+) -> Result<Output> {
+    let mut policy = Policy::load(None)?;
+    policy.limits.seconds =
+        rules::proof_budget_rules::campaign_seconds(harnesses, parallelism, overhead)
+            .context("proof campaign requires a nonempty finite inventory and parallelism")?;
+    run_with(&policy, arguments, image, false)
 }
 
 /// Recognize a project Docker run and route its immutable image through the bounded lifecycle.

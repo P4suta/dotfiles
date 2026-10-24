@@ -118,6 +118,69 @@ fn english_configuration_and_replies_without_prose_are_admitted() -> Result<()> 
 }
 
 #[test]
+fn both_clients_refuse_reply_sentences_that_share_or_cross_lines() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    for client in ["claude", "codex"] {
+        for (language, reply, line) in [
+            (
+                "Japanese",
+                "4 本とも ready になりました。ただ、最後の merge が失敗しています。",
+                1,
+            ),
+            ("Japanese", "確認した変更は\n反映されています。", 1),
+            (
+                "English",
+                "The envelope entry docs feed the published JSON schemas, and the\nrelease gate refuses a schema change without a version bump.",
+                1,
+            ),
+            ("English", "The checks passed. the change is ready.", 1),
+        ] {
+            let blocked = answer(&stop(
+                home.path(),
+                language,
+                &input(client, json!(reply), false),
+            )?)?;
+            assert_eq!(blocked["decision"], "block", "{client}: {reply}: {blocked}");
+            let reason = blocked["reason"].as_str().unwrap();
+            assert!(reason.contains("one sentence per line"), "{reason}");
+            assert!(reason.contains(&format!("line {line}")), "{reason}");
+            let continued = answer(&stop(
+                home.path(),
+                language,
+                &input(client, json!(reply), true),
+            )?)?;
+            assert_eq!(continued["continue"], false, "{client}: {continued}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn both_clients_admit_sentence_lines_and_markdown_reply_shapes() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    for client in ["claude", "codex"] {
+        for (language, reply) in [
+            (
+                "Japanese",
+                "# 検証結果\n**結果**\n確認しました。\n変更は反映済みです。\n検証結果：\n- ビルドに成功しました。\n- テストに成功しました。\n\n| 項目 | 結果 |\n| --- | --- |\n| ビルド | 成功しました。確認済みです。 |\n\n```text\nOne. Two.\nA wrapped\nsentence.\n```\n\n> 引用しました。変更しません。\n",
+            ),
+            (
+                "English",
+                "# Results\n**Validation**\nThe checks passed.\nThe change is ready.\nResults:\n- The build passed.\n- The tests passed.\n\n| Check | Result |\n| --- | --- |\n| Build | One. Two. |\n\n```text\nOne. Two.\nA wrapped\nsentence.\n```\n",
+            ),
+        ] {
+            let admitted = answer(&stop(
+                home.path(),
+                language,
+                &input(client, json!(reply), false),
+            )?)?;
+            assert_eq!(admitted, json!({}), "{client}: {language}: {admitted}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn unsupported_languages_and_malformed_stop_inputs_fail_explicitly() -> Result<()> {
     let home = tempfile::tempdir()?;
     for (language, payload) in [

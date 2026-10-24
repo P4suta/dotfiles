@@ -2,10 +2,14 @@
 
 mod context;
 mod evidence;
+mod link_issue;
 mod local;
+mod merge;
 mod review_policy;
+mod work;
 pub use evidence::store_assessment;
 pub use local::Action as LocalAction;
+use merge::{await_result as await_merge, submit as submit_merge};
 
 /// Validate the owner-local issue contexts selected by the actual local change.
 ///
@@ -53,14 +57,15 @@ pub fn current_review_route(
 }
 
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
+pub use rules::pr_merge_rules;
 pub use rules::{pr_ready_rules, pr_rules, wip_rules};
 
 use crate::pr_ready_rules::{Action as Move, Report, Settlement, State, Workflow};
 use crate::pr_rules::{
-    Blocker, Checks, Dependency, Effect, Exclusion, Generation, IssueGate, Lifecycle, MergeState,
-    Operation, PathMerge, Step, Stop, api_quota_available, coderabbit_body_marker_allowed,
-    dependency, exclusion, head_checks, issue_gate, keeps_pause_exclusion, merge_step, plan,
-    requests_review, review_request_allowed,
+    Blocker, Checks, Dependency, DependencySkip, Effect, Exclusion, Generation, IssueGate,
+    Lifecycle, MergeState, Operation, PathMerge, Step, Stop, api_quota_available,
+    coderabbit_body_marker_allowed, dependency, dependency_skip, exclusion, head_checks,
+    issue_gate, keeps_pause_exclusion, merge_step, plan, requests_review, review_request_allowed,
 };
 use crate::refusal::{Refusal, command};
 use crate::tool::Tool;
@@ -155,6 +160,9 @@ pub enum Commands {
         /// Link actual local issue history through this new checked remote authorization.
         #[arg(long, conflicts_with = "adopt_existing")]
         promote_local: bool,
+        /// Declare unrelated work and keep its reason in owner-local state.
+        #[arg(long, value_name = "REASON", value_parser = work::reason)]
+        independent: Option<String>,
     },
     /// Match signed issue contexts to the actual local or CI change.
     ChangeCheck {
@@ -201,6 +209,9 @@ pub enum Commands {
         /// Also keep CodeRabbit-created PRs as drafts.
         #[arg(long)]
         draft: bool,
+        /// Open an independent work unit and keep its reason in owner-local state.
+        #[arg(long, value_name = "REASON", value_parser = work::reason)]
+        independent: Option<String>,
     },
     /// Replace both title and body with one checked document.
     Edit {
@@ -208,6 +219,15 @@ pub enum Commands {
         document: DocumentArgs,
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: u64,
+    },
+    /// Add an issue closing reference as the destination repository owner.
+    LinkIssue {
+        #[arg(long)]
+        repo: String,
+        #[arg(long)]
+        pr: std::num::NonZeroU64,
+        #[arg(long)]
+        issue: std::num::NonZeroU64,
     },
     /// Validate the current GitHub document and move an open draft to review.
     Ready {
@@ -340,6 +360,7 @@ impl Commands {
             Self::Check { .. } => "check",
             Self::Create { .. } => "create",
             Self::Edit { .. } => "edit",
+            Self::LinkIssue { .. } => "link-issue",
             Self::Ready { .. } => "ready",
             Self::Merge { .. } => "merge",
             Self::PruneMerged { .. } => "prune-merged",
@@ -463,6 +484,11 @@ struct RuleParameters {
 #[derive(Deserialize)]
 struct RequiredCheck {
     context: String,
+}
+
+struct BranchRequirements {
+    checks: Vec<String>,
+    queue: bool,
 }
 
 impl ReportedCheck {
@@ -652,27 +678,8 @@ impl WorkInProgress {
 struct Github {
     policy: WorkflowPolicy,
     login: String,
+    user_id: u64,
     repositories: RefCell<BTreeMap<String, Repository>>,
-}
-
-/// One open PR as the REST list reports it.
-#[derive(Deserialize)]
-struct ListedPr {
-    number: u64,
-    html_url: String,
-    user: ListedUser,
-    head: ListedHead,
-}
-
-#[derive(Deserialize)]
-struct ListedUser {
-    login: String,
-}
-
-#[derive(Deserialize)]
-struct ListedHead {
-    #[serde(rename = "ref")]
-    name: String,
 }
 
 #[derive(Deserialize)]
@@ -730,8 +737,19 @@ struct OpenPr {
     number: u64,
     head_ref_name: String,
     base_ref_name: String,
+    author: Option<DependencyAuthor>,
+    mergeable: Option<String>,
     #[serde(default)]
     is_cross_repository: bool,
+}
+
+#[derive(Deserialize)]
+struct DependencyAuthor {
+    login: String,
+    #[serde(default)]
+    is_bot: bool,
+    #[serde(rename = "type")]
+    author_type: Option<String>,
 }
 
 /// One PR of a merge, read in one response so its checks belong to its head.
@@ -1268,6 +1286,7 @@ impl Github {
         let mut github = Self {
             policy: workflow_policy()?,
             login: String::new(),
+            user_id: 0,
             repositories: RefCell::default(),
         };
         let user: Owner = github.read("user").map_err(|error| {
@@ -1294,6 +1313,7 @@ impl Github {
             ))
         })?;
         github.login = user.login;
+        github.user_id = user.id;
         Ok(github)
     }
 
@@ -1313,53 +1333,24 @@ impl Github {
 
     /// The status checks that the rulesets of `base` require, by the name each check reports.
     fn required_checks(&self, target: &Target, base: &str) -> Result<Vec<String>> {
-        let rules: Vec<BranchRule> =
-            self.read(&format!("repos/{}/rules/branches/{base}", target.repo))?;
-        Ok(rules
+        Ok(self.branch_requirements(target, base)?.checks)
+    }
+
+    fn branch_requirements(&self, target: &Target, base: &str) -> Result<BranchRequirements> {
+        let rules: Vec<BranchRule> = self.read(&format!(
+            "repos/{}/rules/branches/{}",
+            target.repo,
+            review_policy::path_segment(base)?
+        ))?;
+        let queue = rules.iter().any(|rule| rule.r#type == "merge_queue");
+        let checks = rules
             .into_iter()
             .filter(|rule| rule.r#type == "required_status_checks")
             .filter_map(|rule| rule.parameters)
             .flat_map(|parameters| parameters.required_status_checks)
             .map(|check| check.context)
-            .collect())
-    }
-
-    /// Refuses a new PR while the authenticated user already has as many open PRs as the work-in-progress limit of the repository permits.
-    fn admit_work_in_progress(&self, target: &Target, head: &str) -> Result<()> {
-        let open: Vec<ListedPr> = self.read(&format!(
-            "repos/{}/pulls?state=open&per_page=100",
-            target.repo
-        ))?;
-        let mine: Vec<&ListedPr> = open
-            .iter()
-            .filter(|pr| pr.user.login.eq_ignore_ascii_case(&self.login) && pr.head.name != head)
             .collect();
-        let limit = self.policy.work_in_progress.limit(&target.repo);
-        let count = u32::try_from(mine.len()).unwrap_or(u32::MAX);
-        if crate::wip_rules::admits(count, limit) {
-            return Ok(());
-        }
-        let oldest = mine
-            .iter()
-            .min_by_key(|pr| pr.number)
-            .context("a refused limit names an open PR")?;
-        let mut refusal = Refusal::new(
-            "pr.wip",
-            format!(
-                "{} already holds {count} open PR(s) in {}, at its work-in-progress limit of {limit}; add this work to #{} instead of opening another PR",
-                self.login, target.repo, oldest.number
-            ),
-            command(&["git", "switch", &oldest.head.name])
-                + " && "
-                + &command(&["git", "merge", "--no-edit", head])
-                + " && "
-                + &command(&["git", "push"]),
-        );
-        for pr in &mine {
-            refusal =
-                refusal.evidence(format!("#{} {} ({})", pr.number, pr.html_url, pr.head.name));
-        }
-        Err(refusal.into())
+        Ok(BranchRequirements { checks, queue })
     }
 
     /// Inspect live REST quota headers on each serialized prerequisite request.
@@ -1396,6 +1387,15 @@ impl Github {
         response: &str,
         resource: &str,
     ) -> Result<T> {
+        self.response_with_status(response, resource, &["200"])
+    }
+
+    fn response_with_status<T: serde::de::DeserializeOwned>(
+        &self,
+        response: &str,
+        resource: &str,
+        statuses: &[&str],
+    ) -> Result<T> {
         let response = response.replace("\r\n", "\n");
         let (headers, body) = response
             .split_once("\n\n")
@@ -1405,7 +1405,10 @@ impl Github {
                 .lines()
                 .next()
                 .is_some_and(|line| line.starts_with("HTTP/")
-                    && line.split_whitespace().nth(1) == Some("200")),
+                    && line
+                        .split_whitespace()
+                        .nth(1)
+                        .is_some_and(|status| statuses.contains(&status))),
             "unexpected GitHub response status"
         );
         let header = |name: &str| -> Result<&str> {
@@ -1919,6 +1922,7 @@ fn start_implementation(
     paths: &[PathBuf],
     adopt_existing: bool,
     promote_local: bool,
+    independent: Option<&str>,
     rerun: &str,
 ) -> Result<()> {
     target.conventional_required()?;
@@ -1926,6 +1930,15 @@ fn start_implementation(
     let destination = destination(&github, &target.repo)?;
     let gate = inspect_issue(&github, target, destination, None, rerun)?;
     require_issue(gate, target)?;
+    let head = git_output(&["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    let work = work::prepare(
+        &github,
+        target,
+        head.trim(),
+        None,
+        independent,
+        work::Operation::Start,
+    )?;
     context::start(
         &github,
         target,
@@ -1934,6 +1947,7 @@ fn start_implementation(
         adopt_existing,
         promote_local,
     )?;
+    work.started()?;
     println!("Checked implementation context saved ({gate:?})");
     Ok(())
 }
@@ -1964,7 +1978,15 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             paths,
             adopt_existing,
             promote_local,
-        } => start_implementation(&target, &paths, adopt_existing, promote_local, rerun)?,
+            independent,
+        } => start_implementation(
+            &target,
+            &paths,
+            adopt_existing,
+            promote_local,
+            independent.as_deref(),
+            rerun,
+        )?,
         Commands::ChangeCheck { root, base, staged } => {
             check_issue_context(&root, base.as_deref(), staged)?;
         }
@@ -1985,8 +2007,16 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             head,
             base,
             draft,
-        } => create(document, &head, base, draft, rerun)?,
+            independent,
+        } => create(
+            document,
+            &head,
+            base.as_deref(),
+            &Creation::Regular { draft, independent },
+            rerun,
+        )?,
         Commands::Edit { document, pr } => edit(document, pr, rerun)?,
+        Commands::LinkIssue { repo, pr, issue } => link_issue::run(&repo, pr, issue)?,
         Commands::Ready { target, pr } => ready_command(&target, pr, rerun)?,
         Commands::Merge {
             target,
@@ -2101,11 +2131,60 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
     review_policy::describe(&checked)
 }
 
+enum Creation {
+    Regular {
+        draft: bool,
+        independent: Option<String>,
+    },
+    Stack,
+}
+
+struct CreationStack {
+    parents: Vec<u64>,
+    trunk: String,
+}
+
+impl CreationStack {
+    fn select(target: &Target, work: &work::Plan, creation: &Creation) -> Result<Self> {
+        let (parents, trunk) = if work.stacked() || matches!(creation, Creation::Stack) {
+            chain(&open_prs(target)?, work.base())
+        } else {
+            (Vec::new(), work.base().to_owned())
+        };
+        require(
+            !(work.stacked() || matches!(creation, Creation::Stack)) || !parents.is_empty(),
+            || {
+                Refusal::new(
+                    "pr.stack",
+                    "the selected base has no open stack parent",
+                    command(&["gh", "pr", "list", "--repo", &target.repo]),
+                )
+                .evidence(format!("selected base {}", work.base()))
+            },
+        )?;
+        Ok(Self { parents, trunk })
+    }
+
+    fn published(&self, target: &Target, number: u64) -> Result<()> {
+        if !self.parents.is_empty() {
+            let mut arguments = vec!["link".to_owned(), "--base".to_owned(), self.trunk.clone()];
+            arguments.extend(self.parents.iter().map(u64::to_string));
+            arguments.push(number.to_string());
+            gh_stack(
+                target,
+                None,
+                &arguments.iter().map(String::as_str).collect::<Vec<_>>(),
+            )?;
+        }
+        Ok(())
+    }
+}
+
 fn create(
     document: DocumentArgs,
     head: &str,
-    base: Option<String>,
-    draft: bool,
+    base: Option<&str>,
+    creation: &Creation,
     rerun: &str,
 ) -> Result<()> {
     let body_file = document.body_file.clone();
@@ -2116,8 +2195,21 @@ fn create(
         branch(base)?;
     }
     let github = Github::connect()?;
+    let (draft, independent) = match creation {
+        Creation::Regular { draft, independent } => (*draft, independent.as_deref()),
+        Creation::Stack => (true, None),
+    };
+    let work = work::prepare(
+        &github,
+        &target,
+        head,
+        base,
+        independent,
+        work::Operation::Create,
+    )?;
+    let stack = CreationStack::select(&target, &work, creation)?;
     let checked =
-        review_policy::create_binding(&github, &target, &document.body, head, base.as_deref())?;
+        review_policy::create_binding(&github, &target, &document.body, head, Some(work.base()))?;
     let head = review_policy::qualified_head(&checked, head)?;
     admit_review_request(
         Operation::Create,
@@ -2143,23 +2235,31 @@ fn create(
         issue,
         Checks::Incomplete,
     )?;
-    github.admit_work_in_progress(&target, &head)?;
-    refuse_dependent(&github, &target, &head, base.as_deref(), &title, &body_file)?;
+    refuse_dependent(
+        &github,
+        &target,
+        &head,
+        Some(work.base()),
+        &title,
+        &body_file,
+        &stack.parents,
+    )?;
     let mut args = arguments("create", &target.repo);
     args.extend([OsString::from("--head"), head.into()]);
-    if let Some(base) = base {
-        args.extend([OsString::from("--base"), base.into()]);
-    }
+    args.extend([OsString::from("--base"), work.base().into()]);
     if effect == Effect::CreateDraft
         || checked.route == rules::review_routing_rules::ReviewRoute::Pr
     {
         args.push("--draft".into());
     }
     let _body = write_document(&mut args, &document)?;
+    work.before_publication()?;
     let created = gh(&args)?;
     print!("{created}");
-    evidence::remember(&target.repo, created_number(&created)?, &checked.object)?;
-    Ok(())
+    let number = created_number(&created)?;
+    evidence::remember(&target.repo, number, &checked.object)?;
+    work.published(number)?;
+    stack.published(&target, number)
 }
 
 fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
@@ -2344,7 +2444,7 @@ fn open_prs(target: &Target) -> Result<Vec<OpenPr>> {
             "--limit",
             "500",
             "--json",
-            "number,headRefName,baseRefName,isCrossRepository",
+            "number,headRefName,baseRefName,isCrossRepository,author,mergeable",
         ]
         .map(OsString::from),
     );
@@ -2389,7 +2489,9 @@ fn merge_state(
     pr: u64,
     view: &MergeView,
     stacked: bool,
-) -> Result<MergeState> {
+    requirements: &BranchRequirements,
+    carry: Option<&review_policy::Checked>,
+) -> Result<(MergeState, Option<review_policy::Checked>)> {
     let lifecycle = match (view.state.as_str(), view.is_draft) {
         ("MERGED", _) => Lifecycle::Merged,
         ("CLOSED", _) => Lifecycle::Closed,
@@ -2405,10 +2507,23 @@ fn merge_state(
     } else {
         false
     };
-    // GitHub itself holds a merge to the required checks, so the merge state reads the rollup alone.
-    let (total, unfinished, failed, _) = tally(&view.status_check_rollup, &[]);
+    let (total, unfinished, failed, missing) =
+        tally(&view.status_check_rollup, &requirements.checks);
+    let checks = head_checks(total, unfinished.saturating_add(missing), failed);
     let mut exclusion = review_exclusion(&target.repo, pr, &view.body)?;
+    let mut assessment = None;
     if matches!(lifecycle, Lifecycle::Draft | Lifecycle::Ready) {
+        review_policy::fetch_pr(
+            &std::env::current_dir()?,
+            target,
+            view.base_ref_oid
+                .as_deref()
+                .context("actual merge base commit missing")?,
+            &view.head_ref_oid,
+        )?;
+        if let Some(prior) = carry {
+            review_policy::carry_forward(github, target, view, prior)?;
+        }
         let signer = review_policy::assessment_signer(github, target, &view.author, &view.source)?;
         let reviewed = review_policy::check(
             github,
@@ -2424,22 +2539,29 @@ fn merge_state(
         review_policy::validate_live_source(&reviewed, &view.source)?;
         review_policy::labels(&reviewed, &view.labels)?;
         if lifecycle == Lifecycle::Ready
-            && !behind
+            && (stacked || requirements.queue || !behind)
             && view.mergeable != "CONFLICTING"
-            && head_checks(total, unfinished, failed) == rules::pr_rules::HeadChecks::Success
+            && checks == rules::pr_rules::HeadChecks::Success
         {
             review_policy::completion(&reviewed, target, github, pr)?;
         }
         exclusion = Exclusion::Owner;
+        assessment = Some(reviewed);
     }
-    Ok(MergeState {
-        lifecycle,
-        conflict: view.mergeable == "CONFLICTING",
-        behind,
-        checks: head_checks(total, unfinished, failed),
-        clean: stacked || matches!(view.merge_state_status.as_str(), "CLEAN" | "HAS_HOOKS"),
-        exclusion,
-    })
+    Ok((
+        MergeState {
+            lifecycle,
+            conflict: view.mergeable == "CONFLICTING",
+            behind: pr_merge_rules::base_update(behind, stacked, requirements.queue)
+                != pr_merge_rules::BaseUpdate::Current,
+            checks,
+            clean: stacked
+                || requirements.queue
+                || matches!(view.merge_state_status.as_str(), "CLEAN" | "HAS_HOOKS"),
+            exclusion,
+        },
+        assessment,
+    ))
 }
 
 /// The structured refusal for a merge that stops at `pr`.
@@ -2498,8 +2620,14 @@ fn wait(target: &Target, pr: u64, polling: Polling, started: Instant) -> Result<
             .evidence(format!("waited {} seconds", started.elapsed().as_secs()))
         },
     )?;
-    std::thread::sleep(Duration::from_secs(polling.interval));
+    sleep_interval(polling, started);
     Ok(())
+}
+
+fn sleep_interval(polling: Polling, started: Instant) {
+    let remaining = Duration::from_secs(polling.timeout.saturating_mul(SECONDS_PER_MINUTE))
+        .saturating_sub(started.elapsed());
+    std::thread::sleep(Duration::from_secs(polling.interval).min(remaining));
 }
 
 /// Excludes the review for the owner's pause, so the draft becomes ready during the pause.
@@ -2544,24 +2672,48 @@ fn merge_independent(
     rerun: &str,
 ) -> Result<()> {
     let started = Instant::now();
+    let mut carry = None;
+    let mut updated_head = None;
     loop {
         let view = merge_view(target, pr)?;
-        match merge_step(merge_state(github, target, pr, &view, false)?, false, false) {
+        let requirements = github.branch_requirements(target, &view.base_ref_name)?;
+        let (state, assessment) = merge_state(
+            github,
+            target,
+            pr,
+            &view,
+            false,
+            &requirements,
+            carry.as_ref(),
+        )?;
+        if updated_head
+            .as_deref()
+            .is_some_and(|head| head != view.head_ref_oid)
+        {
+            carry = None;
+            updated_head = None;
+        }
+        match merge_step(state, false, false) {
             Step::Done => {
                 println!("#{pr} merged at {}", view.head_ref_oid);
                 return Ok(());
             }
             Step::Update => {
+                if carry.is_some() {
+                    wait(target, pr, polling, started)?;
+                    continue;
+                }
                 let mut args = arguments("update-branch", &target.repo);
                 args.push(pr.to_string().into());
                 print!("{}", gh(&args)?);
+                carry = assessment;
+                updated_head = Some(view.head_ref_oid);
                 wait(target, pr, polling, started)?;
             }
             Step::Restack => bail!("an independent PR is never restacked"),
             Step::Wait => wait(target, pr, polling, started)?,
             Step::Exclude => add_pause_lines(target, pr, &view)?,
             Step::Ready => {
-                let required = github.required_checks(target, &view.base_ref_name)?;
                 make_ready(
                     github,
                     &ready_target(target, &view),
@@ -2569,12 +2721,16 @@ fn merge_independent(
                     view.title,
                     view.body,
                     true,
-                    checks(&view.status_check_rollup, &required),
+                    checks(&view.status_check_rollup, &requirements.checks),
                     &view.head_ref_oid,
                     rerun,
                 )?;
             }
             Step::Merge => {
+                let heads = [(pr, view.head_ref_oid.clone())];
+                if requirements.queue {
+                    return submit_merge(github, target, pr, &heads, true, polling, started);
+                }
                 let mut args = arguments("merge", &target.repo);
                 args.extend(
                     [
@@ -2586,7 +2742,7 @@ fn merge_independent(
                     .map(OsString::from),
                 );
                 print!("{}", gh(&args)?);
-                wait(target, pr, polling, started)?;
+                return await_merge(github, target, &heads, false, polling, started);
             }
             Step::Stop(stop) => return Err(stop_refusal(target, pr, stop, false, &view).into()),
         }
@@ -2691,7 +2847,7 @@ fn require_checkout_origin(target: &Target, url: &str) -> Result<()> {
 
 /// Runs the pinned gh-stack on the target repository and takes the lease when it rewrites or pushes branches.
 fn gh_stack(target: &Target, lease: Option<&Lease>, args: &[&str]) -> Result<()> {
-    let mut process = Tool::GhStack.command();
+    let mut process = tool::owner_gh_stack()?;
     process
         .args(args)
         .env("GH_HOST", "github.com")
@@ -2704,7 +2860,7 @@ fn gh_stack(target: &Target, lease: Option<&Lease>, args: &[&str]) -> Result<()>
     }
     let status = process
         .status()
-        .context("start the pinned gh-stack; run `mise install` in the repository")?;
+        .context("start owner-provisioned gh-stack; apply the shared mise tools")?;
     let rebase = || command(&["pr-workflow", "stack", "rebase", "--repo", &target.repo]);
     match status.code() {
         Some(0) => Ok(()),
@@ -2846,6 +3002,37 @@ fn sync_stack(target: &Target) -> Result<()> {
 }
 
 /// Merges the stack up to `top` once every PR in it can merge.
+fn check_stack_issue(
+    github: &Github,
+    target: &Target,
+    destination: Destination,
+    pr: u64,
+    view: &MergeView,
+    rerun: &str,
+) -> Result<()> {
+    if view.state != "OPEN"
+        || ((destination.fork || !destination.personal) && target.issue.is_none())
+    {
+        return Ok(());
+    }
+    let member = ready_target(target, view);
+    inspect_issue(
+        github,
+        &member,
+        destination,
+        Some((&view.body, BodySource::Pr(pr))),
+        rerun,
+    )
+    .and_then(|gate| require_issue(gate, &member))
+    .map_err(|error| {
+        if let Some(refusal) = error.downcast_ref::<Refusal>() {
+            anyhow::Error::from(refusal.clone().evidence(format!("stack member #{pr}")))
+        } else {
+            error.context(format!("stack member #{pr}"))
+        }
+    })
+}
+
 fn merge_stack(
     github: &Github,
     target: &Target,
@@ -2854,6 +3041,8 @@ fn merge_stack(
     rerun: &str,
 ) -> Result<()> {
     let started = Instant::now();
+    let destination = destination(github, &target.repo)?;
+    let mut carry = BTreeMap::new();
     'restart: loop {
         let open = open_prs(target)?;
         let Some(top_head) = open
@@ -2868,17 +3057,45 @@ fn merge_stack(
             }
             return Err(stop_refusal(target, top, Stop::Closed, true, &view).into());
         };
-        let (numbers, _) = chain(&open, &top_head);
-        let mut verified = Vec::new();
+        let (numbers, trunk) = chain(&open, &top_head);
+        let requirements = github.branch_requirements(target, &trunk)?;
+        let mut observed = Vec::new();
+        let mut assessments = BTreeMap::new();
         for &pr in &numbers {
             let view = merge_view(target, pr)?;
-            match merge_step(merge_state(github, target, pr, &view, true)?, true, false) {
+            check_stack_issue(github, target, destination, pr, &view, rerun)?;
+            let (state, assessment) = merge_state(
+                github,
+                target,
+                pr,
+                &view,
+                true,
+                &requirements,
+                carry.get(&pr),
+            )?;
+            if let Some(assessment) = assessment {
+                assessments.insert(pr, assessment);
+            }
+            observed.push((pr, view, merge_step(state, true, false)));
+        }
+        if observed.iter().any(|(_, _, step)| *step == Step::Restack) {
+            for (pr, view, step) in &observed {
+                if let Step::Stop(stop) = step {
+                    return Err(stop_refusal(target, *pr, *stop, true, view).into());
+                }
+            }
+            sync_stack(target)?;
+            carry = assessments;
+            wait(target, top, polling, started)?;
+            continue;
+        }
+        carry.clear();
+        let mut verified = Vec::new();
+        for (pr, view, step) in observed {
+            match step {
                 Step::Merge => verified.push((pr, view.head_ref_oid)),
                 Step::Done => {}
-                Step::Restack => {
-                    sync_stack(target)?;
-                    continue 'restart;
-                }
+                Step::Restack => bail!("the stack must be restacked before its members can merge"),
                 Step::Wait => {
                     wait(target, pr, polling, started)?;
                     continue 'restart;
@@ -2888,7 +3105,6 @@ fn merge_stack(
                     continue 'restart;
                 }
                 Step::Ready => {
-                    let required = github.required_checks(target, &view.base_ref_name)?;
                     make_ready(
                         github,
                         &ready_target(target, &view),
@@ -2896,7 +3112,7 @@ fn merge_stack(
                         view.title,
                         view.body,
                         true,
-                        checks(&view.status_check_rollup, &required),
+                        checks(&view.status_check_rollup, &requirements.checks),
                         &view.head_ref_oid,
                         rerun,
                     )?;
@@ -2910,27 +3126,15 @@ fn merge_stack(
             println!("#{top} and the PRs below it are merged");
             return Ok(());
         }
-        gh_stack(
+        return submit_merge(
+            github,
             target,
-            None,
-            &["merge", &top.to_string(), "--yes", "--squash"],
-        )?;
-        for (pr, oid) in verified {
-            let view = merge_view(target, pr)?;
-            require(view.state == "MERGED" && view.head_ref_oid == oid, || {
-                Refusal::new(
-                    "pr.merge",
-                    "a PR of the stack did not merge at the head whose checks were verified",
-                    command(&["gh", "pr", "view", &pr.to_string(), "--repo", &target.repo]),
-                )
-                .evidence(format!(
-                    "#{pr}: state {}, head {}, verified {oid}",
-                    view.state, view.head_ref_oid
-                ))
-            })?;
-            println!("#{pr} merged at {oid}");
-        }
-        return Ok(());
+            top,
+            &verified,
+            requirements.queue,
+            polling,
+            started,
+        );
     }
 }
 
@@ -2955,6 +3159,30 @@ fn merge_heads(head: &str, other: &str) -> Result<PathMerge> {
     }
 }
 
+fn report_dependency_skip(pr: &OpenPr) -> bool {
+    let author = pr.author.as_ref();
+    let login = author.map_or("", |author| author.login.as_str());
+    let Some(skip) = dependency_skip(
+        login,
+        author.and_then(|author| author.author_type.as_deref()),
+        author.is_some_and(|author| author.is_bot),
+        pr.mergeable.as_deref(),
+    ) else {
+        return false;
+    };
+    let reason = match skip {
+        DependencySkip::Bot => format!("bot author {login}"),
+        DependencySkip::BaseConflict => {
+            format!(
+                "stale PR already conflicts with its base {}",
+                pr.base_ref_name
+            )
+        }
+    };
+    println!("skipped #{} ({}): {reason}", pr.number, pr.head_ref_name);
+    true
+}
+
 /// Refuses shared commits or conflicting heads and names the required stack.
 fn refuse_dependent(
     github: &Github,
@@ -2963,9 +3191,15 @@ fn refuse_dependent(
     base: Option<&str>,
     title: &str,
     body_file: &Path,
+    ancestors: &[u64],
 ) -> Result<()> {
     let open = open_prs(target)?;
-    let others: Vec<&OpenPr> = open.iter().filter(|pr| pr.head_ref_name != head).collect();
+    let others: Vec<&OpenPr> = open
+        .iter()
+        .filter(|pr| pr.head_ref_name != head)
+        .filter(|pr| !ancestors.contains(&pr.number))
+        .filter(|pr| !report_dependency_skip(pr))
+        .collect();
     if others.is_empty() {
         return Ok(());
     }
@@ -3007,48 +3241,70 @@ fn refuse_dependent(
         let Some(found) = dependency(shared_commits, merge) else {
             continue;
         };
-        let mut next = vec!["pr-workflow", "stack", "create", "--repo", &target.repo];
-        let issue = target.issue.map(|issue| issue.to_string());
-        if let Some(issue) = &issue {
-            next.extend(["--issue", issue]);
+        if !ancestors.is_empty() {
+            return Err(Refusal::new(
+                "pr.dependency",
+                format!(
+                    "{head} depends on #{} outside its parent chain; resolve that dependency before extending the open stack",
+                    other.number
+                ),
+                command(&["gh", "pr", "view", &other.number.to_string(), "--repo", &target.repo]),
+            )
+            .evidence(format!("#{} ({}): {found:?}", other.number, other.head_ref_name))
+            .into());
         }
-        let body_file = body_file.display().to_string();
-        next.extend([
-            "--title",
-            title,
-            "--body-file",
-            &body_file,
-            "--head",
-            head,
-            "--base",
-            &other.head_ref_name,
-        ]);
-        return Err(Refusal::new(
-            "pr.dependency",
-            match found {
-                Dependency::Commits => format!(
-                    "{head} contains commits of #{}, so it depends on that PR; open it as a stack on top of it",
-                    other.number
-                ),
-                Dependency::Conflict => format!(
-                    "{head} conflicts with #{}; open it as a stack on top of that PR",
-                    other.number
-                ),
-            },
-            command(&next),
-        )
-        .evidence(format!(
-            "#{} ({}): {}",
-            other.number,
-            other.head_ref_name,
-            match found {
-                Dependency::Commits => "shared commits",
-                Dependency::Conflict => "git merge-tree --write-tree reports a conflict between the heads",
-            }
-        ))
-        .into());
+        return Err(dependency_refusal(target, head, title, body_file, other, found).into());
     }
     Ok(())
+}
+
+fn dependency_refusal(
+    target: &Target,
+    head: &str,
+    title: &str,
+    body_file: &Path,
+    other: &OpenPr,
+    found: Dependency,
+) -> Refusal {
+    let mut next = vec!["pr-workflow", "stack", "create", "--repo", &target.repo];
+    let issue = target.issue.map(|issue| issue.to_string());
+    if let Some(issue) = &issue {
+        next.extend(["--issue", issue]);
+    }
+    let body_file = body_file.display().to_string();
+    next.extend([
+        "--title",
+        title,
+        "--body-file",
+        &body_file,
+        "--head",
+        head,
+        "--base",
+        &other.head_ref_name,
+    ]);
+    Refusal::new(
+        "pr.dependency",
+        match found {
+            Dependency::Commits => format!(
+                "{head} contains commits of #{}, so it depends on that PR; open it as a stack on top of it",
+                other.number
+            ),
+            Dependency::Conflict => format!(
+                "{head} conflicts with #{}; open it as a stack on top of that PR",
+                other.number
+            ),
+        },
+        command(&next),
+    )
+    .evidence(format!(
+        "#{} ({}): {}",
+        other.number,
+        other.head_ref_name,
+        match found {
+            Dependency::Commits => "shared commits",
+            Dependency::Conflict => "git merge-tree --write-tree reports a conflict between the heads",
+        }
+    ))
 }
 
 /// The PR number at the end of the URL that `gh pr create` printed.
@@ -3063,72 +3319,7 @@ fn created_number(output: &str) -> Result<u64> {
 
 /// Opens a draft PR on top of the open PR whose head names `base`, and links the stack.
 fn create_stacked(document: DocumentArgs, head: &str, base: &str, rerun: &str) -> Result<()> {
-    let body_file = document.body_file.clone();
-    let (target, document) = read_document(document, false)?;
-    branch(head)?;
-    branch(base)?;
-    let github = Github::connect()?;
-    let checked =
-        review_policy::create_binding(&github, &target, &document.body, head, Some(base))?;
-    admit_review_request(
-        Operation::Create,
-        target.generation,
-        &document.body,
-        checked.route,
-        || Ok((true, Exclusion::None)),
-    )?;
-    let destination = destination(&github, &target.repo)?;
-    written_to_standard(destination, PULL_REQUEST, &document)?;
-    let issue = inspect_issue(
-        &github,
-        &target,
-        destination,
-        Some((&document.body, BodySource::File(&body_file))),
-        rerun,
-    )?;
-    planned(
-        Operation::Create,
-        &target,
-        None,
-        true,
-        issue,
-        Checks::Incomplete,
-    )?;
-    let (below, trunk) = chain(&open_prs(&target)?, base);
-    require(!below.is_empty(), || {
-        Refusal::new(
-            "pr.stack",
-            format!("{base} has no open PR to stack on; open the parent PR first"),
-            command(&[
-                "pr-workflow",
-                "create",
-                "--repo",
-                &target.repo,
-                "--head",
-                base,
-                "--title",
-                "<title>",
-                "--body-file",
-                "<body-file>",
-            ]),
-        )
-        .evidence(format!("no open PR has the head {base}"))
-    })?;
-    let mut args = arguments("create", &target.repo);
-    args.extend(["--head", head, "--base", base, "--draft"].map(OsString::from));
-    let _body = write_document(&mut args, &document)?;
-    let created = gh(&args)?;
-    print!("{created}");
-    let number = created_number(&created)?;
-    evidence::remember(&target.repo, number, &checked.object)?;
-    let mut link = vec!["link".to_owned(), "--base".to_owned(), trunk];
-    link.extend(below.iter().map(u64::to_string));
-    link.push(number.to_string());
-    gh_stack(
-        &target,
-        None,
-        &link.iter().map(String::as_str).collect::<Vec<_>>(),
-    )
+    create(document, head, Some(base), &Creation::Stack, rerun)
 }
 
 fn stack(action: StackAction, rerun: &str) -> Result<()> {

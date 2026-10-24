@@ -18,12 +18,13 @@
 use crate::locate;
 use crate::real_git;
 use crate::refusal::Refusal;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 mod cargo;
+mod mise;
 pub mod report;
 
 const DEFAULT_UPDATE_TYPES: &str = "minor patch pin pinDigest";
@@ -44,7 +45,7 @@ const DEFAULT_UID: u32 = 501;
 const DEFAULT_GID: u32 = 20;
 
 /// One dependency with a blocking update in a validated report.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct Update {
     package_file: String,
     dep_name: String,
@@ -57,6 +58,18 @@ pub(crate) struct Update {
     new_digest: String,
     breaking: bool,
     inherited_touched: bool,
+}
+
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
+struct LookupIdentity(Update);
+
+impl Update {
+    fn lookup_identity(&self) -> LookupIdentity {
+        LookupIdentity(Self {
+            inherited_touched: false,
+            ..self.clone()
+        })
+    }
 }
 
 pub fn dispatch(args: &[String]) -> i32 {
@@ -172,6 +185,10 @@ fn gate_ref(remote: &str, input: &str) -> i32 {
         Ok(None) => return 0,
         Err(cause) => return unavailable(&cause),
     };
+    let integrated = match integrated_scope(remote, input, &found) {
+        Ok(integrated) => integrated,
+        Err(cause) => return unavailable(&cause),
+    };
 
     if locate::which("docker").is_none() {
         return unavailable("required tool docker is missing");
@@ -188,15 +205,25 @@ fn gate_ref(remote: &str, input: &str) -> i32 {
     let checked = std::fs::read(&report)
         .map_err(|_| "the required report could not be read".to_owned())
         .and_then(|bytes| {
-            report::parse_for_push(&bytes, &update_types(), &found)
-                .map_err(|error| error.to_string())
+            let checked = report::parse_for_push(&bytes, &update_types(), &found)
+                .map_err(|error| error.to_string())?;
+            let integrated = integrated
+                .as_ref()
+                .map(|scope| report::parse_for_push(&bytes, &update_types(), scope))
+                .transpose()
+                .map_err(|error| error.to_string())?;
+            Ok((checked, integrated))
         });
     if let Some(dir) = report.parent() {
         platform::cleanup::remove_dir_all(dir);
     }
-    let checked = match checked {
+    let (checked, integrated_report) = match checked {
         Ok(checked) => checked,
         Err(evidence) => return report_refusal(&evidence),
+    };
+    let authored = match introduced_updates(integrated.as_ref().zip(integrated_report.as_ref())) {
+        Ok(authored) => authored,
+        Err(cause) => return unavailable(cause),
     };
     if checked.notices != 0 {
         eprintln!("renovate gate: {} nonfatal report notices", checked.notices);
@@ -206,7 +233,7 @@ fn gate_ref(remote: &str, input: &str) -> i32 {
         Ok(contexts) => contexts,
         Err(cause) => return unavailable(cause),
     };
-    let (blocked, outdated) = classify(&updates, &found, &contexts);
+    let (blocked, outdated) = classify(&updates, &found, &contexts, authored.as_ref());
 
     if !outdated.is_empty() {
         eprintln!(
@@ -325,6 +352,7 @@ fn classify(
     updates: &[Update],
     found: &Found,
     contexts: &[SourceContext<'_>],
+    authored: Option<&BTreeSet<LookupIdentity>>,
 ) -> (Vec<String>, Vec<String>) {
     let mut blocked = Vec::new();
     let mut outdated = Vec::new();
@@ -344,21 +372,10 @@ fn classify(
             needed: rules::freshness_rules::Need::Required,
             evidence: true,
             breaking: c.breaking,
-            touched: c.inherited_touched
-                || touched(
-                    c,
-                    found.added_by_file.get(&c.package_file).map(String::as_str),
-                    found.scope_unknown,
-                )
-                || contexts
-                    .iter()
-                    .find(|context| context.package_file == c.package_file)
-                    .is_some_and(|context| {
-                        let replacement = protocol_text(&c.replace_string);
-                        !replacement.is_empty()
-                            && context.after.matches(&replacement).count()
-                                > context.before.matches(&replacement).count()
-                    }),
+            touched: rules::freshness_rules::introduced(
+                source_touched(c, found, contexts),
+                authored.is_none_or(|updates| updates.contains(&c.lookup_identity())),
+            ),
         }) == rules::freshness_rules::Verdict::Outdated
         {
             blocked.push(line);
@@ -367,6 +384,44 @@ fn classify(
         }
     }
     (blocked, outdated)
+}
+
+fn source_touched(c: &Update, found: &Found, contexts: &[SourceContext<'_>]) -> bool {
+    if !c.inherited_touched && !found.changed_files.contains(&c.package_file) {
+        return false;
+    }
+    c.inherited_touched
+        || touched(
+            c,
+            found.added_by_file.get(&c.package_file).map(String::as_str),
+            found.scope_unknown,
+        )
+        || contexts
+            .iter()
+            .find(|context| context.package_file == c.package_file)
+            .is_some_and(|context| {
+                let replacement = protocol_text(&c.replace_string);
+                !replacement.is_empty()
+                    && context.after.matches(&replacement).count()
+                        > context.before.matches(&replacement).count()
+            })
+}
+
+fn introduced_updates(
+    integrated: Option<(&Found, &report::CheckedReport)>,
+) -> Result<Option<BTreeSet<LookupIdentity>>, &'static str> {
+    let Some((found, checked)) = integrated else {
+        return Ok(None);
+    };
+    let contexts = replacement_contexts(&checked.updates, found)?;
+    Ok(Some(
+        checked
+            .updates
+            .iter()
+            .filter(|update| source_touched(update, found, &contexts))
+            .map(Update::lookup_identity)
+            .collect(),
+    ))
 }
 
 fn replacement_contexts<'a>(
@@ -432,6 +487,10 @@ fn range_base(remote: &str, local_sha: &str, remote_sha: &str) -> Result<Option<
     if !remote_sha.is_empty() && !remote_sha.chars().all(|c| c == '0') {
         return Ok(Some(remote_sha.to_owned()));
     }
+    default_base(remote, local_sha)
+}
+
+fn default_base(remote: &str, local_sha: &str) -> Result<Option<String>, String> {
     let Some(tip) = default_branch_tip(remote)? else {
         return Ok(None);
     };
@@ -441,6 +500,44 @@ fn range_base(remote: &str, local_sha: &str, remote_sha: &str) -> Result<Option<
         return Err("the remote default branch commit cannot be read".to_owned());
     }
     Ok(real_git::capture(&["merge-base", local_sha, &tip]).map(|value| value.trim().to_owned()))
+}
+
+fn integrated_scope(remote: &str, input: &str, found: &Found) -> Result<Option<Found>, String> {
+    let fields: Vec<_> = input.split_whitespace().collect();
+    let [_, offered, _, published] = fields[..] else {
+        return Err("the offered revision range is malformed".to_owned());
+    };
+    if published.chars().all(|character| character == '0') {
+        return Ok(None);
+    }
+    let merges = real_git::capture(&[
+        "rev-list",
+        "--merges",
+        "--max-count=1",
+        &format!("{published}..{offered}"),
+    ])
+    .ok_or("Git could not inspect the incoming merge history")?;
+    if merges.trim().is_empty() {
+        return Ok(None);
+    }
+    let base = default_base(remote, offered)?
+        .ok_or("the integrated default branch baseline is unavailable")?;
+    let changed_files = diff_names(&base, offered)?;
+    let added_by_file = diff_added_lines(&base, offered, &changed_files)?
+        .into_iter()
+        .collect();
+    let baselines_by_file = changed_files
+        .iter()
+        .map(|file| (file.clone(), base.clone()))
+        .collect();
+    Ok(Some(Found {
+        repository: found.repository.clone(),
+        changed_files,
+        added_by_file,
+        baselines_by_file,
+        offered: Some(offered.to_owned()),
+        scope_unknown: false,
+    }))
 }
 
 fn default_branch_tip(remote: &str) -> Result<Option<String>, String> {

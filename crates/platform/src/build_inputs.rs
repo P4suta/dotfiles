@@ -24,7 +24,7 @@ pub const CRATES: [&str; 9] = [
 ];
 
 /// Files outside the crates' `src` directories that the compiler includes or that decide how the tools build.
-const SHARED: [&str; 46] = [
+const SHARED: [&str; 58] = [
     ".cargo/config.toml",
     ".chezmoiroot",
     ".github/workflows/ci.yml",
@@ -48,6 +48,17 @@ const SHARED: [&str; 46] = [
     "crates/platform/build.rs",
     "crates/platform/tests/support/fixture_process.rs",
     "crates/rules/clippy.toml",
+    "fuzz/corpus/answer_plan/lexical",
+    "fuzz/corpus/generated_attributes/unknown-value",
+    "fuzz/corpus/generated_attributes/valid",
+    "fuzz/corpus/generated_attributes/wrong-path",
+    "fuzz/corpus/github_bodies/arguments",
+    "fuzz/corpus/github_bodies/duplicate-json",
+    "fuzz/corpus/github_bodies/expansion",
+    "fuzz/corpus/github_bodies/nested-json",
+    "fuzz/corpus/shell_suggestions/invalid-range",
+    "fuzz/corpus/shell_suggestions/quoting",
+    "fuzz/corpus/shell_suggestions/valid-tree",
     "home/.chezmoidata/modern.toml",
     "home/.chezmoidata/versions.toml",
     "home/.chezmoitemplates/partials/njutest-mise.toml",
@@ -62,6 +73,7 @@ const SHARED: [&str; 46] = [
     "mise.njutest.toml",
     "package.json",
     "policy/obligations.toml",
+    "specs/lean/lean-toolchain",
     "tsconfig.json",
     "xtask/proofs/Dockerfile",
     "xtask/schema/njutest/manifest.json",

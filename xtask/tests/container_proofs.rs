@@ -392,6 +392,19 @@ fn completed_proof_verdicts_ignore_elapsed_time_and_incomplete_proofs_lack_evide
 }
 
 #[test]
+fn an_incomplete_batch_names_every_expected_harness() {
+    let expected = ["stopped_first", "not_started_last"];
+    let report = json!({"verification_results":{"summary":{"status":"incomplete","executed":1},"results":[{"harness_id":expected[0],"status":"Timeout","checks":[]}]}});
+    let error = validate_results(&report, &expected, false)
+        .unwrap_err()
+        .to_string();
+    for name in expected {
+        assert!(error.contains(name), "{error}");
+    }
+    assert!(error.contains("inconclusive"), "{error}");
+}
+
+#[test]
 fn a_counterexample_with_unfinished_properties_is_missing_evidence() {
     let expected = ["incomplete-counterexample"];
     let report = json!({"verification_results":{"summary":{"status":"completed","executed":1,"failed":1,"successful":0},"results":[{"harness_id":expected[0],"status":"Failure","checks":[{"category":"assertion","status":"Failure"},{"category":"unwinding assertion","status":"Unknown"}]}]}});

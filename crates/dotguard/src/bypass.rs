@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn epoch_and_known_dates() {
         assert_eq!(civil_from_days(0), (1970, 1, 1));
-        assert_eq!(civil_from_days(19_723), (2024, 1, 1)); // a leap year
+        assert_eq!(civil_from_days(19_723), (2024, 1, 1)); // 2024 is a leap year.
         assert_eq!(civil_from_days(19_784), (2024, 3, 2)); // the day after Feb 29
         assert_eq!(civil_from_days(-1), (1969, 12, 31));
     }

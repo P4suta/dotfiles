@@ -9,12 +9,14 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 pub const KANI_VERSION: &str = "0.68.0";
 pub(crate) const KANI_CBMC_VERSION: &str = "6.11.0";
 const KANI_OBJECT_BITS: u32 = 12;
+const KANI_PARALLELISM: u16 = 1;
 
 /// Every proof covers a reachable acceptance and a reachable refusal.
 const WITNESSES: usize = 2;
@@ -60,12 +62,36 @@ pub fn verify_push(
 /// Returns an error when evidence is incomplete or empty, the harness set differs from `expected`, or a completed result contradicts `counterexample`.
 /// A normal run must pass every proof with an assertion, two satisfied cover witnesses, and every property verified, and a counterexample run must fail every harness on an assertion.
 pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) -> Result<()> {
+    validate_results_reported(value, expected, counterexample, |result, verdict| {
+        let outcome = match verdict {
+            proof_budget_rules::Verdict::Proven => "proved",
+            proof_budget_rules::Verdict::Failed => "refuted",
+            proof_budget_rules::Verdict::Inconclusive => "incomplete",
+        };
+        println!("Kani {}: {outcome}", result["harness_id"]);
+        if let Some(millis) = result["duration_ms"].as_u64() {
+            println!("Kani {}: {millis} ms (advisory)", result["harness_id"]);
+        }
+    })
+}
+
+fn validate_results_reported(
+    value: &Value,
+    expected: &[&str],
+    counterexample: bool,
+    mut report: impl FnMut(&Value, proof_budget_rules::Verdict),
+) -> Result<()> {
     let summary = &value["verification_results"]["summary"];
+    let complete = summary["status"] == "completed"
+        && summary["executed"].as_u64() == Some(expected.len() as u64)
+        && !expected.is_empty();
+    if !complete {
+        report_incomplete(expected);
+    }
     ensure!(
-        summary["status"] == "completed"
-            && summary["executed"].as_u64() == Some(expected.len() as u64)
-            && !expected.is_empty(),
-        "proof did not complete: incomplete or empty execution (missing evidence, inconclusive)"
+        complete,
+        "proof did not complete: incomplete or empty execution for [{}] (missing evidence, inconclusive)",
+        expected.join(", ")
     );
     let results = value["verification_results"]["results"]
         .as_array()
@@ -82,64 +108,95 @@ pub fn validate_results(value: &Value, expected: &[&str], counterexample: bool) 
         results.len() == expected.len() && names == expected.iter().copied().collect(),
         "unexpected, missing, or duplicate proof harness"
     );
-    for result in results {
-        let properties = result["checks"].as_array().filter(|checks| {
-            !checks.is_empty()
-                && checks.iter().all(|check| {
-                    matches!(
-                        check["status"].as_str(),
-                        Some("Success" | "Failure" | "Unreachable" | "Satisfied" | "Unsatisfiable")
-                    )
-                })
-        });
-        let completed_result = match (result["status"].as_str(), properties) {
-            (Some("Success"), Some(_)) => Some(true),
-            (Some("Failure"), Some(checks))
-                if checks.iter().any(|check| check["status"] == "Failure") =>
-            {
-                Some(false)
-            }
-            _ => None,
-        };
-        ensure!(
-            proof_budget_rules::verdict(completed_result)
-                != proof_budget_rules::Verdict::Inconclusive,
-            "proof did not complete: {} (missing evidence, inconclusive)",
-            result["harness_id"]
-        );
-        if let Some(millis) = result["duration_ms"].as_u64() {
-            println!("Kani {}: {millis} ms (advisory)", result["harness_id"]);
-        }
-    }
     let mut checks = Checks::default();
-    if counterexample {
-        checks.run("counterexample summary", || {
-            ensure!(
-                summary["failed"] == expected.len(),
-                "counterexample was not rejected"
-            );
-            Ok(())
-        });
-    } else {
-        checks.run("production summary", || {
-            ensure!(
-                summary["failed"] == 0 && summary["successful"] == expected.len(),
-                "required proof failed"
-            );
-            Ok(())
-        });
+    if results
+        .iter()
+        .all(|result| completed_verdict(result) != proof_budget_rules::Verdict::Inconclusive)
+    {
+        if counterexample {
+            checks.run("counterexample summary", || {
+                ensure!(
+                    summary["failed"] == expected.len(),
+                    "counterexample was not rejected"
+                );
+                Ok(())
+            });
+        } else {
+            checks.run("production summary", || {
+                ensure!(
+                    summary["failed"] == 0 && summary["successful"] == expected.len(),
+                    "required proof failed"
+                );
+                Ok(())
+            });
+        }
     }
     for result in results {
         let name = result["harness_id"].as_str().unwrap_or_default();
         checks.run(&format!("harness {name}"), || {
-            if counterexample {
-                validate_counterexample(result)
-            } else {
-                validate_proof(result)
-            }
+            validate_reported_result(result, counterexample, &mut report)
         });
     }
     checks.finish()
+}
+
+fn report_incomplete(expected: &[&str]) {
+    for name in expected {
+        println!("Kani {name}: incomplete (batch not validated)");
+    }
+}
+
+fn completed_verdict(result: &Value) -> proof_budget_rules::Verdict {
+    let properties = result["checks"].as_array().filter(|checks| {
+        !checks.is_empty()
+            && checks.iter().all(|check| {
+                matches!(
+                    check["status"].as_str(),
+                    Some("Success" | "Failure" | "Unreachable" | "Satisfied" | "Unsatisfiable")
+                )
+            })
+    });
+    let completed = match (result["status"].as_str(), properties) {
+        (Some("Success"), Some(_)) => Some(true),
+        (Some("Failure"), Some(checks))
+            if checks.iter().any(|check| check["status"] == "Failure") =>
+        {
+            Some(false)
+        }
+        _ => None,
+    };
+    proof_budget_rules::verdict(completed)
+}
+
+fn validate_reported_result(
+    result: &Value,
+    counterexample: bool,
+    report: &mut impl FnMut(&Value, proof_budget_rules::Verdict),
+) -> Result<()> {
+    let verdict = completed_verdict(result);
+    let validation = (|| {
+        ensure!(
+            verdict != proof_budget_rules::Verdict::Inconclusive,
+            "proof did not complete: {} (missing evidence, inconclusive)",
+            result["harness_id"]
+        );
+        if counterexample {
+            validate_counterexample(result)
+        } else {
+            validate_proof(result)
+        }
+    })();
+    let outcome = if validation.is_ok() {
+        proof_budget_rules::verdict(Some(!counterexample))
+    } else if verdict == proof_budget_rules::Verdict::Failed
+        && validate_counterexample(result).is_ok()
+    {
+        proof_budget_rules::Verdict::Failed
+    } else {
+        proof_budget_rules::Verdict::Inconclusive
+    };
+    report(result, outcome);
+    validation
 }
 
 fn validate_counterexample(result: &Value) -> Result<()> {
@@ -322,6 +379,7 @@ fn verify_batch_command(
         .args(["--output-format", "terse", "-Z", "unstable-options"])
         .args(features(flags))
         .arg("--exact")
+        .args(["--jobs", &KANI_PARALLELISM.to_string()])
         .arg("--harness-timeout")
         .arg(format!("{}s", proof_budget_rules::TIMEOUT_SECONDS))
         .arg("--export-json")
@@ -339,8 +397,13 @@ fn verify_batch_command(
         "receipt",
         &fs::read(directory.join("results.json"))?,
     )?;
-    let result: Value = skill_ops::read_json(&directory.join("results.json"))
-        .context("proof did not complete: missing Kani report (missing evidence, inconclusive)")?;
+    let result: Value = skill_ops::read_json(&directory.join("results.json")).with_context(|| {
+        report_incomplete(expected);
+        format!(
+            "proof did not complete for [{}]: missing Kani report (missing evidence, inconclusive)",
+            expected.join(", ")
+        )
+    })?;
     validate_results(&result, expected, counterexample)?;
     ensure!(
         status.success() != counterexample,
@@ -836,11 +899,11 @@ pub fn container_target_volume(root: &Path) -> String {
 }
 
 /// Kani writes temporary files beside the source it compiles, so the gate runs on a container-local copy of the read-only checkout.
-const CONTAINER_GATE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -; exec cargo run --locked --manifest-path xtask/Cargo.toml --";
+const CONTAINER_SOURCE: &str = "set -o pipefail; tar -C /source --exclude=.git --exclude=node_modules --exclude=target -cf - . | tar -C /work -xf -;";
 
 #[must_use]
 pub fn container_run_arguments(root: &Path, image: &str, target_volume: &str) -> Vec<OsString> {
-    container_campaign_arguments(root, image, target_volume, ProofCampaign::Full)
+    container_campaign_arguments(root, image, target_volume, ProofCampaign::Full, &[])
 }
 
 fn container_campaign_arguments(
@@ -848,6 +911,7 @@ fn container_campaign_arguments(
     image: &str,
     target_volume: &str,
     campaign: ProofCampaign,
+    sources: &[String],
 ) -> Vec<OsString> {
     // Docker reads `--mount` as one CSV record, so quoting keeps a comma in the path inside the field, and Windows forbids the quote character in paths.
     let mut mount = OsString::from("type=bind,\"source=");
@@ -867,6 +931,19 @@ fn container_campaign_arguments(
     .into();
     arguments.push(mount);
     arguments.extend(dotfiles::bounded::resource_arguments());
+    let mut action = if sources.is_empty() && campaign == ProofCampaign::Ci {
+        "proofs-ci"
+    } else {
+        "proofs"
+    }
+    .to_owned();
+    if !sources.is_empty() {
+        for source in sources {
+            action.push_str(" --source '");
+            action.push_str(&source.replace('\'', "'\\''"));
+            action.push('\'');
+        }
+    }
     arguments.extend(
         [
             "--volume",
@@ -885,11 +962,7 @@ fn container_campaign_arguments(
             "bash",
             "-ec",
             &format!(
-                "{CONTAINER_GATE} {}",
-                match campaign {
-                    ProofCampaign::Full => "proofs",
-                    ProofCampaign::Ci => "proofs-ci",
-                }
+                "{CONTAINER_SOURCE} exec cargo run --locked --manifest-path xtask/Cargo.toml -- {action}"
             ),
         ]
         .map(OsString::from),
@@ -901,32 +974,85 @@ fn container_campaign_arguments(
 fn verify_in_container(root: &Path, campaign: ProofCampaign) -> Result<()> {
     let root = crate::canonical(root)?;
     crate::phase_evidence::run(&root, "bounded Linux proof container", 1, || {
-        verify_container_measured(&root, campaign)
+        verify_container_measured(&root, campaign, &[])
     })
 }
 
-fn verify_container_measured(root: &Path, campaign: ProofCampaign) -> Result<()> {
+fn verify_container_measured(
+    root: &Path,
+    campaign: ProofCampaign,
+    sources: &[String],
+) -> Result<()> {
     ensure_linux_engine().context("Kani proofs on this host run in a Linux container")?;
     let definition = root.join(PROOF_IMAGE);
     let image = proof_image(root)?;
     ensure_image(root, &definition, &image)?;
     let image_id = verified_image_id(&image)?;
     crate::container::prepare_cargo(root, &image_id)?;
-    let output = crate::phase_evidence::output(
-        Tool::Docker.command().args(container_campaign_arguments(
+    let manifest = selected_manifest(root, sources)?;
+    let (harnesses, overhead) = campaign_workload(root, &manifest)?;
+    let subjects: Vec<_> = manifest
+        .obligations
+        .iter()
+        .filter_map(|obligation| match obligation {
+            Obligation::Kani { source, .. } => Some(source.as_str()),
+            _ => None,
+        })
+        .collect();
+    let output = dotfiles::bounded::run_campaign(
+        &container_campaign_arguments(
             root,
             &image_id,
             &container_target_volume(root),
             campaign,
-        )),
-        "Linux proof container campaign",
-    )?;
+            sources,
+        ),
+        &image_id,
+        harnesses,
+        KANI_PARALLELISM,
+        overhead,
+    )
+    .with_context(|| {
+        format!(
+            "proof campaign report is incomplete for Kani subjects [{}] (missing evidence, inconclusive)",
+            subjects.join(", ")
+        )
+    })?;
+    crate::phase_evidence::retain("Linux proof container campaign", "stdout", &output.stdout)?;
+    crate::phase_evidence::retain("Linux proof container campaign", "stderr", &output.stderr)?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
     ensure!(
         output.status.success(),
         "the containerized proof gate failed: {}",
         output.status
     );
     Ok(())
+}
+
+fn campaign_workload(root: &Path, manifest: &obligations::Manifest) -> Result<(u32, u32)> {
+    let mut harnesses = 0_u32;
+    let mut modules = 0_u32;
+    for obligation in &manifest.obligations {
+        if let Obligation::Kani { source, probes, .. } = obligation {
+            let production = obligations::module(&fs::read_to_string(root.join(source))?)?;
+            let rejected = obligations::probe_harnesses(probes)?;
+            let count = u32::try_from(production.harnesses.len() + rejected.len())?;
+            harnesses = harnesses
+                .checked_add(count)
+                .context("proof inventory overflow")?;
+            modules = modules
+                .checked_add(1)
+                .context("proof module count overflow")?;
+        }
+    }
+    let phase_seconds = dotfiles::bounded::Policy::load(None)?.limits.seconds;
+    let phases = u32::try_from(crate::proof_ci_phase::Phase::ALL.len())?;
+    let overhead = modules
+        .checked_add(phases)
+        .and_then(|workloads| workloads.checked_mul(phase_seconds))
+        .context("proof preparation safety cap overflow")?;
+    Ok((harnesses, overhead))
 }
 
 pub(crate) fn verified_image_id(image: &str) -> Result<String> {
@@ -958,6 +1084,49 @@ pub(crate) fn verified_image_id(image: &str) -> Result<String> {
 /// Returns an error when the pinned Kani version or Docker engine can't run, Docker can't build the verification image, or any proof or counterexample check fails.
 pub fn verify(root: &Path) -> Result<()> {
     verify_campaign(root, ProofCampaign::Full)
+}
+
+fn selected_manifest(root: &Path, sources: &[String]) -> Result<obligations::Manifest> {
+    let mut manifest = obligations::manifest(root)?;
+    if !sources.is_empty() {
+        let selected: BTreeSet<_> = sources.iter().collect();
+        ensure!(
+            selected.len() == sources.len(),
+            "duplicate selected proof source"
+        );
+        manifest.obligations.retain(|obligation| {
+            matches!(obligation, Obligation::Kani { source, .. } if selected.contains(source))
+        });
+        ensure!(
+            manifest.obligations.len() == selected.len(),
+            "every selected proof source must name a registered Kani rule module"
+        );
+    }
+    Ok(manifest)
+}
+
+/// Verify selected production rule modules and their complete rejecting inventories.
+///
+/// # Errors
+///
+/// Refuses unknown or duplicate sources and propagates incomplete or failed verification.
+pub fn verify_sources(root: &Path, sources: &[String]) -> Result<()> {
+    ensure!(!sources.is_empty(), "selected proof inventory is empty");
+    let manifest = selected_manifest(root, sources)?;
+    crate::elapsed_refinement::with_source(root, || {
+        crate::quality::with_locked_workspaces(root, || {
+            if dotfiles::bounded::requires_container() || cfg!(windows) {
+                crate::phase_evidence::run(
+                    root,
+                    "selected bounded Kani subjects",
+                    sources.len(),
+                    || verify_container_measured(root, ProofCampaign::Ci, sources),
+                )
+            } else {
+                verify_kani(root, &manifest)
+            }
+        })
+    })
 }
 
 /// Runs the CI campaign, which retains the proof checks and defers mutation to the full native campaign.
@@ -1133,6 +1302,92 @@ pub(crate) fn verify_kani(root: &Path, manifest: &obligations::Manifest) -> Resu
     })
 }
 
+/// Verify the answer gate's registered subjects under the installed or explicitly selected bounded policy.
+///
+/// # Errors
+///
+/// Refuses missing obligations, incomplete proofs, admitted counterexamples, and a failed corpus replay.
+pub fn verify_answer(root: &Path, policy: Option<&Path>) -> Result<()> {
+    let root = crate::canonical(root)?;
+    if dotfiles::bounded::requires_container() {
+        return verify_answer_container(&root, &dotfiles::bounded::Policy::load(policy)?);
+    }
+    ensure!(
+        policy.is_none(),
+        "an explicit policy requires the owner-side container route"
+    );
+    let mut manifest = obligations::manifest(&root)?;
+    manifest.obligations.retain(|obligation| matches!(obligation, Obligation::Kani { source, .. } if source == "crates/rules/src/answer_rules.rs"));
+    ensure!(
+        manifest.obligations.len() == 1,
+        "answer gate needs exactly one registered rule obligation"
+    );
+    crate::phase_evidence::run(&root, "answer policy subjects", 1, || {
+        kani_environment_version(&root)?;
+        let verifier = crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+        let engine = crate::phase_evidence::engine_digest(&root)?;
+        let (proved, rejected) = run_rule_subjects(
+            &manifest,
+            |source, probes| {
+                prepare_rules(
+                    &root,
+                    source,
+                    probes,
+                    &flags(&manifest, source),
+                    &verifier,
+                    &engine,
+                )
+            },
+            execute_rules,
+        )?;
+        println!(
+            "Verified {proved} answer policy harnesses and rejected {rejected} counterexamples."
+        );
+        let host = nightly_host(&root)?;
+        let output = replay(&root, FUZZ_DIRECTORY, "answer_plan", &host)?;
+        ensure!(
+            output.status.success(),
+            "answer parser corpus replay failed"
+        );
+        println!("Replayed the committed answer parser corpus.");
+        Ok(())
+    })
+}
+
+fn verify_answer_container(root: &Path, policy: &dotfiles::bounded::Policy) -> Result<()> {
+    ensure_linux_engine()?;
+    let image = proof_image(root)?;
+    ensure_image(root, &root.join(PROOF_IMAGE), &image)?;
+    let image = verified_image_id(&image)?;
+    crate::container::prepare_cargo(root, &image)?;
+    let mut arguments = container_run_arguments(root, &image, &container_target_volume(root));
+    *arguments.last_mut().context("answer proof container omits its command")? = format!(
+        "{CONTAINER_SOURCE} exec cargo run --locked --manifest-path xtask/Cargo.toml -- answer-proofs"
+    ).into();
+    arguments.splice(
+        1..1,
+        [
+            OsString::from("--network"),
+            OsString::from("none"),
+            OsString::from("--env"),
+            OsString::from("CARGO_BUILD_JOBS=1"),
+        ],
+    );
+    crate::phase_evidence::run(root, "bounded answer proof subjects", 1, || {
+        let output = dotfiles::bounded::run_with_policy(policy, &arguments, &image)?;
+        crate::phase_evidence::retain("answer proof container", "stdout", &output.stdout)?;
+        crate::phase_evidence::retain("answer proof container", "stderr", &output.stderr)?;
+        std::io::stdout().write_all(&output.stdout)?;
+        std::io::stderr().write_all(&output.stderr)?;
+        ensure!(
+            output.status.success(),
+            "answer proof subjects are incomplete: {}",
+            output.status
+        );
+        Ok(())
+    })
+}
+
 fn verify_kani_measured(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     kani_environment_version(root)?;
     verify_kani_driver(root)?;
@@ -1257,6 +1512,7 @@ pub const FUZZ_VERSION: &str = "0.13.2";
 
 /// The cargo-fuzz directory of this repository's parser targets, which `assure.toml` names as their owners.
 pub const FUZZ_DIRECTORY: &str = "fuzz";
+const FUZZ_REPLAY_CODEGEN_UNITS: &str = "16";
 const FUZZ_COMPILE_OPERATION: &str = "fuzz target compilation prerequisite";
 const FUZZ_COMPILE_MANIFEST: &str = "fuzz/Cargo.toml";
 const FUZZ_SHARED_SOURCE: &str = "crates/dotfiles/examples/support";
@@ -1389,17 +1645,14 @@ fn nightly_host(root: &Path) -> Result<String> {
 
 /// Replays the committed corpus of `target` once for the pinned compiler's host, with no new input.
 fn replay(root: &Path, directory: &str, target: &str, host: &str) -> Result<std::process::Output> {
+    let mut command = nightly_cargo(root);
+    command.args(["fuzz", "run", "--codegen-units", FUZZ_REPLAY_CODEGEN_UNITS]);
+    if directory == FUZZ_DIRECTORY && target == "answer_plan" {
+        command.arg("--no-default-features");
+    }
     crate::phase_evidence::output(
-        nightly_cargo(root)
-            .args([
-                "fuzz",
-                "run",
-                "--target",
-                host,
-                "--fuzz-dir",
-                directory,
-                target,
-            ])
+        command
+            .args(["--target", host, "--fuzz-dir", directory, target])
             .arg(format!("{directory}/corpus/{target}"))
             .args(["--", "-runs=0"]),
         &format!("fuzz {directory}/{target} for {host}"),
@@ -2844,6 +3097,116 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_incomplete_harness_preserves_every_individual_outcome() {
+        use proof_budget_rules::Verdict;
+
+        let mut value = serde_json::json!({"verification_results": {
+            "summary": {"status": "completed", "executed": 2, "successful": 1, "failed": 0},
+            "results": [
+                {"harness_id": "valid", "status": "Success", "checks": [
+                    {"category": "assertion", "status": "Success"},
+                    {"category": "cover", "status": "Satisfied"},
+                    {"category": "cover", "status": "Satisfied"}
+                ]},
+                {"harness_id": "timed_out", "status": "Timeout", "checks": []}
+            ]
+        }});
+        for reversed in [false, true] {
+            if reversed {
+                value["verification_results"]["results"]
+                    .as_array_mut()
+                    .unwrap()
+                    .reverse();
+            }
+            let mut reported = Vec::new();
+            let error = validate_results_reported(
+                &value,
+                &["valid", "timed_out"],
+                false,
+                |row, verdict| {
+                    reported.push((row["harness_id"].as_str().unwrap().to_owned(), verdict));
+                },
+            )
+            .unwrap_err();
+            assert!(format!("{error:#}").contains("inconclusive"));
+            if reversed {
+                reported.reverse();
+            }
+            assert_eq!(
+                reported,
+                [
+                    ("valid".to_owned(), Verdict::Proven),
+                    ("timed_out".to_owned(), Verdict::Inconclusive)
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_report_names_every_unvalidated_harness() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let expected = ["not_started_first", "not_started_last"];
+        let mut command = Tool::Git.command();
+        command.arg("--version");
+        let error = verify_batch_command(
+            command,
+            Path::new("unwritten-report.rs"),
+            directory.path(),
+            &expected,
+            false,
+            &BTreeSet::new(),
+        )
+        .unwrap_err();
+        let diagnostic = format!("{error:#}");
+        assert!(diagnostic.contains("missing Kani report"), "{diagnostic}");
+        for name in expected {
+            assert!(diagnostic.contains(name), "{diagnostic}");
+        }
+        assert!(diagnostic.contains("inconclusive"), "{diagnostic}");
+        Ok(())
+    }
+
+    #[test]
+    fn selected_sources_keep_their_probes_and_refuse_unknown_or_duplicate_modules() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let source = "crates/rules/src/proof_budget_rules.rs".to_owned();
+        let manifest = selected_manifest(root, std::slice::from_ref(&source))?;
+        assert!(matches!(
+            manifest.obligations.as_slice(),
+            [Obligation::Kani { source: actual, probes, .. }]
+                if actual == &source && !probes.is_empty()
+        ));
+        assert!(selected_manifest(root, &[source.clone(), source]).is_err());
+        for invalid in ["missing.rs", "xtask/src/skill_proofs.rs", "../outside.rs"] {
+            assert!(selected_manifest(root, &[invalid.to_owned()]).is_err());
+        }
+        let (selected, _) = campaign_workload(root, &manifest)?;
+        let (full, _) = campaign_workload(root, &selected_manifest(root, &[])?)?;
+        assert!(selected > 0 && selected < full);
+        Ok(())
+    }
+
+    #[test]
+    fn selected_container_sources_remain_literal_shell_arguments() {
+        let source = "a'$(touch unexpected).rs".to_owned();
+        let arguments = container_campaign_arguments(
+            Path::new("/fixture"),
+            "fixture-image",
+            "fixture-cache",
+            ProofCampaign::Ci,
+            &[source],
+        );
+        assert!(
+            arguments
+                .last()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .ends_with("proofs --source 'a'\\''$(touch unexpected).rs'")
+        );
+    }
+
+    #[test]
     fn the_fuzz_compile_barrier_uses_real_compiler_status_before_heavy_work() -> Result<()> {
         use std::cell::Cell;
 
@@ -3250,7 +3613,7 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     fn freshness_report_decisions_and_their_counterexamples_verify_against_production() -> Result<()>
     {
-        const EXPECTED: (usize, usize) = (4, 9);
+        const EXPECTED: (usize, usize) = (5, 11);
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
         crate::phase_evidence::run(
             root,
@@ -3333,6 +3696,75 @@ mod tests {
                 ensure!(
                     result == EXPECTED,
                     "shape proof inventory differs: {result:?}"
+                );
+                Ok(())
+            },
+        )
+    }
+
+    #[test]
+    #[ignore = "requires the installed pinned Kani"]
+    #[cfg(not(target_os = "windows"))]
+    fn prose_layout_decisions_and_their_counterexamples_verify_against_production() -> Result<()> {
+        const EXPECTED: (usize, usize) = (11, 15);
+        const TEST: &str = "skill_proofs::tests::prose_layout_decisions_and_their_counterexamples_verify_against_production";
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        if dotfiles::bounded::requires_container() {
+            ensure_linux_engine()?;
+            let image = proof_image(root)?;
+            ensure_image(root, &root.join(PROOF_IMAGE), &image)?;
+            let image = verified_image_id(&image)?;
+            crate::container::prepare_cargo(root, &image)?;
+            let mut arguments =
+                container_run_arguments(root, &image, &container_target_volume(root));
+            *arguments.last_mut().context("proof container command")? = format!(
+                "{CONTAINER_SOURCE} exec cargo test --locked --package xtask --lib -- --ignored --exact {TEST} --nocapture"
+            ).into();
+            let output = crate::phase_evidence::output(
+                Tool::Docker.command().args(arguments),
+                "bounded prose layout proofs",
+            )?;
+            ensure!(
+                output.status.success(),
+                "bounded prose layout proofs failed"
+            );
+            return Ok(());
+        }
+        crate::phase_evidence::run(
+            root,
+            "prose layout subject regression",
+            EXPECTED.0 + EXPECTED.1,
+            || {
+                let manifest = obligations::manifest(root)?;
+                let source = "crates/rules/src/prose_rules.rs";
+                let probes = manifest
+                    .obligations
+                    .iter()
+                    .find_map(|obligation| match obligation {
+                        Obligation::Kani {
+                            source: candidate,
+                            probes,
+                            ..
+                        } if candidate == source => Some(probes),
+                        _ => None,
+                    })
+                    .context("prose layout decisions have a registered proof obligation")?;
+                kani_environment_version(root)?;
+                verify_kani_driver(root)?;
+                let verifier_hash =
+                    crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
+                let engine_hash = crate::phase_evidence::engine_digest(root)?;
+                let result = verify_rules(
+                    root,
+                    source,
+                    probes,
+                    &flags(&manifest, source),
+                    &verifier_hash,
+                    &engine_hash,
+                )?;
+                ensure!(
+                    result == EXPECTED,
+                    "prose layout proof inventory differs: {result:?}"
                 );
                 Ok(())
             },
@@ -4009,11 +4441,13 @@ mod tests {
         ] {
             let full = container_run_arguments(Path::new("source"), "image", "target");
             let arguments =
-                container_campaign_arguments(Path::new("source"), "image", "target", campaign);
+                container_campaign_arguments(Path::new("source"), "image", "target", campaign, &[]);
             assert_eq!(arguments[..arguments.len() - 1], full[..full.len() - 1]);
             assert_eq!(
                 arguments.last().unwrap(),
-                &OsString::from(format!("{CONTAINER_GATE} {entry}"))
+                &OsString::from(format!(
+                    "{CONTAINER_SOURCE} exec cargo run --locked --manifest-path xtask/Cargo.toml -- {entry}"
+                ))
             );
         }
     }

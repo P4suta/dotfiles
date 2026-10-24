@@ -166,7 +166,7 @@ pub fn merged_targets(listing: &[u8]) -> Result<Vec<String>> {
 ///
 /// # Errors
 ///
-/// Returns an error when the target names neither a JSON nor a TOML file, or when it can't parse the host file or the rendering.
+/// Returns an error for an unsupported format or an invalid JSON or TOML document.
 pub fn keeps_host_keys(target: &str, current: &str, rendered: &str) -> Result<bool> {
     fn kept(current: &Value, rendered: &Value) -> bool {
         match (current, rendered) {
@@ -180,6 +180,9 @@ pub fn keeps_host_keys(target: &str, current: &str, rendered: &str) -> Result<bo
             (Value::Object(current), _) => current.is_empty(),
             _ => true,
         }
+    }
+    if matches!(target, ".ssh/config" | ".ssh\\config") {
+        return Ok(crate::herdr_rules::ssh_config_preserved(current, rendered));
     }
     let toml = match Path::new(target).extension().and_then(|e| e.to_str()) {
         Some("json") => false,

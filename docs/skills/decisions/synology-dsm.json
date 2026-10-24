@@ -1,5 +1,5 @@
 {
-  "revision": "ce4a9b692bec65bccf2a954d8446024f585f24067757423f1d3415cc2b6986ba",
+  "revision": "8e0a83c2eca4c3af076e72465569e5871621bce2ad94582140a2212ff7c0383b",
   "outcome": "implemented",
   "reason": "Administer the Synology NAS over the tailnet through its own OpenSSH with root kept behind an interactive prompt.\nSeparate from nas (artifact transfers), tailscale (reachability and policy), and multi-machine (development hosts); machine identities stay in the local inventory.",
   "evidence": [

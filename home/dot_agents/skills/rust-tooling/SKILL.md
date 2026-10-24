@@ -12,6 +12,7 @@ Prefer an existing Rust command or repository `xtask` before creating another ex
 Keep mise, just, hooks, and CI recipes as thin invocations of those commands.
 A direct call to a maintained tool needs no Rust, but parsing, loops, state changes, retries, and business rules belong in typed Rust.
 Never leave a shell or Python prototype behind as a second implementation.
+The shared agent lint hook checks supported files after edits and before script execution, and a missing linter requires its reported installation command before work continues.
 
 Give the tool a scoped Cargo manifest, committed lockfile, explicit arguments, and accurate help.
 Keep private helpers unpublished, and choose dependencies that fit the supported platforms and MSRV.

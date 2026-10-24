@@ -52,6 +52,24 @@ The plan runs, in order:
 
 ## Verification on every repository
 
+Agent mutation hooks run `dotfiles lint-hook` over only the written paths.
+The same bounded linter adapter checks scripts before the Bash guard admits execution.
+The pure `lint_hook_rules` selects file types, linters, configuration sources, and admission, while repository configuration keeps its supported exclusions.
+Missing linters, timeouts, and findings block with reproducing commands.
+
+The Bash guard collects GitHub publication bodies during the same bounded shell traversal that inspects legacy commands.
+The pinned syntax parser supplies source spans, and a static-word decoder preserves quoting and refuses unresolved expansions.
+File inputs need one direct invocation, no redirects, bounded regular UTF-8 files, and complete JSON with unique keys.
+Relative files also need a known execution directory.
+One literal standard-input heredoc supplies exact bytes.
+Pipelines and expandable heredocs leave inspection incomplete.
+Close and reopen comments, merge bodies, and nested API body fields share the issue or PR prose channel and the attribution checks.
+Legacy exceptions never exempt publication prose.
+Structured coauthor records keep names as metadata.
+The checker still inspects ordinary colon prose and malformed records.
+These checks assume that the executable is the supported GitHub CLI and that files and context stay fixed between inspection and execution.
+They establish neither a coauthor's identity nor atomic enforcement at the network boundary.
+
 Codex runs command hooks through the configured session shell.
 The Windows profile uses PowerShell invocation syntax and `dotfiles codex-hooks run` to preserve each hook's input, output, and exit status.
 The wrapper records its start, child completion, and failure diagnostics under `~/.local/state/dotfiles/codex-hooks.jsonl`.
@@ -70,10 +88,22 @@ Ordinary agents read the applicable skill instructions directly.
 
 `home/dot_config/assure/shapes.toml` names the code shapes every repository on these machines must verify: pure decisions, protocols, and parsers, each with the signals that find it and the owner it needs.
 The same gate applies the anti-pattern catalog beside it, and counts each finding as a gap.
+The TypeScript number rule leaves declaration files, tests, stubs, and fixtures to their generators and test checks.
+For generated TypeScript, the survey resolves repository `.gitattributes` from the same working tree, index, or commit as the source.
+A changed or removed attribute file rechecks the source it can classify.
+An isolated Git repository applies the [attribute precedence](https://git-scm.com/docs/gitattributes) and [NUL-delimited attribute protocol](https://git-scm.com/docs/git-check-attr).
+The isolated context ignores owner and system attribute overrides.
+Only `linguist-generated` set or `true` omits TypeScript from this catalog, and other values keep the ordinary checks.
+Git's attribute semantics remain an external assumption checked by native regression fixtures, while the pure marker decision has a source-bound proof obligation.
+The attribute fuzz corpus uses line-separated fields that the target converts to NUL separators and checks through decoding and canonical marker encoding.
 The owner's configuration names each repository's owners and budgets under `~/.config/assure/repos/`, as [the owner-map decision](adr/keep-the-assure-owner-map-out-of-projects.md) describes.
 An exemption sits in the comment block that precedes the site it exempts.
 `dotfiles assure start` reports the gaps when an agent session starts, and the stop hook refuses to end a turn that leaves a gap in a file it changed.
 Claude Code and Codex also pass the owner's `reply_language` to this hook to check final reply prose, with at most one continuation, as [the language decision](adr/check-owner-reply-language-at-stop.md) describes.
+The hook and every prose channel share the sentence layout rules in `crates/rules/src/prose_rules.rs`.
+They refuse two sentences on one line and a sentence that wraps across adjacent prose lines.
+They report the first line and tell writers to split long sentences when a channel limits line length.
+Headings, labels ending in a colon, lists, tables, code, quotes, and front matter keep their structural line rules.
 The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
 `pr-workflow ready` also refuses a PR that weakens a budget.
 Existing gaps remain in the session report without requiring an unrelated repair in every PR.

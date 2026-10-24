@@ -37,6 +37,24 @@ pub struct Evidence {
     pub unused: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum ConfigInventory {
+    Distinct { legacy: bool, canonical: bool },
+    Shared { canonical: bool, combined: bool },
+}
+
+#[must_use]
+pub const fn config_inventory_matches(inventory: ConfigInventory) -> bool {
+    match inventory {
+        ConfigInventory::Distinct { legacy, canonical } => legacy && canonical,
+        ConfigInventory::Shared {
+            canonical,
+            combined,
+        } => canonical || combined,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Verdict {
     Allowed,
@@ -72,6 +90,39 @@ pub const fn decide(mode: Mode, change: Change, evidence: Evidence) -> Verdict {
 
 #[cfg(kani)]
 mod proofs {
+    #[kani::proof]
+    fn config_inventories_require_complete_declared_states() {
+        let inventory: super::ConfigInventory = kani::any();
+        let accepted = super::config_inventory_matches(inventory);
+        match inventory {
+            super::ConfigInventory::Distinct { legacy, canonical } => {
+                assert_eq!(accepted, legacy && canonical);
+            }
+            super::ConfigInventory::Shared {
+                canonical,
+                combined,
+            } => {
+                assert_eq!(accepted, canonical || combined);
+            }
+        }
+        kani::cover!(accepted);
+        kani::cover!(!accepted);
+        kani::cover!(matches!(
+            inventory,
+            super::ConfigInventory::Shared {
+                canonical: false,
+                combined: true
+            }
+        ));
+        kani::cover!(matches!(
+            inventory,
+            super::ConfigInventory::Shared {
+                canonical: true,
+                combined: false
+            }
+        ));
+    }
+
     #[kani::proof]
     fn changes_require_explicit_apply_and_verified_scope() {
         let mode: super::Mode = kani::any();
@@ -125,6 +176,72 @@ mod proofs {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn distinct_inventories_require_both_matches_and_shared_inventories_require_one_complete_state()
+    {
+        use super::ConfigInventory::{Distinct, Shared};
+        for (inventory, expected) in [
+            (
+                Distinct {
+                    legacy: false,
+                    canonical: false,
+                },
+                false,
+            ),
+            (
+                Distinct {
+                    legacy: false,
+                    canonical: true,
+                },
+                false,
+            ),
+            (
+                Distinct {
+                    legacy: true,
+                    canonical: false,
+                },
+                false,
+            ),
+            (
+                Distinct {
+                    legacy: true,
+                    canonical: true,
+                },
+                true,
+            ),
+            (
+                Shared {
+                    canonical: false,
+                    combined: false,
+                },
+                false,
+            ),
+            (
+                Shared {
+                    canonical: false,
+                    combined: true,
+                },
+                true,
+            ),
+            (
+                Shared {
+                    canonical: true,
+                    combined: false,
+                },
+                true,
+            ),
+            (
+                Shared {
+                    canonical: true,
+                    combined: true,
+                },
+                true,
+            ),
+        ] {
+            assert_eq!(super::config_inventory_matches(inventory), expected);
+        }
+    }
+
     #[test]
     fn unavailable_destination_preserves_the_source_writer() {
         let evidence = super::Evidence {

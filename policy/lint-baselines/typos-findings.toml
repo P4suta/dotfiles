@@ -11,10 +11,6 @@ Fo = 1
 Fo = 2
 Hava = 1
 
-[findings."crates/dotguard/src/bin/herdr-agent/main.rs"]
-Aother = 2
-Asign = 2
-
 [findings."crates/dotguard/src/gitargv.rs"]
 nd = 3
 

@@ -1,9 +1,13 @@
 use anyhow::{Context, Result, bail, ensure};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::process::{Command, Stdio};
+
+mod merge_queue_rules;
+mod queue;
 
 const BASELINE: &str = include_str!("../../../assets/baseline.json");
 /// A repository's parts: `OWNER/REPO`.
@@ -11,6 +15,9 @@ const REPOSITORY_PARTS: usize = 2;
 /// The largest page of the GitHub API, and the pages a listing may take before the tool gives up.
 const PAGE_SIZE: usize = 100;
 const MAX_PAGES: usize = 1000;
+const GITHUB_DIRECTORY: &str = ".github";
+const WORKFLOW_DIRECTORY: &str = ".github/workflows";
+const CONTENTS_DIRECTORY_LIMIT: usize = 1000;
 const REPOSITORY_KEYS: &[&str] = &[
     "allow_squash_merge",
     "allow_merge_commit",
@@ -97,12 +104,21 @@ impl Profile {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum OwnerType {
+    #[default]
+    User,
+    Organization,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Repository {
     pub id: u64,
     pub full_name: String,
     pub owner_id: u64,
+    #[serde(default)]
+    pub owner_type: OwnerType,
     pub default_branch: String,
     pub archived: bool,
     pub fork: bool,
@@ -120,12 +136,21 @@ pub struct Environment {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+pub struct Workflow {
+    pub path: String,
+    pub yaml: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct State {
     pub repository: Repository,
     pub immutable: Value,
     pub rulesets: Vec<Value>,
     pub environments: Vec<Environment>,
     pub workflow_permissions: Value,
+    #[serde(default)]
+    pub workflows: Vec<Workflow>,
     /// The repository's `security_and_analysis` object, which GitHub reports only to administrators.
     #[serde(default)]
     pub security: Value,
@@ -191,6 +216,11 @@ pub enum Operation {
     EnableImmutableReleases,
     CreateRuleset {
         definition: Value,
+    },
+    UpdateRuleset {
+        id: u64,
+        before: Value,
+        after: Value,
     },
     Environment {
         name: String,
@@ -293,20 +323,7 @@ pub fn plan(snapshot: Snapshot, profile: Profile) -> Result<Plan> {
                 });
             }
         }
-        let required_checks = state
-            .rulesets
-            .iter()
-            .filter(|rule| rule["target"] == "branch" && rule["enforcement"] == "active")
-            .flat_map(|rule| rule["rules"].as_array().into_iter().flatten())
-            .any(|rule| {
-                rule["type"] == "required_status_checks"
-                    && rule["parameters"]["required_status_checks"]
-                        .as_array()
-                        .is_some_and(|checks| !checks.is_empty())
-            });
-        if !required_checks {
-            findings.push(Finding { repository: repo.full_name.clone(), message: "Bind a real successful CI check before adding a required-status rule; the CLI never invents a check name.".into() });
-        }
+        queue::changes(state, &mut changes, &mut findings)?;
         if state.workflow_permissions["default_workflow_permissions"] != "read" {
             findings.push(Finding { repository: repo.full_name.clone(), message: "Default workflow token is writable; review job permissions before changing its default.".into() });
         }
@@ -561,6 +578,12 @@ pub enum Mutation<'a> {
         repository: &'a str,
         definition: &'a Value,
     },
+    UpdateRuleset {
+        repository: &'a str,
+        id: u64,
+        before: &'a Value,
+        after: &'a Value,
+    },
     ProtectEnvironment {
         repository: &'a str,
         name: &'a str,
@@ -587,6 +610,7 @@ impl Mutation<'_> {
             Self::RepositorySettings { repository, .. }
             | Self::EnableImmutableReleases { repository }
             | Self::CreateRuleset { repository, .. }
+            | Self::UpdateRuleset { repository, .. }
             | Self::ProtectEnvironment { repository, .. }
             | Self::SecretScanning { repository }
             | Self::ActionsPinning { repository, .. } => *repository,
@@ -624,6 +648,26 @@ impl Mutation<'_> {
                     WriteMethod::Post,
                     format!("{root}/rulesets"),
                     Some(expected),
+                )
+            }
+            Self::UpdateRuleset {
+                id, before, after, ..
+            } => {
+                ensure!(id > 0 && before["id"] == id, "ruleset identity mismatch");
+                ensure!(
+                    before["target"] == "branch" && before["enforcement"] == "active",
+                    "queue requires an active branch ruleset"
+                );
+                let add_queue = after["rules"].as_array().context("missing rules")?.len()
+                    > before["rules"].as_array().context("missing rules")?.len();
+                ensure!(
+                    queue::queued_ruleset(before, add_queue)? == *after,
+                    "only the queue and strict status policy may change"
+                );
+                (
+                    WriteMethod::Put,
+                    format!("{root}/rulesets/{id}"),
+                    Some(queue::payload(after)?),
                 )
             }
             Self::ProtectEnvironment { name, previous, .. } => {
@@ -785,6 +829,8 @@ pub fn audit(api: &impl Api, name: &str) -> Result<State> {
         id: number(&raw, "id")?,
         full_name,
         owner_id: number(&raw["owner"], "id")?,
+        owner_type: serde_json::from_value(raw["owner"]["type"].clone())
+            .context("invalid repository owner type")?,
         default_branch: string(&raw, "default_branch")?,
         archived: raw["archived"]
             .as_bool()
@@ -826,6 +872,7 @@ pub fn audit(api: &impl Api, name: &str) -> Result<State> {
     environments.sort_by(|left, right| left.name.cmp(&right.name));
     let workflow_permissions = api.read(&format!("{root}/actions/permissions/workflow"))?;
     let actions = api.read(&format!("{root}/actions/permissions"))?;
+    let workflows = audit_workflows(api, &root, &repository.default_branch)?;
     Ok(State {
         metadata: api.metadata(name)?,
         repository,
@@ -833,9 +880,73 @@ pub fn audit(api: &impl Api, name: &str) -> Result<State> {
         rulesets,
         environments,
         workflow_permissions,
+        workflows,
         security: raw["security_and_analysis"].clone(),
         actions,
     })
+}
+
+fn contents(api: &impl Api, root: &str, path: &str, branch: &str) -> Result<Vec<Value>> {
+    let endpoint = if path.is_empty() {
+        format!("{root}/contents")
+    } else {
+        format!("{root}/contents/{path}")
+    };
+    let listing = api.read(&format!("{endpoint}?ref={}", encode_segment(branch)))?;
+    let entries = listing.as_array().context("expected contents directory")?;
+    ensure!(
+        entries.len() < CONTENTS_DIRECTORY_LIMIT,
+        "contents listing may be truncated: {path}"
+    );
+    Ok(entries.clone())
+}
+
+fn audit_workflows(api: &impl Api, root: &str, branch: &str) -> Result<Vec<Workflow>> {
+    let mut parent = "";
+    for path in [GITHUB_DIRECTORY, WORKFLOW_DIRECTORY] {
+        if !contents(api, root, parent, branch)?
+            .iter()
+            .any(|entry| entry["path"] == path && entry["type"] == "dir")
+        {
+            return Ok(Vec::new());
+        }
+        parent = path;
+    }
+    let mut workflows = Vec::new();
+    for entry in contents(api, root, WORKFLOW_DIRECTORY, branch)? {
+        let path = string(&entry, "path")?;
+        if entry["type"] != "file" || !(path.ends_with(".yml") || path.ends_with(".yaml")) {
+            continue;
+        }
+        ensure!(
+            path.strip_prefix(WORKFLOW_DIRECTORY)
+                .is_some_and(|suffix| suffix.starts_with('/') && !suffix[1..].contains('/')),
+            "unexpected workflow path: {path}"
+        );
+        let encoded_path = path
+            .split('/')
+            .map(encode_segment)
+            .collect::<Vec<_>>()
+            .join("/");
+        let file = api.read(&format!(
+            "{root}/contents/{encoded_path}?ref={}",
+            encode_segment(branch)
+        ))?;
+        ensure!(
+            file["encoding"] == "base64",
+            "workflow contents unavailable: {path}"
+        );
+        let content = string(&file, "content")?;
+        let bytes = STANDARD
+            .decode(content.split_whitespace().collect::<String>())
+            .with_context(|| format!("decode workflow {path}"))?;
+        workflows.push(Workflow {
+            path,
+            yaml: String::from_utf8(bytes).context("workflow must be UTF-8")?,
+        });
+    }
+    workflows.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(workflows)
 }
 
 #[expect(
@@ -910,7 +1021,7 @@ fn managed_state(state: &State) -> Result<Value> {
             "branch_policies":env.branch_policies.iter().map(|policy|
                 json!({"id":policy["id"],"name":policy["name"],"type":policy["type"]})).collect::<Vec<_>>()
         }))).collect::<Result<Vec<_>>>()?,
-        "workflow_permissions":state.workflow_permissions,
+        "workflow_permissions":state.workflow_permissions,"workflows":state.workflows,
         "security":state.security,"actions":state.actions}),
     )
 }
@@ -989,6 +1100,24 @@ impl CheckedTarget<'_> {
                 expected
                     .rulesets
                     .sort_by_key(|rule| rule["id"].as_u64().unwrap_or(0));
+            }
+            Operation::UpdateRuleset { id, before, after } => {
+                api.write(Mutation::UpdateRuleset {
+                    repository: name,
+                    id: *id,
+                    before,
+                    after,
+                })?;
+                let current = api.read(&format!("{root}/rulesets/{id}"))?;
+                ensure!(
+                    current["id"] == *id && queue::payload(&current)? == queue::payload(after)?,
+                    "ruleset update verification failed: {name}/{id}"
+                );
+                *expected
+                    .rulesets
+                    .iter_mut()
+                    .find(|ruleset| ruleset["id"] == *id)
+                    .context("ruleset missing from snapshot")? = current;
             }
             Operation::Environment {
                 name: environment_name,
@@ -1121,6 +1250,19 @@ pub fn apply(
                     );
                 }
             }
+            Operation::UpdateRuleset { id, before, .. } => {
+                let live = audit(api, &change.repository)?;
+                ensure!(
+                    managed_state(expected)? == managed_state(&live)?,
+                    "settings or workflows changed before ruleset update: {}",
+                    change.repository
+                );
+                let current = api.read(&format!("repos/{}/rulesets/{id}", change.repository))?;
+                ensure!(
+                    queue::payload(&current)? == queue::payload(before)? && current["id"] == *id,
+                    "ruleset changed before write: {id}"
+                );
+            }
             Operation::SecretScanning { before, .. } => ensure!(
                 current_repository["security_and_analysis"] == *before,
                 "secret scanning settings changed before write: {}",
@@ -1164,4 +1306,90 @@ pub fn apply(
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Mutation, WriteMethod, queue};
+    use anyhow::Result;
+    use serde_json::{Value, json};
+
+    fn live_ruleset() -> Value {
+        json!({
+            "id": 1, "name": "main", "target": "branch", "enforcement": "active",
+            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+            "bypass_actors": [{"actor_id": 9, "actor_type": "Integration", "bypass_mode": "pull_request"}],
+            "rules": [
+                {"type": "deletion"},
+                {"type": "required_status_checks", "parameters": {
+                    "required_status_checks": [{"context": "actual-ci", "integration_id": 15368}],
+                    "strict_required_status_checks_policy": true
+                }}
+            ],
+            "created_at": "2026-10-01T00:00:00Z"
+        })
+    }
+
+    #[test]
+    fn queue_update_request_puts_the_complete_writable_ruleset() -> Result<()> {
+        let before = live_ruleset();
+        let after = queue::queued_ruleset(&before, true)?;
+        let (method, endpoint, body) = Mutation::UpdateRuleset {
+            repository: "owner/project",
+            id: 1,
+            before: &before,
+            after: &after,
+        }
+        .request()?;
+        assert!(matches!(method, WriteMethod::Put));
+        assert_eq!(endpoint, "repos/owner/project/rulesets/1");
+        let mut expected = after;
+        let object = expected.as_object_mut().unwrap();
+        object.remove("id");
+        object.remove("created_at");
+        assert_eq!(body, Some(expected));
+        Ok(())
+    }
+
+    #[test]
+    fn queue_update_request_refuses_other_changes_and_wrong_identities() -> Result<()> {
+        let before = live_ruleset();
+        let after = queue::queued_ruleset(&before, true)?;
+        for key in [
+            "name",
+            "target",
+            "enforcement",
+            "conditions",
+            "bypass_actors",
+            "rules",
+        ] {
+            let mut changed = after.clone();
+            changed[key] = Value::Null;
+            assert!(
+                Mutation::UpdateRuleset {
+                    repository: "owner/project",
+                    id: 1,
+                    before: &before,
+                    after: &changed,
+                }
+                .request()
+                .is_err(),
+                "unexpected change to {key}"
+            );
+        }
+        for id in [0, 2] {
+            assert!(
+                Mutation::UpdateRuleset {
+                    repository: "owner/project",
+                    id,
+                    before: &before,
+                    after: &after,
+                }
+                .request()
+                .is_err(),
+                "unexpected ruleset identity {id}"
+            );
+        }
+        Ok(())
+    }
 }

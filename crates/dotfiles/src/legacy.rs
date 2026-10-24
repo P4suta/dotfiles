@@ -4,6 +4,7 @@ use crate::legacy_rules::{self, Verdict};
 use crate::shell_write_rules::{program, segments};
 use anyhow::{Context, Result, ensure};
 use model::data::{Modern, ModernTool};
+use std::io::Read;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -11,11 +12,12 @@ use std::sync::OnceLock;
 const TABLE: &str = include_str!("../../../home/.chezmoidata/modern.toml");
 
 /// The variable whose value `LEGACY: REASON` admits one refused command and records why.
-/// Its value `SCRIPT_PATH: REASON` skips inspecting that one script and records why.
+/// Its value `SCRIPT_PATH: REASON` skips that script's mapped legacy findings and records why.
 pub const BYPASS: &str = "DOTFILES_LEGACY_BYPASS";
 
 /// The largest script the hook reads to inspect the commands it runs, 1 MiB.
 const SCRIPT_LIMIT: u64 = 1024 * 1024;
+const SCRIPT_PREFIX_BYTES: u64 = 4096;
 
 /// How deep the hook follows scripts that a command runs.
 pub(crate) const DEPTH: usize = 4;
@@ -23,6 +25,7 @@ pub(crate) const DEPTH: usize = 4;
 /// The shells whose script argument the hook reads.
 const SHELLS: [&str; 5] = ["sh", "bash", "zsh", "dash", "ksh"];
 
+mod syntax;
 mod translate;
 
 pub(crate) fn nested_scripts(command: &str) -> Vec<String> {
@@ -88,6 +91,32 @@ pub(crate) fn command_words(words: &[String]) -> (&[String], Option<&str>) {
             {
                 tail
             }
+            [word, tail @ ..] if program(word) == "xargs" => {
+                let mut arguments = tail;
+                loop {
+                    arguments = match arguments {
+                        [flag, _, after @ ..]
+                            if matches!(
+                                flag.as_str(),
+                                "-n" | "-P"
+                                    | "-I"
+                                    | "-L"
+                                    | "-s"
+                                    | "-d"
+                                    | "--max-args"
+                                    | "--max-procs"
+                                    | "--replace"
+                                    | "--delimiter"
+                            ) =>
+                        {
+                            after
+                        }
+                        [flag, after @ ..] if flag.starts_with('-') => after,
+                        _ => break,
+                    };
+                }
+                arguments
+            }
             [word, verb, tail @ ..]
                 if program(word) == "mise" && matches!(verb.as_str(), "x" | "exec") =>
             {
@@ -102,7 +131,12 @@ pub(crate) fn command_words(words: &[String]) -> (&[String], Option<&str>) {
 }
 
 /// The script file a command runs, such as `bash build.sh`, `./build.sh`, or `. env.sh`.
-fn script_path<'a>(name: &str, first: &'a str, arguments: &'a [String]) -> Option<&'a str> {
+pub(crate) fn script_path<'a>(
+    name: &str,
+    first: &'a str,
+    arguments: &'a [String],
+    directory: Option<&Path>,
+) -> Option<&'a str> {
     if SHELLS.contains(&name) {
         let inline = arguments.iter().any(|argument| {
             argument.starts_with('-') && !argument.starts_with("--") && argument.contains('c')
@@ -118,10 +152,57 @@ fn script_path<'a>(name: &str, first: &'a str, arguments: &'a [String]) -> Optio
             .find(|argument| !argument.starts_with('-'))
             .map(String::as_str);
     }
-    let shell_file = Path::new(first)
-        .extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("sh"));
-    (first.contains('/') && shell_file).then_some(first)
+    let shell_file = Path::new(first).extension().is_some_and(|extension| {
+        ["sh", "bash", "zsh"]
+            .iter()
+            .any(|name| extension.eq_ignore_ascii_case(name))
+    });
+    let shebang = if first.contains('/') && Path::new(first).extension().is_none() {
+        let path =
+            directory.map_or_else(|| Path::new(first).to_path_buf(), |root| root.join(first));
+        let mut prefix = Vec::new();
+        if let Ok(file) = std::fs::File::open(path)
+            && file
+                .take(SCRIPT_PREFIX_BYTES)
+                .read_to_end(&mut prefix)
+                .is_err()
+        {
+            return Some(first);
+        }
+        let text = String::from_utf8_lossy(&prefix);
+        matches!(
+            crate::lint_hook_rules::classify(first, text.lines().next().unwrap_or_default()),
+            crate::lint_hook_rules::FileType::Shell | crate::lint_hook_rules::FileType::Zsh
+        )
+    } else {
+        false
+    };
+    (first.contains('/') && (shell_file || shebang)).then_some(first)
+}
+
+pub(crate) fn assigned(
+    words: &[String],
+    variables: &mut std::collections::BTreeMap<String, String>,
+) {
+    for word in words.iter().skip_while(|word| word.as_str() == "export") {
+        if !is_assignment(word) {
+            break;
+        }
+        if let Some((name, value)) = word.split_once('=') {
+            let facts: Vec<_> = variables
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect();
+            match crate::lint_hook_rules::resolve_script(value, &facts) {
+                crate::lint_hook_rules::ScriptPath::Literal(value) => {
+                    variables.insert(name.to_owned(), value);
+                }
+                crate::lint_hook_rules::ScriptPath::Unresolved => {
+                    variables.remove(name);
+                }
+            }
+        }
+    }
 }
 
 fn excepted(table: &Modern, path: &Path, directory: Option<&Path>) -> bool {
@@ -136,12 +217,22 @@ fn excepted(table: &Modern, path: &Path, directory: Option<&Path>) -> bool {
         .any(|exception| path == exception.path)
 }
 
-fn refusal_text(tool: &ModernTool, legacy: &str, arguments: &[&str]) -> String {
+fn refusal_text(
+    tool: &ModernTool,
+    legacy: &str,
+    arguments: Option<&[syntax::Argument<'_>]>,
+) -> String {
     format!(
         "Refused: `{legacy}` is a legacy command, and the modern tool table prefers `{preferred}`: {reason}\nNext action: {next}\nThe legacy tool stays correct for: {keep}\nTo run it once anyway, put the table entry and your reason before the command: {BYPASS}='{legacy}: <reason>' {legacy} ...",
         preferred = tool.preferred,
         reason = tool.reason,
-        next = translate::rewrite(&tool.next, arguments),
+        next = arguments.map_or_else(
+            || format!(
+                "Use `{}` with the original shell arguments after checking their syntax.",
+                tool.preferred
+            ),
+            |arguments| translate::rewrite_spelled(&tool.next, arguments).to_string(),
+        ),
         keep = tool.keep,
     )
 }
@@ -157,24 +248,254 @@ fn script_bypass_hint(path: &str) -> String {
 pub struct Findings {
     pub refusals: Vec<String>,
     pub unavailable: Vec<String>,
+    pub(crate) bodies: Vec<crate::claude_hook::github::Body>,
+}
+
+struct ScriptContext<'a> {
+    directory: Option<&'a Path>,
+    table: &'a Modern,
+    depth: usize,
+    variables: &'a std::collections::BTreeMap<String, String>,
 }
 
 impl Findings {
+    fn inspect_legacy(
+        &mut self,
+        invocation: &syntax::Invocation<'_>,
+        words: &[String],
+        table: &Modern,
+    ) {
+        let (command, bypass) = command_words(words);
+        let Some((first, rest)) = command.split_first() else {
+            return;
+        };
+        let name = program(first);
+        let arguments: Vec<_> = rest.iter().map(String::as_str).collect();
+        let tool = table.tools.iter().find(|tool| {
+            tool.legacy.iter().any(|legacy| legacy == name.as_str())
+                && legacy_rules::invokes(
+                    &arguments,
+                    &tool.when.iter().map(String::as_str).collect::<Vec<_>>(),
+                )
+                && !(tool.stream && legacy_rules::reads_stream(&arguments))
+        });
+        let bypassed = bypass.is_some_and(|value| legacy_rules::bypass_names(value, name.as_str()));
+        match (legacy_rules::verdict(tool.is_some(), false, bypassed), tool) {
+            (Verdict::Refuse, Some(tool)) => {
+                let spelling = invocation.arguments(words.len() - rest.len());
+                self.refusals
+                    .push(refusal_text(tool, name.as_str(), spelling.as_deref().ok()));
+            }
+            (Verdict::Bypassed, _) => {
+                let reason = bypass
+                    .and_then(|value| value.split_once(':'))
+                    .map_or("", |(_, reason)| reason.trim());
+                record_bypass(reason, words);
+            }
+            _ => {}
+        }
+    }
+
+    fn inspect_publications(
+        &mut self,
+        invocation: &syntax::Invocation<'_>,
+        directory: Option<&Path>,
+        files_safe: bool,
+    ) -> Vec<String> {
+        let mut words = invocation.values();
+        let spelled = invocation.arguments(0).ok();
+        if let Some(arguments) = &spelled {
+            for (word, argument) in words.iter_mut().zip(arguments) {
+                if let Some(value) = crate::claude_hook::github::literal_word(argument.spelling) {
+                    *word = value;
+                }
+            }
+        }
+        let spellings = spelled.as_ref().map(|arguments| {
+            arguments
+                .iter()
+                .map(|argument| argument.spelling)
+                .collect::<Vec<_>>()
+        });
+        self.bodies.extend(crate::claude_hook::github::collect(
+            &words,
+            spellings.as_deref(),
+            invocation.literal_stdin(),
+            directory,
+            files_safe && invocation.file_inputs_safe(),
+        ));
+        words
+    }
+
+    fn inline_script(&mut self, argument: Option<&syntax::Argument<'_>>) -> Option<String> {
+        let script = argument
+            .and_then(|argument| crate::claude_hook::github::literal_word(argument.spelling));
+        if script.is_none() {
+            self.unavailable
+                .push("the inline shell script is not a known literal".to_owned());
+            self.bodies
+                .push(crate::claude_hook::github::Body::Unreadable(
+                    "the inline shell script can supply an uninspected GitHub body".to_owned(),
+                ));
+        }
+        script
+    }
+
+    fn inspect_script(
+        &mut self,
+        path: &str,
+        argument: Option<&syntax::Argument<'_>>,
+        words: &[String],
+        files_safe: bool,
+        context: &ScriptContext<'_>,
+    ) {
+        if !files_safe {
+            self.bodies
+                .push(crate::claude_hook::github::Body::Unreadable(
+                "the shell script has an uncertain execution context for GitHub body inspection"
+                    .to_owned(),
+            ));
+        }
+        if argument
+            .and_then(|argument| crate::claude_hook::github::literal_word(argument.spelling))
+            .is_none()
+        {
+            self.bodies
+                .push(crate::claude_hook::github::Body::Unreadable(
+                    "the shell script path can supply an uninspected GitHub body".to_owned(),
+                ));
+        }
+        let facts: Vec<_> = context
+            .variables
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        let crate::lint_hook_rules::ScriptPath::Literal(resolved) =
+            crate::lint_hook_rules::resolve_script(path, &facts)
+        else {
+            self.refusals.push(format!("Refused: cannot resolve script path {path}.\nNext action: use a literal path, or assign its variables to literal paths in this command."));
+            return;
+        };
+        let path = resolved.as_str();
+        let (_, bypass) = command_words(words);
+        if let Some(value) = bypass.filter(|value| legacy_rules::script_bypass_names(value, path)) {
+            let reason = value
+                .strip_prefix(path)
+                .and_then(|suffix| suffix.strip_prefix(':'))
+                .map_or("", str::trim);
+            record_bypass(reason, words);
+            match script_refusal(path, context.directory, context.table, context.depth) {
+                Ok(report) => {
+                    self.bodies.extend(report.bodies);
+                    self.unavailable.extend(report.unavailable);
+                }
+                Err(error) => self
+                    .bodies
+                    .push(crate::claude_hook::github::Body::Unreadable(format!(
+                        "the bypassed script could not be inspected for GitHub bodies: {error:#}"
+                    ))),
+            }
+        } else {
+            match script_refusal(path, context.directory, context.table, context.depth)
+                .with_context(|| format!("inspect the script {path}"))
+            {
+                Ok(report) => self.append(report),
+                Err(error) => self
+                    .unavailable
+                    .push(format!("{error:#}\n{}", script_bypass_hint(path))),
+            }
+        }
+    }
+
     fn append(&mut self, other: Self) {
         self.refusals.extend(other.refusals);
         self.unavailable.extend(other.unavailable);
+        self.bodies.extend(other.bodies);
+    }
+
+    fn inspect_stdin(
+        &mut self,
+        invocation: &syntax::Invocation<'_>,
+        directory: Option<&Path>,
+        table: &Modern,
+        depth: usize,
+    ) {
+        if !invocation.inputs().is_empty() && invocation.literal_stdin().is_none() {
+            self.unavailable.push("Refused: the shell's standard-input script could not be inspected.\nNext action: use a literal script path or a literal heredoc for inspection.".to_owned());
+            self.bodies
+                .push(crate::claude_hook::github::Body::Unreadable(
+                    "the shell's standard-input script is unavailable for GitHub body inspection"
+                        .to_owned(),
+                ));
+            return;
+        }
+        for input in invocation.inputs() {
+            match input {
+                syntax::Input::Script(script) if depth < DEPTH => self.append(inspect(script, directory, table, depth + 1)),
+                syntax::Input::Script(_) => self.unavailable.push("script nesting exceeds the inspection limit".to_owned()),
+                syntax::Input::Unavailable => self.unavailable.push("Refused: the shell's standard-input script could not be inspected.\nNext action: use a literal script path or a literal heredoc for inspection.".to_owned()),
+            }
+        }
     }
 }
 
 /// Every mapped invocation and unavailable inspection in the command's bounded scripts.
 /// A bypass that names the entry with a reason admits the command and appends a line to the Git bypass log.
-/// A bypass that names the exact script path with a reason skips inspecting that script and records it once.
+/// A script bypass skips mapped legacy findings while mandatory GitHub body inspection remains active.
 ///
 /// # Errors
 ///
 /// Returns an error when the embedded table doesn't parse.
 pub fn findings(command: &str, directory: Option<&Path>) -> Result<Findings> {
     Ok(inspect(command, directory, table()?, 0))
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Shell {
+    Bash,
+    PowerShell,
+}
+
+impl Shell {
+    fn invocations<'a>(
+        self,
+        command: &'a str,
+        findings: &mut Findings,
+    ) -> Vec<syntax::Invocation<'a>> {
+        let unparsed = || {
+            segments(command)
+                .into_iter()
+                .map(syntax::Invocation::unparsed)
+                .collect()
+        };
+        match self {
+            Self::PowerShell => unparsed(),
+            Self::Bash => match syntax::parse(command) {
+                Ok(invocations) => invocations,
+                Err(error) => {
+                    findings.unavailable.push(format!("Refused: shell argument spelling could not be verified: {error:#}.\nNext action: correct the shell syntax or restore the pinned shfmt parser before using a suggested command."));
+                    unparsed()
+                }
+            },
+        }
+    }
+}
+
+pub(crate) fn findings_in_shell(
+    command: &str,
+    directory: Option<&Path>,
+    shell: Shell,
+) -> Result<Findings> {
+    Ok(inspect_shell(command, directory, table()?, 0, shell))
+}
+
+/// Checks the byte ranges in argument metadata without executing the shell source.
+///
+/// # Errors
+///
+/// Returns an error for unreadable syntax metadata, unsupported source, or an invalid source range.
+pub fn check_shell_spelling_tree(source: &str, tree: &str) -> Result<()> {
+    syntax::check(source, tree)
 }
 
 /// The joined diagnostics, or `None` when every supported inspection admits the command.
@@ -198,22 +519,35 @@ fn script_refusal(
     table: &Modern,
     depth: usize,
 ) -> Result<Findings> {
+    ensure!(
+        Path::new(path).is_absolute() || directory.is_some_and(Path::is_absolute),
+        "the relative script has no known execution directory"
+    );
     let resolved = match directory {
         Some(directory) if Path::new(path).is_relative() => directory.join(path),
         _ => Path::new(path).to_path_buf(),
     };
-    if excepted(table, &resolved, directory) {
-        return Ok(Findings::default());
-    }
+    let skip_legacy = excepted(table, &resolved, directory);
     let metadata = resolved.metadata()?;
     ensure!(
         metadata.is_file() && metadata.len() <= SCRIPT_LIMIT,
         "the script {path} must be a regular file no larger than {SCRIPT_LIMIT} bytes"
     );
     ensure!(depth < DEPTH, "script nesting exceeds the inspection limit");
-    let text = std::fs::read_to_string(&resolved)
+    let mut bytes = Vec::new();
+    std::fs::File::open(&resolved)?
+        .take(SCRIPT_LIMIT + 1)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        u64::try_from(bytes.len())? <= SCRIPT_LIMIT,
+        "the script grew beyond its inspection limit"
+    );
+    let text = String::from_utf8(bytes)
         .with_context(|| format!("read the script {}", resolved.display()))?;
     let mut findings = inspect(&text, directory, table, depth + 1);
+    if skip_legacy {
+        findings.refusals.clear();
+    }
     for message in findings
         .refusals
         .iter_mut()
@@ -283,59 +617,85 @@ fn shell_word(text: &str) -> Option<(&str, &str)> {
 }
 
 fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize) -> Findings {
+    inspect_shell(command, directory, table, depth, Shell::Bash)
+}
+
+fn inspect_shell(
+    command: &str,
+    directory: Option<&Path>,
+    table: &Modern,
+    depth: usize,
+    shell: Shell,
+) -> Findings {
     let nested = depth < DEPTH;
     let mut findings = Findings::default();
-    for words in segments(command) {
-        let (command_words, bypass) = command_words(&words);
+    let mut variables = std::collections::BTreeMap::new();
+    let mut inline_scripts = Vec::new();
+    let invocations = shell.invocations(command, &mut findings);
+    let files_safe = depth == 0 && invocations.len() == 1;
+    for invocation in invocations {
+        let words = findings.inspect_publications(&invocation, directory, files_safe);
+        let spelled = invocation.arguments(0).ok();
+        assigned(&words, &mut variables);
+        let (command_words, _) = command_words(&words);
         let Some((first, rest)) = command_words.split_first() else {
             continue;
         };
         let name = program(first);
         let name = name.as_str();
-        if let Some(path) = script_path(name, first, rest) {
-            if let Some(value) =
-                bypass.filter(|value| legacy_rules::script_bypass_names(value, path))
-            {
-                let reason = value
-                    .strip_prefix(path)
-                    .and_then(|suffix| suffix.strip_prefix(':'))
-                    .map_or("", str::trim);
-                record_bypass(reason, &words);
-            } else {
-                match script_refusal(path, directory, table, depth)
-                    .with_context(|| format!("inspect the script {path}"))
-                {
-                    Ok(report) => findings.append(report),
-                    Err(error) => findings
-                        .unavailable
-                        .push(format!("{error:#}\n{}", script_bypass_hint(path))),
-                }
-            }
-        }
-        let arguments: Vec<&str> = rest.iter().map(String::as_str).collect();
-        let tool = table.tools.iter().find(|tool| {
-            tool.legacy.iter().any(|legacy| legacy == name)
-                && legacy_rules::invokes(
-                    &arguments,
-                    &tool.when.iter().map(String::as_str).collect::<Vec<_>>(),
-                )
-                && !(tool.stream && legacy_rules::reads_stream(&arguments))
+        let path = script_path(name, first, rest, directory);
+        let inline = rest.iter().position(|word| {
+            word.starts_with('-') && !word.starts_with("--") && word.contains('c')
         });
-        let bypassed = bypass.is_some_and(|value| legacy_rules::bypass_names(value, name));
-        match (legacy_rules::verdict(tool.is_some(), false, bypassed), tool) {
-            (Verdict::Refuse, Some(tool)) => {
-                findings.refusals.push(refusal_text(tool, name, &arguments));
+        if SHELLS.contains(&name) && inline.is_some_and(|position| rest.get(position + 1).is_some())
+        {
+            let argument = words.len() - rest.len() + inline.unwrap_or_default() + 1;
+            if let Some(script) = findings.inline_script(
+                spelled
+                    .as_ref()
+                    .and_then(|arguments| arguments.get(argument)),
+            ) {
+                inline_scripts.push(script);
             }
-            (Verdict::Bypassed, _) => {
-                let reason = bypass
-                    .and_then(|value| value.split_once(':'))
-                    .map_or("", |(_, reason)| reason.trim());
-                record_bypass(reason, &words);
-            }
-            _ => {}
         }
+        if SHELLS.contains(&name) && path.is_none() && inline.is_none() {
+            findings.inspect_stdin(&invocation, directory, table, depth);
+        }
+        if (SHELLS.contains(&name) || path.is_some())
+            && dynamic_xargs_script(&words, command_words, path)
+        {
+            findings.refusals.push("Refused: xargs supplies an unresolved script path.\nNext action: use a literal path in the shell's script argument before invoking xargs.".to_owned());
+            continue;
+        }
+        if let Some(path) = path {
+            let position = if first == path {
+                Some(words.len() - rest.len() - 1)
+            } else {
+                rest.iter()
+                    .position(|argument| argument == path)
+                    .map(|position| words.len() - rest.len() + position)
+            };
+            let argument = position.and_then(|position| {
+                spelled
+                    .as_ref()
+                    .and_then(|arguments| arguments.get(position))
+            });
+            findings.inspect_script(
+                path,
+                argument,
+                &words,
+                files_safe && invocation.file_inputs_safe(),
+                &ScriptContext {
+                    directory,
+                    table,
+                    depth,
+                    variables: &variables,
+                },
+            );
+        }
+        findings.inspect_legacy(&invocation, &words, table);
     }
-    for script in nested_scripts(command) {
+    for script in inline_scripts {
         if nested {
             findings.append(inspect(script.as_str(), directory, table, depth + 1));
         } else {
@@ -345,6 +705,34 @@ fn inspect(command: &str, directory: Option<&Path>, table: &Modern, depth: usize
         }
     }
     findings
+}
+
+fn dynamic_xargs_script(words: &[String], command: &[String], path: Option<&str>) -> bool {
+    use crate::lint_hook_rules::{ScriptArgument, ScriptInput, script_argument};
+    let wrappers: Vec<_> = words
+        .iter()
+        .take(words.len().saturating_sub(command.len()))
+        .collect();
+    let xargs = wrappers.iter().any(|word| program(word) == "xargs");
+    let replacement = wrappers.iter().enumerate().find_map(|(index, word)| {
+        if *word == "-I" {
+            return wrappers.get(index + 1).map(|word| word.as_str());
+        }
+        word.strip_prefix("-I").filter(|value| !value.is_empty())
+    });
+    let replaced = replacement.is_some_and(|marker| path.is_some_and(|path| path.contains(marker)));
+    let inline = command
+        .iter()
+        .skip(1)
+        .any(|word| word.starts_with('-') && !word.starts_with("--") && word.contains('c'));
+    let input = if path.is_none() {
+        ScriptInput::Missing
+    } else if replaced {
+        ScriptInput::Replaced
+    } else {
+        ScriptInput::Literal
+    };
+    script_argument(xargs, input, inline) == ScriptArgument::NeedsLiteral
 }
 
 #[cfg(test)]
@@ -407,6 +795,37 @@ mod tests {
         refusal(command, None)
             .unwrap()
             .unwrap_or_else(|| panic!("admitted: {command}"))
+    }
+
+    #[test]
+    fn suggestions_preserve_shell_argument_spelling() {
+        for arguments in [
+            "-c '.foo' ~/.codex/hooks.json",
+            "'.foo' '~/path with spaces'",
+            "'.foo' ~/path\\ with\\ spaces",
+            "'.foo' \"$HOME/file name\" ''",
+            "'.foo' 'literal'\"suffix\"",
+        ] {
+            let message = refused(&format!("jq {arguments} 2>&1"));
+            assert!(
+                message
+                    .lines()
+                    .any(|line| line == format!("Next action: jaq {arguments}")),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_inline_script_inside_a_heredoc_is_inspected_once() -> Result<()> {
+        let findings = findings("sh <<'EOF'\nbash -c 'grep x f'\nEOF", None)?;
+        assert_eq!(findings.refusals.len(), 1, "{:?}", findings.refusals);
+        assert!(
+            findings.unavailable.is_empty(),
+            "{:?}",
+            findings.unavailable
+        );
+        Ok(())
     }
 
     #[test]
@@ -627,7 +1046,7 @@ mod tests {
     }
 
     #[test]
-    fn a_script_bypass_skips_nested_and_unavailable_inspections_before_reading() {
+    fn a_script_bypass_preserves_mandatory_unavailable_body_inspections() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         std::fs::write(root.join("outer.sh"), "sh nested.sh; sh missing.sh\n").unwrap();
@@ -655,7 +1074,14 @@ mod tests {
                 BYPASSES.with(|log| log.borrow_mut().clear());
                 let report = inspect(&command, Some(root), table().unwrap(), depth);
                 assert!(report.refusals.is_empty(), "{path}: {report:?}");
-                assert!(report.unavailable.is_empty(), "{path}: {report:?}");
+                assert!(
+                    !report.unavailable.is_empty()
+                        || report.bodies.iter().any(|body| matches!(
+                            body,
+                            crate::claude_hook::github::Body::Unreadable(_)
+                        )),
+                    "{path}: {report:?}"
+                );
                 BYPASSES.with(|log| {
                     let log = log.borrow();
                     assert_eq!(log.len(), 1, "{path}");

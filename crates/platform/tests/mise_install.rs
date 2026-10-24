@@ -279,7 +279,8 @@ fn a_finalized_install_preserves_tools_added_by_the_parent_mise_activation() -> 
     )?;
     let mut parent = platform::process::command(&mise);
     parent.env_clear();
-    for name in ["PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT"] {
+    parent.env("PATH", "");
+    for name in ["SystemRoot", "WINDIR", "COMSPEC", "PATHEXT"] {
         if let Some(value) = std::env::var_os(name) {
             parent.env(name, value);
         }

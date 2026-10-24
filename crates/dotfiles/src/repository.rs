@@ -1,10 +1,12 @@
 //! The README, the license files, and the GitHub description that every owner repository generates from its `repository.toml`, and the gate that refuses drift from them.
 
 use crate::refusal::Refusal;
-use crate::repository_rules::{Drift, drift};
+use crate::repository_rules::{Drift, Generation, LicenseAssets, drift, generation};
 use crate::tool::Tool;
 use anyhow::{Context, Result};
 use model::repository::{FILE, LICENSE, Repository};
+use platform::build_inputs::hex;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 
@@ -12,6 +14,9 @@ use std::path::Path;
 const README: &str = include_str!("../assets/repository/README.template");
 
 const DOCUMENTATION_INDEX: &str = "docs/README.md";
+const README_PATH: &str = "README.md";
+const MIT_PATH: &str = "LICENSE-MIT";
+const APACHE_PATH: &str = "LICENSE-APACHE";
 
 /// The license texts, which the Rust API Guidelines recommend shipping side by side.
 const MIT: &str = include_str!("../assets/repository/LICENSE-MIT");
@@ -67,13 +72,38 @@ pub fn generate(metadata: &Repository) -> Generated {
         .replace("{usage_language}", &metadata.usage_language)
         .replace("{usage}", metadata.usage.trim_end());
     vec![
-        ("README.md", readme),
-        (
-            "LICENSE-MIT",
-            MIT.replace("{copyright}", &metadata.copyright),
-        ),
-        ("LICENSE-APACHE", APACHE.to_owned()),
+        (README_PATH, readme),
+        (MIT_PATH, MIT.replace("{copyright}", &metadata.copyright)),
+        (APACHE_PATH, APACHE.to_owned()),
     ]
+}
+
+fn license_matches(root: &Path, path: &str, expected: &str) -> bool {
+    fs::read(root.join(path))
+        .is_ok_and(|bytes| hex(Sha256::digest(bytes).as_ref()).eq_ignore_ascii_case(expected))
+}
+
+fn artifacts(root: &Path, metadata: &Repository) -> Result<Generated> {
+    let assets =
+        metadata
+            .preserved_licenses
+            .as_ref()
+            .map_or(LicenseAssets::Generated, |reviewed| {
+                LicenseAssets::Preserved {
+                    mit_matches: license_matches(root, MIT_PATH, &reviewed.mit_sha256),
+                    apache_matches: license_matches(root, APACHE_PATH, &reviewed.apache_sha256),
+                }
+            });
+    match generation(assets) {
+        Generation::All => Ok(generate(metadata)),
+        Generation::Readme => Ok(generate(metadata)
+            .into_iter()
+            .filter(|(path, _)| *path == README_PATH)
+            .collect()),
+        Generation::Refused => anyhow::bail!(
+            "{FILE}: preserved_licenses requires the reviewed SHA-256 bytes of both {MIT_PATH} and {APACHE_PATH}; restore the reviewed files before generation"
+        ),
+    }
 }
 
 /// Writes the generated files at `root`.
@@ -93,7 +123,7 @@ pub fn write(root: &Path) -> Result<()> {
         "record contributor consent before generating license files: {}",
         missing.join(", ")
     );
-    for (path, text) in generate(&metadata) {
+    for (path, text) in artifacts(root, &metadata)? {
         fs::write(root.join(path), text).with_context(|| format!("write {path}"))?;
     }
     Ok(())
@@ -236,7 +266,7 @@ fn description(repository: &str) -> Result<String> {
 pub fn check(root: &Path, remote: Option<&str>) -> Result<()> {
     let metadata = metadata(root)?;
     let mut stale = Vec::new();
-    for (path, text) in generate(&metadata) {
+    for (path, text) in artifacts(root, &metadata)? {
         let current = fs::read_to_string(root.join(path))
             .unwrap_or_default()
             .replace("\r\n", "\n");
@@ -293,6 +323,7 @@ pub fn check(root: &Path, remote: Option<&str>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write as _;
 
     const INDEX: &str = "docs/README.md";
     const README_PATH: &str = "README.md";
@@ -300,8 +331,10 @@ mod tests {
         "# Fixture\n\nA fixture repository.\n\n## Installation\n\n",
         "```sh\ncargo install fixture\n```\n\n## Usage\n\n",
         "```sh\nfixture --help\n```\n\n## License\n\n",
-        "Licensed under either of the [Apache License, Version 2.0](LICENSE-APACHE) or the [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT), at your option.\n",
-        "You license each contribution you submit under the same two licenses, without other terms, unless you state otherwise.\n",
+        "Licensed under either license:\n\n",
+        "- [Apache License, Version 2.0](LICENSE-APACHE)\n",
+        "- [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT)\n\n",
+        "Contributions use both licenses unless you state other terms.\n",
     );
 
     fn fixture() -> tempfile::TempDir {
@@ -344,6 +377,89 @@ mod tests {
             .downcast_ref::<Refusal>()
             .expect("a structured refusal")
             .clone()
+    }
+
+    fn preserve_licenses(root: &Path) -> [(&'static str, Vec<u8>); 2] {
+        let assets = [
+            (
+                "LICENSE-MIT",
+                b"Reviewed MIT grant\r\nCopyright Owner\r\n".to_vec(),
+            ),
+            (
+                "LICENSE-APACHE",
+                b"Reviewed Apache grant\nOriginal notice\n".to_vec(),
+            ),
+        ];
+        let mut config = fs::read_to_string(root.join(FILE)).unwrap();
+        config.push_str("\n[preserved_licenses]\n");
+        for ((path, bytes), key) in assets.iter().zip(["mit_sha256", "apache_sha256"]) {
+            fs::write(root.join(path), bytes).unwrap();
+            let digest = platform::build_inputs::hex(Sha256::digest(bytes).as_ref());
+            writeln!(config, "{key} = \"{digest}\"").unwrap();
+        }
+        fs::write(root.join(FILE), config).unwrap();
+        assets
+    }
+
+    #[test]
+    fn reviewed_license_bytes_survive_readme_generation() {
+        let directory = fixture();
+        let root = directory.path();
+        let assets = preserve_licenses(root);
+        fs::write(root.join(README_PATH), "An obsolete README\n").unwrap();
+        write(root).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join(README_PATH)).unwrap(),
+            LEGACY_README
+        );
+        for (path, bytes) in assets {
+            assert_eq!(fs::read(root.join(path)).unwrap(), bytes);
+        }
+        check(root, None).unwrap();
+    }
+
+    #[test]
+    fn missing_or_changed_reviewed_licenses_refuse_before_any_generated_write() {
+        for path in ["LICENSE-MIT", "LICENSE-APACHE"] {
+            for missing in [false, true] {
+                let directory = fixture();
+                let root = directory.path();
+                preserve_licenses(root);
+                let marker = "Do not replace this README\n";
+                fs::write(root.join(README_PATH), marker).unwrap();
+                if missing {
+                    fs::remove_file(root.join(path)).unwrap();
+                } else {
+                    fs::write(root.join(path), "Unreviewed replacement\n").unwrap();
+                }
+                let error = write(root).unwrap_err().to_string();
+                assert!(error.contains(path), "{error}");
+                assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+                assert!(check(root, None).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn preservation_requires_both_digest_fields_and_keeps_the_manifest_gate() {
+        let directory = fixture();
+        let root = directory.path();
+        preserve_licenses(root);
+        let config = fs::read_to_string(root.join(FILE)).unwrap();
+        for key in ["mit_sha256", "apache_sha256"] {
+            let incomplete = config
+                .lines()
+                .filter(|line| !line.starts_with(key))
+                .collect::<Vec<_>>()
+                .join("\n");
+            fs::write(root.join(FILE), incomplete).unwrap();
+            assert!(metadata(root).is_err(), "{key}");
+        }
+        fs::write(root.join(FILE), config).unwrap();
+        write(root).unwrap();
+        let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+        fs::write(root.join("Cargo.toml"), manifest.replace(LICENSE, "MIT")).unwrap();
+        assert_eq!(refused(root).rule, "repository.license");
     }
 
     #[test]

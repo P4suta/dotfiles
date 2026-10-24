@@ -4,6 +4,6 @@
 [ruleset.main]
 # The one status the ruleset requires: the required job of ci.yml, which a skipped job never blocks.
 required_status_checks = ["required"]
-# A merge queue tests each change on the current main, so the ruleset no longer demands an up-to-date branch.
-strict_required_status_checks_policy = false
-merge_queue = true
+# GitHub offers no merge queue for this personal repository, so stacked pull requests keep strict checks on the current main.
+strict_required_status_checks_policy = true
+merge_queue = false

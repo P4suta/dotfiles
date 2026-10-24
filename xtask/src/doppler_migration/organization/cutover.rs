@@ -3,7 +3,7 @@ use super::{
     field, gh, git, names, retire, text, workflows,
 };
 use anyhow::{Context, ensure};
-use rules::doppler_organization_rules::Change;
+use rules::doppler_organization_rules::{Change, ConfigInventory, config_inventory_matches};
 use std::collections::{BTreeMap, BTreeSet};
 use std::process::Stdio;
 use yaml_rust2::{Yaml, YamlLoader};
@@ -11,10 +11,10 @@ use yaml_rust2::{Yaml, YamlLoader};
 const GITHUB_OUTPUT_LIMIT: usize = 8 * 1024 * 1024;
 const MAIN_BRANCH: &str = "main";
 const MANUAL_EVENT: &str = "workflow_dispatch";
-const SYNC_METADATA_FIELDS: [&str; 3] =
+pub(super) const SYNC_METADATA_FIELDS: [&str; 3] =
     ["DOPPLER_CONFIG", "DOPPLER_ENVIRONMENT", "DOPPLER_PROJECT"];
 
-fn main_revision(repository: &Repository) -> Result<String> {
+pub(super) fn main_revision(repository: &Repository) -> Result<String> {
     let actual = gh(&format!("repos/{}", repository.name))?;
     ensure!(
         actual.get("id").and_then(Value::as_u64) == Some(repository.id)
@@ -133,23 +133,18 @@ fn remaining_consumers(
     report: &Report,
     consumers: &[&Consumer],
 ) -> Result<()> {
+    check_unused_fields(repository, revision, &remaining_fields(report, consumers)?)
+}
+
+pub(super) fn check_unused_fields(
+    repository: &Repository,
+    revision: &str,
+    fields: &BTreeSet<String>,
+) -> Result<()> {
     let paths = git(
         &repository.directory,
         &["ls-tree", "-r", "--name-only", revision, "--", ".github"],
     )?;
-    let mut fields: BTreeSet<_> = consumers
-        .iter()
-        .flat_map(|consumer| consumer.aliases.keys().cloned())
-        .collect();
-    fields.extend(SYNC_METADATA_FIELDS.map(str::to_owned));
-    for consumer in consumers {
-        let config = report
-            .configs
-            .iter()
-            .find(|config| config.project == consumer.project && config.config == consumer.source)
-            .context("legacy config inventory missing")?;
-        fields.extend(config.names.iter().cloned());
-    }
     let mut sources = BTreeMap::new();
     for path in paths.lines().filter(|path| {
         (path.starts_with(".github/workflows/") || path.starts_with(".github/actions/"))
@@ -165,7 +160,28 @@ fn remaining_consumers(
         )?;
         sources.insert(path.to_owned(), source);
     }
-    check_workflow_sources(&sources, &fields)
+    ensure!(!sources.is_empty(), "workflow consumer inventory is empty");
+    check_workflow_sources(&sources, fields)
+}
+
+fn remaining_fields(report: &Report, consumers: &[&Consumer]) -> Result<BTreeSet<String>> {
+    let mut fields: BTreeSet<_> = consumers
+        .iter()
+        .flat_map(|consumer| consumer.aliases.keys().cloned())
+        .collect();
+    fields.extend(SYNC_METADATA_FIELDS.map(str::to_owned));
+    for consumer in consumers {
+        let config = report
+            .configs
+            .iter()
+            .find(|config| config.project == consumer.project && config.config == consumer.source)
+            .context("legacy config inventory missing")?;
+        fields.extend(config.names.iter().cloned());
+        if consumer.source == consumer.purpose.config() {
+            fields.extend(consumer.purpose.fields().iter().cloned());
+        }
+    }
+    Ok(fields)
 }
 
 fn check_workflow_sources(
@@ -368,20 +384,44 @@ fn verify_configs(report: &Report, session: &Session, consumers: &[&Consumer]) -
             .iter()
             .find(|config| config.project == consumer.project && config.config == consumer.source)
             .context("legacy config inventory missing")?;
-        ensure!(
-            old.names == names(&session.client, &consumer.project, &consumer.source)?,
-            "legacy field inventory changed"
-        );
+        let source = names(&session.client, &consumer.project, &consumer.source)?;
         let expected_names = consumer.purpose.fields().iter().cloned().collect();
-        ensure!(
-            names(
-                &session.client,
-                &consumer.project,
-                consumer.purpose.config()
-            )? == expected_names,
-            "purpose field inventory differs from the verified contract"
-        );
+        let purpose = (consumer.source != consumer.purpose.config())
+            .then(|| {
+                names(
+                    &session.client,
+                    &consumer.project,
+                    consumer.purpose.config(),
+                )
+            })
+            .transpose()?;
+        check_config_inventory(&old.names, &expected_names, &source, purpose.as_ref())?;
     }
+    Ok(())
+}
+
+fn check_config_inventory(
+    legacy: &BTreeSet<String>,
+    canonical: &BTreeSet<String>,
+    source: &BTreeSet<String>,
+    purpose: Option<&BTreeSet<String>>,
+) -> Result<()> {
+    let inventory = if let Some(purpose) = purpose {
+        ConfigInventory::Distinct {
+            legacy: legacy == source,
+            canonical: canonical == purpose,
+        }
+    } else {
+        let combined: BTreeSet<_> = legacy.union(canonical).cloned().collect();
+        ConfigInventory::Shared {
+            canonical: canonical == source,
+            combined: &combined == source,
+        }
+    };
+    ensure!(
+        config_inventory_matches(inventory),
+        "config field inventory differs from the verified contract"
+    );
     Ok(())
 }
 
@@ -529,6 +569,66 @@ pub(super) fn run(request: &Request, session: &Session, report: &Report) -> Resu
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn shared_writer_review_includes_its_new_canonical_field_names() {
+        let report: Report = serde_json::from_value(json!({
+            "workplace":"workplace", "checkouts":"/checkouts", "repositories":[],
+            "configs":[{"project":"project", "config":"automation",
+                "names":["RELEASE_PLEASE_CLIENT_ID", "RELEASE_PLEASE_PRIVATE_KEY"]}],
+            "consumers":[{"project":"project", "source":"automation", "purpose":"automation",
+                "repository":"owner/project", "shared":"shared.automation",
+                "aliases":{"RELEASE_PLEASE_CLIENT_ID":"GITHUB_APP_CLIENT_ID",
+                    "RELEASE_PLEASE_PRIVATE_KEY":"GITHUB_APP_PRIVATE_KEY"}, "jobs":[]}],
+            "legacy_registry":[]
+        }))
+        .unwrap();
+        let consumers: Vec<_> = report.consumers.iter().collect();
+        let fields = remaining_fields(&report, &consumers).unwrap();
+        for name in ["GITHUB_APP_CLIENT_ID", "GITHUB_APP_PRIVATE_KEY"] {
+            let source = format!("key: ${{{{ secrets.{name} }}}}");
+            assert!(check_secret_references(&source, &fields, &BTreeMap::new()).is_err());
+        }
+        check_secret_references(
+            "key: ${{ steps.credentials.outputs.GITHUB_APP_PRIVATE_KEY }}",
+            &fields,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn shared_configs_admit_only_complete_migration_states() {
+        let legacy = BTreeSet::from([
+            "RELEASE_PLEASE_CLIENT_ID".to_owned(),
+            "RELEASE_PLEASE_PRIVATE_KEY".to_owned(),
+        ]);
+        let canonical = BTreeSet::from([
+            "GITHUB_APP_CLIENT_ID".to_owned(),
+            "GITHUB_APP_PRIVATE_KEY".to_owned(),
+        ]);
+        let combined = legacy.union(&canonical).cloned().collect();
+        check_config_inventory(&legacy, &canonical, &combined, None).unwrap();
+        check_config_inventory(&legacy, &canonical, &canonical, None).unwrap();
+        for fields in [
+            legacy.clone(),
+            BTreeSet::new(),
+            BTreeSet::from(["GITHUB_APP_CLIENT_ID".to_owned()]),
+            canonical
+                .union(&BTreeSet::from(["RELEASE_PLEASE_CLIENT_ID".to_owned()]))
+                .cloned()
+                .collect(),
+            canonical
+                .union(&BTreeSet::from(["UNEXPECTED".to_owned()]))
+                .cloned()
+                .collect(),
+        ] {
+            assert!(check_config_inventory(&legacy, &canonical, &fields, None).is_err());
+        }
+        check_config_inventory(&legacy, &canonical, &legacy, Some(&canonical)).unwrap();
+        assert!(check_config_inventory(&legacy, &canonical, &combined, Some(&canonical)).is_err());
+        assert!(check_config_inventory(&legacy, &canonical, &legacy, Some(&combined)).is_err());
+    }
 
     fn repository() -> Repository {
         Repository {

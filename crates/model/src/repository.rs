@@ -27,6 +27,9 @@ pub struct Repository {
     /// Link the generated README to `docs/README.md`.
     #[serde(default)]
     pub documentation_index: bool,
+    /// Preserve both reviewed license files at these SHA-256 digests.
+    #[serde(default)]
+    pub preserved_licenses: Option<PreservedLicenses>,
     /// The copyright holder that `LICENSE-MIT` names.
     pub copyright: String,
     /// The license expression, which must read `MIT OR Apache-2.0`.
@@ -34,6 +37,16 @@ pub struct Repository {
     /// Each contributor besides the copyright holder and bots, with the record of their consent to the dual license.
     #[serde(default)]
     pub consent: Vec<Consent>,
+}
+
+/// The reviewed bytes of the existing dual-license assets.
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreservedLicenses {
+    /// The SHA-256 digest of `LICENSE-MIT`.
+    pub mit_sha256: String,
+    /// The SHA-256 digest of `LICENSE-APACHE`.
+    pub apache_sha256: String,
 }
 
 /// One contributor's consent to license their contributions under both licenses.

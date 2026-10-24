@@ -39,6 +39,44 @@ fn metadata(repository: &str, network: Option<u64>) -> Result<Repository> {
     }))?)
 }
 
+#[test]
+fn remote_identity_binding_requires_no_contributor_checkout() -> Result<()> {
+    let mut reads = Vec::new();
+    let binding = source_identity::bind(FORK, UPSTREAM, |repository| {
+        reads.push(repository.to_owned());
+        metadata(repository, (repository != UPSTREAM).then_some(1))
+    })?;
+    assert_eq!(reads, [UPSTREAM, FORK]);
+    assert_eq!(binding.source(), FORK);
+    assert_eq!(binding.source_id(), 2);
+    assert_eq!(binding.target(), UPSTREAM);
+    assert_eq!(binding.target_id(), 1);
+    assert!(!binding.same_repository());
+    let same = source_identity::bind(UPSTREAM, UPSTREAM, |repository| metadata(repository, None))?;
+    assert!(same.same_repository());
+    assert_eq!(same.source_id(), same.target_id());
+    for network in [None, Some(0), Some(2), Some(3)] {
+        assert!(
+            source_identity::bind(FORK, UPSTREAM, |repository| {
+                metadata(
+                    repository,
+                    (repository != UPSTREAM).then_some(network).flatten(),
+                )
+            })
+            .is_err()
+        );
+    }
+    for (source, target) in [("../project", UPSTREAM), (FORK, "upstream/project/extra")] {
+        assert!(
+            source_identity::bind(source, target, |_| {
+                panic!("invalid repository name must stop before API reads")
+            })
+            .is_err()
+        );
+    }
+    Ok(())
+}
+
 fn verify_source(root: &Path) -> Result<()> {
     let mut reads = Vec::new();
     let checked = source_identity::capture(root, UPSTREAM, |repository| {

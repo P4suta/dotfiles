@@ -16,6 +16,9 @@ Keep text only for what the code leaves unsaid: a public usage contract, a legal
 Give public API documentation enough detail, examples, and failure conditions to use the API correctly.
 Record durable architectural tradeoffs in an ADR instead of repeating them at call sites.
 Write comments that `prose check --channel comment` accepts.
+Write one sentence per line in English and Japanese.
+Never wrap a sentence across lines or put two sentences on one line.
+Split a long sentence into shorter ones when a channel limits line length.
 
 Treat `#[allow(...)]`, file-wide suppression directives, ignored failures, and exclusions as prohibited by default.
 Fix the representation or behavior behind a diagnostic instead of shrinking the checked surface.

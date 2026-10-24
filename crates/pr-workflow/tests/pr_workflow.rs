@@ -17,8 +17,12 @@ fn gh_directory() -> &'static tempfile::TempDir {
     static DIRECTORY: OnceLock<tempfile::TempDir> = OnceLock::new();
     DIRECTORY.get_or_init(|| {
         let directory = tempfile::tempdir().unwrap();
-        for program in ["gh", "gh-stack", "git"] {
-            let source = if program == "git" { "gh" } else { program };
+        for program in ["gh", "gh-stack", "git", "mise"] {
+            let source = if matches!(program, "git" | "mise") {
+                "gh"
+            } else {
+                program
+            };
             let result = platform::process::command("rustc")
                 .args(["--edition", "2024"])
                 .arg(format!(
@@ -3091,58 +3095,604 @@ fn local_create_is_draft_and_passes_the_checked_body_by_file() -> Result<()> {
     Ok(())
 }
 
-/// A user at the default limit of three open PRs adds new work to the oldest instead of opening another.
-/// PRs of other users and PRs from the same branch never count.
+fn issue_link_fixture(fixture: &Fixture, original: &str) -> Result<Command> {
+    let target = serde_json::json!({
+        "id":37,"full_name":"P4suta/project","owner":{"login":"P4suta","id":42_543_015},
+        "fork":false,"default_branch":"main"
+    });
+    let source = serde_json::json!({
+        "id":73,"full_name":"contributor/project","owner":{"login":"contributor","id":1000},
+        "fork":true,"source":{"id":37,"full_name":"P4suta/project"},"default_branch":"main"
+    });
+    let pull = serde_json::json!({
+        "number":17,"html_url":"https://github.com/P4suta/project/pull/17",
+        "title":"Contributor proposal","body":original,"state":"open","draft":true,
+        "user":{"login":"contributor","id":1000},
+        "head":{"ref":"feature","sha":fixture.head,"repo":source},
+        "base":{"ref":"main","sha":fixture.base,"repo":target},
+        "labels":[{"id":3,"name":"retained"}],
+        "requested_reviewers":[{"id":41,"login":"reviewer"}],
+        "requested_teams":[{"id":51,"slug":"reviewers"}]
+    });
+    let mut after = pull.clone();
+    after["body"] = serde_json::json!(format!("{original}\nCloses #23.\n"));
+    let repositories = format!("repos/P4suta/project={target}\nrepos/contributor/project={source}");
+    let branches = format!(
+        "repos/p4suta/project/branches/main={}\nrepos/contributor/project/branches/feature={}",
+        serde_json::json!({"name":"main","commit":{"sha":fixture.base}}),
+        serde_json::json!({"name":"feature","commit":{"sha":fixture.head}})
+    );
+    let mut command = fixture.command_at_repo("link-issue", "P4suta/project", false)?;
+    command.args(["--pr", "17", "--issue", "23"])
+        .env("GH_FIXTURE_REPOSITORIES", repositories)
+        .env("GH_FIXTURE_BRANCHES", branches)
+        .env("GH_FIXTURE_LINK_PULLS", format!("17={pull}\n17={pull}\n17={after}\n17={after}"))
+        .env("GH_FIXTURE_ISSUE", serde_json::json!({
+            "number":23,"html_url":"https://github.com/P4suta/project/issues/23","state":"open",
+            "title":"Keep issue references","body":"Keep the selected issue linked to the proposal."
+        }).to_string());
+    Ok(command)
+}
+
 #[test]
-fn create_refuses_a_second_open_pr_by_the_same_author_and_names_the_first() -> Result<()> {
-    let fixture = Fixture::new(BODY)?;
-    let pr = |number: u64, login: &str, head: &str| {
-        serde_json::json!({
-            "number": number,
-            "html_url": format!("https://github.com/owner/project/pull/{number}"),
-            "user": {"login": login},
-            "head": {"ref": head}
-        })
-    };
-    let create = |pulls: &serde_json::Value| -> Result<Output> {
-        Ok(fixture
-            .command("create")?
-            .args(["--title", "fix: preserve edits", "--body-file"])
-            .arg(&fixture.body)
-            .args(["--head", "feature"])
-            .env("GH_FIXTURE_PULLS", pulls.to_string())
-            .output()?)
-    };
-    let output = create(&serde_json::json!([
-        pr(9, "Other", "theirs"),
-        pr(12, "P4suta", "feature"),
-        pr(13, "P4suta", "second"),
-        pr(15, "P4suta", "third")
-    ]))?;
+fn the_repository_owner_links_an_external_pr_without_replacing_its_review_evidence() -> Result<()> {
+    let original =
+        "Contributor rationale.\n\n<!-- retained assessment marker -->\n\n@coderabbitai ignore\n";
+    let fixture = Fixture::new(original)?;
+    let output = issue_link_fixture(&fixture, original)?.output()?;
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    fs::remove_file(&fixture.log)?;
-    let output = create(&serde_json::json!([
-        pr(14, "P4suta", "later"),
-        pr(11, "p4suta", "earlier"),
-        pr(16, "P4suta", "latest")
-    ]))?;
-    let record = refusal(&output);
-    assert_eq!(record["rule"], "pr.wip");
+    let log = fixture.log()?;
+    let input = log
+        .split("input:\n")
+        .nth(1)
+        .context("body-only JSON update missing")?;
+    let input: serde_json::Value =
+        serde_json::from_str(input.lines().next().context("JSON input missing")?)?;
     assert_eq!(
-        record["next"],
-        "git switch earlier && git merge --no-edit feature && git push"
+        input,
+        serde_json::json!({"body":format!("{original}\nCloses #23.\n")})
     );
-    let evidence = record["evidence"].to_string();
+    assert_eq!(log.matches("\nPATCH\n").count(), 1);
+    assert!(!log.contains("ssh_signing_keys"));
+    assert!(!log.contains("\n--title\n"));
+    Ok(())
+}
+
+fn alter_json_fixture(
+    command: &mut Command,
+    variable: &str,
+    mut alter: impl FnMut(usize, &str, &mut serde_json::Value),
+) -> Result<()> {
+    let responses = command
+        .get_envs()
+        .find(|(name, _)| *name == variable)
+        .and_then(|(_, value)| value)
+        .and_then(|value| value.to_str())
+        .context("JSON fixture responses missing")?
+        .to_owned();
+    let mut changed = Vec::new();
+    for (index, line) in responses.lines().enumerate() {
+        let (endpoint, value) = line
+            .split_once('=')
+            .context("fixture response endpoint missing")?;
+        let mut value: serde_json::Value = serde_json::from_str(value)?;
+        alter(index, endpoint, &mut value);
+        changed.push(format!("{endpoint}={value}"));
+    }
+    command.env(variable, changed.join("\n"));
+    Ok(())
+}
+
+#[test]
+fn issue_link_accepts_a_stable_base_tip_beyond_the_pr_snapshot() -> Result<()> {
+    for original in [BODY, "Contributor rationale.\n\nCloses #23.\n"] {
+        let fixture = Fixture::new(original)?;
+        let mut command = issue_link_fixture(&fixture, original)?;
+        alter_json_fixture(
+            &mut command,
+            "GH_FIXTURE_BRANCHES",
+            |_, endpoint, branch| {
+                if endpoint == "repos/p4suta/project/branches/main" {
+                    branch["commit"]["sha"] = serde_json::json!("d".repeat(40));
+                }
+            },
+        )?;
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fixture.log()?.matches("\nPATCH\n").count(),
+            usize::from(original == BODY)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_refuses_a_live_source_or_base_change_before_writing() -> Result<()> {
+    for source in [false, true] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = issue_link_fixture(&fixture, BODY)?;
+        let (endpoint, name, initial) = if source {
+            (
+                "repos/contributor/project/branches/feature",
+                "feature",
+                fixture.head.clone(),
+            )
+        } else {
+            ("repos/p4suta/project/branches/main", "main", "d".repeat(40))
+        };
+        let before = serde_json::json!({"name":name,"commit":{"sha":initial}});
+        let after = serde_json::json!({"name":name,"commit":{"sha":"e".repeat(40)}});
+        command.env(
+            "GH_FIXTURE_LINK_BRANCHES",
+            format!("{endpoint}={before}\n{endpoint}={after}"),
+        );
+        let record = refusal(&command.output()?);
+        assert!(
+            record["cause"].as_str().unwrap().contains("changed"),
+            "{record}"
+        );
+        let log = fixture.log()?;
+        assert_eq!(
+            log.lines()
+                .filter(|line| *line == format!("issue-link-branch {endpoint}"))
+                .count(),
+            2
+        );
+        assert!(!log.contains("\nPATCH\n"));
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_refuses_malformed_live_branch_identities() -> Result<()> {
+    for source in [false, true] {
+        for (pointer, value) in [
+            ("/name", "other".to_owned()),
+            ("/commit/sha", "short".to_owned()),
+            ("/commit/sha", "g".repeat(40)),
+        ] {
+            let fixture = Fixture::new(BODY)?;
+            let mut command = issue_link_fixture(&fixture, BODY)?;
+            alter_json_fixture(
+                &mut command,
+                "GH_FIXTURE_BRANCHES",
+                |_, endpoint, branch| {
+                    if endpoint.contains("contributor") == source {
+                        *branch.pointer_mut(pointer).unwrap() = serde_json::json!(value);
+                    }
+                },
+            )?;
+            assert!(
+                !command.output()?.status.success(),
+                "{source} {pointer} {value}"
+            );
+            assert!(!fixture.log()?.contains("\nPATCH\n"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_refuses_a_different_numeric_owner_with_the_same_login() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let output = issue_link_fixture(&fixture, BODY)?
+        .env("GH_FIXTURE_USER", r#"{"login":"P4suta","id":7}"#)
+        .output()?;
+    assert_eq!(refusal(&output)["rule"], "pr.owner");
+    assert!(!fixture.log()?.contains("\nPATCH\n"));
+    Ok(())
+}
+
+#[test]
+fn issue_link_refuses_closed_or_misidentified_resources_before_writing() -> Result<()> {
+    for (pointer, value, expected) in [
+        ("/state", serde_json::json!("closed"), "pr.issue-link"),
+        ("/number", serde_json::json!(18), "pr.failed"),
+        (
+            "/html_url",
+            serde_json::json!("https://github.com/other/project/pull/17"),
+            "pr.failed",
+        ),
+        ("/head/repo", serde_json::Value::Null, "pr.failed"),
+        ("/base/repo/id", serde_json::json!(99), "pr.failed"),
+        ("/head/sha", serde_json::json!("short"), "pr.failed"),
+        ("/base/sha", serde_json::json!("short"), "pr.failed"),
+        ("/head/ref", serde_json::json!("--help"), "pr.branch"),
+        ("/user/id", serde_json::json!(0), "pr.failed"),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = issue_link_fixture(&fixture, BODY)?;
+        alter_json_fixture(&mut command, "GH_FIXTURE_LINK_PULLS", |_, _, pull| {
+            *pull.pointer_mut(pointer).unwrap() = value.clone();
+        })?;
+        assert_eq!(refusal(&command.output()?)["rule"], expected, "{pointer}");
+        assert!(!fixture.log()?.contains("\nPATCH\n"));
+    }
+    for (state, url, expected) in [
+        (
+            "closed",
+            "https://github.com/P4suta/project/issues/23",
+            "pr.issue-link",
+        ),
+        (
+            "open",
+            "https://github.com/other/project/issues/23",
+            "pr.failed",
+        ),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let output = issue_link_fixture(&fixture, BODY)?.env("GH_FIXTURE_ISSUE", serde_json::json!({
+            "number":23,"html_url":url,"state":state,"title":"Keep issue references","body":"Keep the reference."
+        }).to_string()).output()?;
+        assert_eq!(refusal(&output)["rule"], expected);
+        assert!(!fixture.log()?.contains("\nPATCH\n"));
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_requires_the_contributor_repository_to_share_the_destination_network() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let mut command = issue_link_fixture(&fixture, BODY)?;
+    alter_json_fixture(
+        &mut command,
+        "GH_FIXTURE_REPOSITORIES",
+        |_, endpoint, repository| {
+            if endpoint.contains("contributor") {
+                repository["source"]["id"] = serde_json::json!(99);
+            }
+        },
+    )?;
+    assert!(!command.output()?.status.success());
+    assert!(!fixture.log()?.contains("\nPATCH\n"));
+    Ok(())
+}
+
+#[test]
+fn issue_link_refuses_document_head_and_metadata_drift_before_writing() -> Result<()> {
+    for (pointer, value) in [
+        ("/body", serde_json::json!("Another editor's rationale.")),
+        ("/title", serde_json::json!("Another title")),
+        ("/head/sha", serde_json::json!("d".repeat(40))),
+        ("/draft", serde_json::json!(false)),
+        ("/user/id", serde_json::json!(99)),
+        ("/labels", serde_json::json!([])),
+        ("/requested_reviewers", serde_json::json!([])),
+        ("/requested_teams", serde_json::json!([])),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = issue_link_fixture(&fixture, BODY)?;
+        alter_json_fixture(&mut command, "GH_FIXTURE_LINK_PULLS", |index, _, pull| {
+            if index == 1 {
+                *pull.pointer_mut(pointer).unwrap() = value.clone();
+            }
+        })?;
+        let record = refusal(&command.output()?);
+        assert!(
+            record["cause"].as_str().unwrap().contains("changed before"),
+            "{pointer}: {record}"
+        );
+        assert!(!fixture.log()?.contains("\nPATCH\n"));
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_stops_after_an_uncertain_write_or_changed_readback_without_retrying() -> Result<()> {
+    for scenario in ["transport", "acknowledgement", "readback"] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = issue_link_fixture(&fixture, BODY)?;
+        if scenario == "transport" {
+            command.env("GH_FIXTURE_LINK_WRITE_FAILURE", "1");
+        } else {
+            alter_json_fixture(&mut command, "GH_FIXTURE_LINK_PULLS", |index, _, pull| {
+                if index == if scenario == "acknowledgement" { 2 } else { 3 } {
+                    pull["body"] = serde_json::json!("Another editor's rationale.");
+                }
+            })?;
+        }
+        let record = refusal(&command.output()?);
+        assert!(
+            record["cause"]
+                .as_str()
+                .unwrap()
+                .contains("before another write")
+        );
+        assert_eq!(fixture.log()?.matches("\nPATCH\n").count(), 1);
+        if scenario != "readback" {
+            assert_eq!(record["rule"], "pr.link-write");
+            assert_eq!(fixture.log()?.matches("issue-link-read\n").count(), 3);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_keeps_an_existing_reference_without_a_write() -> Result<()> {
+    let original = "Contributor rationale.\n\nCloses #23.\n\n@coderabbitai ignore\n";
+    let fixture = Fixture::new(original)?;
+    let output = issue_link_fixture(&fixture, original)?.output()?;
     assert!(
-        evidence.contains("#11 https://github.com/owner/project/pull/11 (earlier)")
-            && evidence.contains("#14"),
-        "{evidence}"
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    assert!(!fixture.log()?.contains("\ncreate\n"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("already closes"));
+    assert!(!fixture.log()?.contains("\nPATCH\n"));
+    Ok(())
+}
+
+#[test]
+fn issue_link_rejects_zero_numbers_before_any_github_request() -> Result<()> {
+    for (pr, issue) in [("0", "23"), ("17", "0")] {
+        let fixture = Fixture::new(BODY)?;
+        let output = fixture
+            .command_at_repo("link-issue", "P4suta/project", false)?
+            .args(["--pr", pr, "--issue", issue])
+            .output()?;
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(fs::read_to_string(&fixture.log).unwrap_or_default(), "");
+    }
+    Ok(())
+}
+
+#[test]
+fn issue_link_accepts_a_null_existing_body() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let mut command = issue_link_fixture(&fixture, BODY)?;
+    alter_json_fixture(&mut command, "GH_FIXTURE_LINK_PULLS", |index, _, pull| {
+        pull["body"] = if index < 2 {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!("Closes #23.\n")
+        };
+    })?;
+    let output = command.output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fixture.log()?;
+    let input = log
+        .split("input:\n")
+        .nth(1)
+        .context("JSON update missing")?;
+    let input: serde_json::Value =
+        serde_json::from_str(input.lines().next().context("JSON missing")?)?;
+    assert_eq!(input, serde_json::json!({"body":"Closes #23.\n"}));
+    Ok(())
+}
+
+#[test]
+fn issue_link_preserves_body_prefixes_and_adds_one_separate_reference() -> Result<()> {
+    for (original, expected) in [
+        ("", "Closes #23.\n"),
+        ("Rationale.", "Rationale.\n\nCloses #23.\n"),
+        ("Rationale.\n", "Rationale.\n\nCloses #23.\n"),
+        ("Rationale.\n\n", "Rationale.\n\nCloses #23.\n"),
+        ("根拠。", "根拠。\n\nCloses #23.\n"),
+        ("Rationale.\r\n", "Rationale.\r\n\nCloses #23.\n"),
+        ("Rationale.\r\n\r\n", "Rationale.\r\n\r\nCloses #23.\n"),
+        ("Rationale.\n\r\n", "Rationale.\n\r\nCloses #23.\n"),
+        (
+            "Closes other/project#23.\n",
+            "Closes other/project#23.\n\nCloses #23.\n",
+        ),
+    ] {
+        let fixture = Fixture::new(original)?;
+        let mut command = issue_link_fixture(&fixture, original)?;
+        alter_json_fixture(&mut command, "GH_FIXTURE_LINK_PULLS", |index, _, pull| {
+            if index >= 2 {
+                pull["body"] = serde_json::json!(expected);
+            }
+        })?;
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "{original:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let log = fixture.log()?;
+        let input = log
+            .split("input:\n")
+            .nth(1)
+            .context("JSON update missing")?;
+        let input: serde_json::Value =
+            serde_json::from_str(input.lines().next().context("JSON missing")?)?;
+        assert_eq!(input, serde_json::json!({"body":expected}));
+        assert!(input["body"].as_str().unwrap().starts_with(original));
+        assert_eq!(log.matches("\nPATCH\n").count(), 1);
+    }
+    Ok(())
+}
+
+fn owned_work(
+    number: u64,
+    head: &str,
+    base: &str,
+    sha: &str,
+    repository: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "number": number,
+        "html_url": format!("https://github.com/{repository}/pull/{number}"),
+        "user": {"login": "P4suta"},
+        "head": {"ref": head, "sha": sha, "repo": {"id": 37, "full_name": repository}},
+        "base": {"ref": base}
+    })
+}
+
+fn work_unit_fixture() -> Result<(Fixture, PathBuf)> {
+    let (fixture, checkout) = dependency_fixture()?;
+    let scope = fixture.directory.path();
+    for (branch, base) in [
+        ("member", "feature"),
+        ("first", "main"),
+        ("second", "main"),
+        ("third", "main"),
+    ] {
+        scoped_git(&checkout, scope, &["checkout", "-q", "-B", branch, base]);
+        fs::write(checkout.join(format!("{branch}.txt")), branch)?;
+        scoped_git(&checkout, scope, &["add", "."]);
+        scoped_git(&checkout, scope, &["commit", "-q", "-m", branch]);
+        scoped_git(&checkout, scope, &["push", "-q", "../remote.git", branch]);
+    }
+    Ok((fixture, checkout))
+}
+
+#[test]
+fn a_stack_counts_once_and_independent_units_obey_the_limit() -> Result<()> {
+    let (fixture, checkout) = work_unit_fixture()?;
+    let scope = fixture.directory.path();
+    let create = |head: &str,
+                  base: &str,
+                  pulls: &serde_json::Value,
+                  independent: bool,
+                  number: u64|
+     -> Result<Output> {
+        scoped_git(&checkout, scope, &["checkout", "-q", head]);
+        let open = pulls
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|pull| {
+                serde_json::json!({
+                    "number":pull["number"], "headRefName":pull["head"]["ref"],
+                    "baseRefName":pull["base"]["ref"], "author":{"login":"P4suta"},
+                    "mergeable":"MERGEABLE"
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut command = create_among_open_prs_command(
+            &fixture,
+            &checkout,
+            head,
+            &serde_json::to_string(&open)?,
+            base,
+        )?;
+        command.env("GH_FIXTURE_PULLS", pulls.to_string()).env(
+            "GH_FIXTURE_CREATED",
+            format!("https://github.com/P4suta/project/pull/{number}"),
+        );
+        if independent {
+            command.args(["--independent", "Unrelated urgent correction"]);
+        }
+        Ok(command.output()?)
+    };
+    let first = create("first", "main", &serde_json::json!([]), true, 11)?;
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let pull = |number: u64, head: &str, base: &str| -> Result<serde_json::Value> {
+        Ok(owned_work(
+            number,
+            head,
+            base,
+            &git(&checkout, &["rev-parse", head])?,
+            "P4suta/project",
+        ))
+    };
+    let mut pulls = serde_json::json!([
+        pull(4, "a", "main")?,
+        pull(5, "feature", "a")?,
+        pull(11, "first", "main")?
+    ]);
+    let stacked = create("member", "feature", &pulls, false, 17)?;
+    assert!(
+        stacked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stacked.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&stacked.stdout).contains("Open work: 2 unit(s), 3 owned PR(s)")
+    );
+    assert!(fixture.log()?.contains("\n--base\nfeature\n"));
+    assert!(
+        fixture
+            .stack_log()
+            .contains("gh-stack link --base main 4 5 17")
+    );
+    pulls
+        .as_array_mut()
+        .unwrap()
+        .push(pull(17, "member", "feature")?);
+    let second = create("second", "main", &pulls, true, 12)?;
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    pulls
+        .as_array_mut()
+        .unwrap()
+        .push(pull(12, "second", "main")?);
+    let record = refusal(&create("third", "main", &pulls, true, 13)?);
+    assert_eq!(record["rule"], "pr.wip");
+    assert!(record["cause"].as_str().unwrap().contains("3 work units"));
+    assert_eq!(fixture.log()?.matches("\ncreate\n").count(), 3);
+    Ok(())
+}
+
+#[test]
+fn invalid_work_inventories_never_reach_creation() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let pull = |number: u64, head: &str, base: &str| {
+        owned_work(number, head, base, &fixture.base, "owner/project")
+    };
+    let duplicate = pull(4, "parent", "main");
+    let mut missing_source = pull(4, "parent", "main");
+    missing_source["head"]["repo"] = serde_json::Value::Null;
+    let repeated_page = (1..=100)
+        .map(|number| pull(number, &format!("branch-{number}"), "main"))
+        .collect::<Vec<_>>();
+    for (inventory, rule) in [
+        (
+            serde_json::json!([duplicate.clone(), duplicate]),
+            "pr.failed",
+        ),
+        (
+            serde_json::json!([pull(4, "left", "right"), pull(5, "right", "left")]),
+            "pr.work-units",
+        ),
+        (
+            serde_json::json!([
+                pull(4, "root", "main"),
+                pull(5, "left", "root"),
+                pull(6, "right", "root")
+            ]),
+            "pr.work-units",
+        ),
+        (
+            serde_json::json!([pull(4, "left", "main"), pull(5, "right", "main")]),
+            "pr.work-units",
+        ),
+        (serde_json::json!([missing_source]), "pr.failed"),
+        (serde_json::json!(repeated_page), "pr.failed"),
+    ] {
+        let output = fixture
+            .command("create")?
+            .args(["--title", "fix: preserve edits", "--body-file"])
+            .arg(&fixture.body)
+            .args(["--head", "feature"])
+            .env("GH_FIXTURE_PULLS", inventory.to_string())
+            .output()?;
+        assert_eq!(refusal(&output)["rule"], rule);
+    }
+    let log = fixture.log()?;
+    assert!(!log.contains("\ncreate\n"));
+    assert!(log.contains("&page=2"));
     Ok(())
 }
 
@@ -4234,6 +4784,311 @@ fn independent_prs_merge_in_order_through_update_checks_ready_and_the_verified_h
 }
 
 #[test]
+fn merge_carries_the_signed_assessment_after_an_update_only_when_the_diff_matches() -> Result<()> {
+    for changed in [false, true] {
+        let fixture = Fixture::new(BODY)?;
+        let mut command = fixture.personal_command("merge")?;
+        let old = &fixture.head;
+        let new = if changed {
+            fs::write(
+                fixture.directory.path().join("body.md"),
+                "A different change.\n",
+            )?;
+            git(fixture.directory.path(), &["add", "body.md"])?;
+            git(fixture.directory.path(), &["commit", "-qm", "changed diff"])?;
+            git(fixture.directory.path(), &["rev-parse", "HEAD"])?
+        } else {
+            fixture.sibling_head("updated head")?
+        };
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let output = command
+            .args(["--pr", "17", "--interval", "0"])
+            .env("GH_FIXTURE_BEHIND", old)
+            .env(
+                "GH_FIXTURE_VIEWS",
+                [
+                    read(17, old, false, &body, PASSING, "BEHIND"),
+                    read(17, &new, false, &body, PASSING, "CLEAN"),
+                    read(17, &new, false, &body, PASSING, "MERGED"),
+                ]
+                .join("\n"),
+            )
+            .output()?;
+        let log = fixture.log()?;
+        if changed {
+            assert!(!output.status.success());
+            assert!(!mutations(&log).contains(&"merge".into()));
+            assert!(String::from_utf8_lossy(&output.stderr).contains("diff"));
+        } else {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let directory = fixture
+                .directory
+                .path()
+                .join(".local/state/pr-workflow/assessments/p4suta__project");
+            let carried = fs::read_dir(directory)?
+                .filter_map(Result::ok)
+                .find(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(&format!("{new}-"))
+                })
+                .context("the updated head needs its own signed assessment")?;
+            let packet: serde_json::Value = serde_json::from_slice(&fs::read(carried.path())?)?;
+            let raw = packet["raw"].as_str().context("signed raw commit")?;
+            assert!(raw.contains(&format!("parent {new}\n")));
+            let statement: serde_json::Value =
+                serde_json::from_str(raw.split_once("\n\n").context("signed payload")?.1)?;
+            assert_eq!(statement["binding"]["head"], new);
+            assert_eq!(statement["signer"], "P4suta");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn merge_waits_for_running_and_missing_required_checks_before_ready() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+    let views = [
+        read(17, &fixture.head, true, &body, PASSING, "DRAFT"),
+        read(
+            17,
+            &fixture.head,
+            true,
+            &body,
+            r#"[{"name":"required","status":"IN_PROGRESS","conclusion":null}]"#,
+            "DRAFT",
+        ),
+        read(
+            17,
+            &fixture.head,
+            true,
+            &body,
+            r#"[{"name":"required","status":"COMPLETED","conclusion":"SUCCESS"}]"#,
+            "DRAFT",
+        ),
+        read(
+            17,
+            &fixture.head,
+            true,
+            &body,
+            r#"[{"name":"required","status":"COMPLETED","conclusion":"SUCCESS"}]"#,
+            "DRAFT",
+        ),
+        read(
+            17,
+            &fixture.head,
+            false,
+            &body,
+            r#"[{"name":"required","status":"COMPLETED","conclusion":"SUCCESS"}]"#,
+            "CLEAN",
+        ),
+        read(
+            17,
+            &fixture.head,
+            false,
+            &body,
+            r#"[{"name":"required","status":"COMPLETED","conclusion":"SUCCESS"}]"#,
+            "CLEAN",
+        ),
+        read(17, &fixture.head, false, &body, PASSING, "MERGED"),
+    ]
+    .join("\n");
+    let output = fixture.personal_command("merge")?
+        .args(["--pr", "17", "--interval", "0"])
+        .env("GH_FIXTURE_RULES", r#"[{"type":"required_status_checks","parameters":{"required_status_checks":[{"context":"required"}]}}]"#)
+        .env("GH_FIXTURE_VIEWS", views).output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(mutations(&fixture.log()?), ["ready", "merge"]);
+    Ok(())
+}
+
+#[test]
+fn merge_fetches_the_updated_head_and_base_before_checking_signed_evidence() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let mut command = fixture.personal_command("merge")?;
+    let root = fixture.directory.path();
+    let remote = fixture.context_home.path().join("remote.git");
+    git(
+        fixture.context_home.path(),
+        &[
+            "init",
+            "--bare",
+            "--quiet",
+            remote.to_str().context("remote path")?,
+        ],
+    )?;
+    git(
+        root,
+        &[
+            "push",
+            "--quiet",
+            remote.to_str().context("remote path")?,
+            &format!("{}:refs/heads/main", fixture.base),
+            "HEAD:refs/heads/feature",
+        ],
+    )?;
+    git(
+        fixture.context_home.path(),
+        &[
+            "clone",
+            "--quiet",
+            "--branch",
+            "main",
+            remote.to_str().context("remote path")?,
+            "producer",
+        ],
+    )?;
+    let producer = fixture.context_home.path().join("producer");
+    git(&producer, &["config", "user.name", "Fixture"])?;
+    git(&producer, &["config", "user.email", "fixture@example.com"])?;
+    fs::write(producer.join("base.txt"), "Updated base.\n")?;
+    git(&producer, &["add", "base.txt"])?;
+    git(&producer, &["commit", "-qm", "base update"])?;
+    let base = git(&producer, &["rev-parse", "HEAD"])?;
+    git(&producer, &["checkout", "-qb", "feature", "origin/feature"])?;
+    git(&producer, &["merge", "--no-edit", "main"])?;
+    let head = git(&producer, &["rev-parse", "HEAD"])?;
+    git(&producer, &["push", "--quiet", "origin", "main", "feature"])?;
+    let absent = fixture_git::command("git", &root.join("gitconfig"))
+        .current_dir(root)
+        .args(["cat-file", "-e", &head])
+        .output()?;
+    assert!(!absent.status.success());
+    let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+    let output = command
+        .args(["--pr", "17", "--interval", "0"])
+        .env("PWF_FIXTURE_FETCH_CHECKOUT", root)
+        .env("PWF_FIXTURE_FETCH_BARE", &remote)
+        .env("GH_FIXTURE_BEHIND", &fixture.head)
+        .env(
+            "GH_FIXTURE_BASES",
+            format!("{}={}\n{head}={base}", fixture.head, fixture.base),
+        )
+        .env(
+            "GH_FIXTURE_VIEWS",
+            [
+                read(17, &fixture.head, false, &body, PASSING, "BEHIND"),
+                read(17, &head, false, &body, PASSING, "CLEAN"),
+                read(17, &head, false, &body, PASSING, "MERGED"),
+            ]
+            .join("\n"),
+        )
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        git(root, &["rev-parse", &format!("{head}^{{commit}}")])?,
+        head
+    );
+    assert_eq!(
+        git(root, &["rev-parse", &format!("{base}^{{commit}}")])?,
+        base
+    );
+    Ok(())
+}
+
+#[test]
+fn merge_queue_waits_without_updating_or_resubmitting_and_reports_each_outcome() -> Result<()> {
+    for outcome in ["merged", "ejected", "timed_out", "head_changed"] {
+        let fixture = Fixture::new(BODY)?;
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let other = fixture.sibling_head("unverified pushed head")?;
+        let queued = queue_read(17, &fixture.head, "OPEN", true);
+        let final_read = match outcome {
+            "merged" => queue_read(17, &fixture.head, "MERGED", false),
+            "ejected" => queue_read(17, &fixture.head, "OPEN", false),
+            "head_changed" => queue_read(17, &other, "OPEN", true),
+            _ => queued.clone(),
+        };
+        let output = fixture
+            .personal_command("merge")?
+            .args([
+                "--pr",
+                "17",
+                "--interval",
+                "0",
+                "--timeout",
+                if outcome == "timed_out" { "0" } else { "1" },
+            ])
+            .env("GH_FIXTURE_RULES", r#"[{"type":"merge_queue"}]"#)
+            .env("GH_FIXTURE_BEHIND", &fixture.head)
+            .env(
+                "GH_FIXTURE_VIEWS",
+                read(17, &fixture.head, false, &body, PASSING, "BEHIND"),
+            )
+            .env("GH_FIXTURE_QUEUE", [queued, final_read].join("\n"))
+            .output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            output.status.success(),
+            outcome == "merged",
+            "{outcome}: {stdout} {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            stdout.contains(&format!("\"outcome\":\"{outcome}\"")),
+            "{stdout}"
+        );
+        let log = fixture.log()?;
+        assert_eq!(log.matches("\n--method\nPUT\n").count(), 1, "{log}");
+        assert!(
+            log.contains(&format!("\"sha\":\"{}\"", fixture.head)),
+            "{log}"
+        );
+        assert!(log.contains("\"merge_action\":\"merge_queue\""), "{log}");
+        assert!(mutations(&log).is_empty(), "{log}");
+    }
+    Ok(())
+}
+
+fn queue_read(pr: u64, head: &str, state: &str, queued: bool) -> String {
+    format!(
+        "{pr}={}",
+        serde_json::json!({"data":{"repository":{"pullRequest":{
+            "state":state,"headRefOid":head,"mergeQueueEntry":if queued {serde_json::json!({"id":"entry"})} else {serde_json::Value::Null}
+        }}}})
+    )
+}
+
+#[test]
+fn merge_polls_a_pending_async_request_and_refuses_an_unbound_request() -> Result<()> {
+    for bound in [true, false] {
+        let fixture = Fixture::new(BODY)?;
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let output = fixture.personal_command("merge")?
+            .args(["--pr", "17", "--interval", "0"])
+            .env("GH_FIXTURE_RULES", r#"[{"type":"merge_queue"}]"#)
+            .env("GH_FIXTURE_VIEWS", read(17, &fixture.head, false, &body, PASSING, "BLOCKED"))
+            .env("GH_FIXTURE_ASYNC", serde_json::json!({"status":"pending","details":{"message":"pending","uuid":"request-1","merge_action":"merge_queue","expected_head_sha":if bound {fixture.head.as_str()} else {"unverified"}}}).to_string())
+            .env("GH_FIXTURE_ASYNC_HEADERS", "HTTP/2.0 202 Accepted\nX-Ratelimit-Remaining: 4990\nX-Ratelimit-Reset: 1800000000\nX-Ratelimit-Resource: core")
+            .env("GH_FIXTURE_QUEUE", queue_read(17, &fixture.head, "MERGED", false)).output()?;
+        assert_eq!(
+            output.status.success(),
+            bound,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let log = fixture.log()?;
+        assert_eq!(log.matches("\n--method\nPUT\n").count(), 1);
+        assert_eq!(log.contains("/merge-async/request-1"), bound);
+    }
+    Ok(())
+}
+
+#[test]
 fn a_merge_stops_with_a_structured_refusal_and_merges_nothing() -> Result<()> {
     let closed = format!("{BODY}\nCloses #23.\n");
     let excluded = format!("{closed}\n@coderabbitai ignore\n");
@@ -4344,8 +5199,26 @@ fn create_among_open_prs(
     head: &str,
     open: &str,
 ) -> Result<Output> {
+    create_among_open_prs_command(fixture, checkout, head, open, "main")?
+        .args(["--base", "main"])
+        .output()
+        .map_err(Into::into)
+}
+
+fn create_among_open_prs_command(
+    fixture: &Fixture,
+    checkout: &std::path::Path,
+    head: &str,
+    open: &str,
+    assessment_base: &str,
+) -> Result<Command> {
     let mut command = fixture.personal_command("create")?;
-    let (packet, _) = fixture.assessment(checkout, "P4suta/project", "origin/main", head)?;
+    let (packet, _) = fixture.assessment(
+        checkout,
+        "P4suta/project",
+        &format!("origin/{assessment_base}"),
+        head,
+    )?;
     fs::write(
         &fixture.body,
         fixture.assessed_body(&fs::read_to_string(&fixture.body)?),
@@ -4355,7 +5228,7 @@ fn create_among_open_prs(
             command.env_remove(name);
         }
     }
-    Ok(command
+    command
         .current_dir(checkout)
         .env(
             "GIT_CONFIG_GLOBAL",
@@ -4370,7 +5243,10 @@ fn create_among_open_prs(
         .env("GH_FIXTURE_HEAD", git(checkout, &["rev-parse", head])?)
         .env(
             "GH_FIXTURE_BASE",
-            git(checkout, &["rev-parse", "origin/main"])?,
+            git(
+                checkout,
+                &["rev-parse", &format!("origin/{assessment_base}")],
+            )?,
         )
         .env("GH_FIXTURE_ASSESSMENT", serde_json::to_string(&packet)?)
         .env("GH_FIXTURE_LIST", open)
@@ -4382,8 +5258,137 @@ fn create_among_open_prs(
             "--body-file",
         ])
         .arg(&fixture.body)
-        .args(["--head", head, "--base", "main"])
-        .output()?)
+        .args(["--head", head]);
+    Ok(command)
+}
+
+fn dependency_fixture() -> Result<(Fixture, PathBuf)> {
+    let fixture = Fixture::new(&format!("{BODY}\nCloses #23.\n"))?;
+    let checkout = branches(fixture.directory.path())?;
+    git(
+        &checkout,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/P4suta/project.git",
+        ],
+    )?;
+    Ok((fixture, checkout))
+}
+
+#[test]
+fn dependency_check_skips_conflicting_bot_release_prs_and_reports_why() -> Result<()> {
+    for author in [
+        serde_json::json!({"login":"app/p4suta-release-plz"}),
+        serde_json::json!({"login":"release-plz[bot]"}),
+        serde_json::json!({"login":"release-plz", "type":"Bot"}),
+        serde_json::json!({"login":"release-plz", "is_bot":true}),
+    ] {
+        let (fixture, checkout) = dependency_fixture()?;
+        let open = serde_json::json!([{
+            "number":5, "title":"Release", "headRefName":"a", "baseRefName":"main",
+            "author":author, "mergeable":"MERGEABLE"
+        }]);
+        let output = create_among_open_prs(&fixture, &checkout, "solo", &open.to_string())?;
+        assert!(
+            output.status.success(),
+            "{author}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("skipped #5 (a): bot author"));
+        let log = fixture.log()?;
+        assert!(log.contains("\ncreate\n"));
+        assert!(log.contains("number,headRefName,baseRefName,isCrossRepository,author,mergeable"));
+    }
+    Ok(())
+}
+
+#[test]
+fn dependency_check_skips_conflicting_stale_prs_and_reports_why() -> Result<()> {
+    let (fixture, checkout) = dependency_fixture()?;
+    let open = r#"[{"number":5,"headRefName":"a","baseRefName":"main","author":{"login":"contributor"},"mergeable":"CONFLICTING"}]"#;
+    let output = create_among_open_prs(&fixture, &checkout, "solo", open)?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("skipped #5 (a): stale PR already conflicts with its base main")
+    );
+    assert!(fixture.log()?.contains("\ncreate\n"));
+    Ok(())
+}
+
+#[test]
+fn dependency_check_refuses_conflicting_ordinary_prs() -> Result<()> {
+    for mergeable in ["MERGEABLE", "UNKNOWN"] {
+        let (fixture, checkout) = dependency_fixture()?;
+        let open = serde_json::json!([{
+            "number":5, "headRefName":"a", "baseRefName":"main",
+            "author":{"login":"contributor", "type":"User", "is_bot":false},
+            "mergeable":mergeable
+        }]);
+        let output = create_among_open_prs(&fixture, &checkout, "solo", &open.to_string())?;
+        let record = refusal(&output);
+        assert_eq!(record["rule"], "pr.dependency");
+        assert!(
+            record["cause"]
+                .as_str()
+                .unwrap()
+                .contains("conflicts with #5")
+        );
+        assert!(
+            record["next"]
+                .as_str()
+                .unwrap()
+                .ends_with("--head solo --base a")
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("skipped"));
+        assert!(!fixture.log()?.contains("\ncreate\n"));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_stack_member_keeps_dependency_checks_for_prs_outside_its_parent_chain() -> Result<()> {
+    let (fixture, checkout) = dependency_fixture()?;
+    let scope = fixture.directory.path();
+    scoped_git(
+        &checkout,
+        scope,
+        &["checkout", "-q", "-B", "external", "main"],
+    );
+    fs::write(checkout.join("feature.txt"), "external change\n")?;
+    scoped_git(&checkout, scope, &["add", "feature.txt"]);
+    scoped_git(&checkout, scope, &["commit", "-q", "-m", "external"]);
+    scoped_git(
+        &checkout,
+        scope,
+        &["push", "-q", "../remote.git", "external"],
+    );
+    scoped_git(&checkout, scope, &["checkout", "-q", "feature"]);
+    let parent = git(&checkout, &["rev-parse", "a"])?;
+    let other = git(&checkout, &["rev-parse", "external"])?;
+    let mut foreign = owned_work(5, "external", "main", &other, "P4suta/project");
+    foreign["user"]["login"] = serde_json::json!("contributor");
+    let pulls = serde_json::json!([
+        owned_work(4, "a", "main", &parent, "P4suta/project"),
+        foreign
+    ]);
+    let open = serde_json::json!([
+        {"number":4,"headRefName":"a","baseRefName":"main","author":{"login":"P4suta"},"mergeable":"MERGEABLE"},
+        {"number":5,"headRefName":"external","baseRefName":"main","author":{"login":"contributor"},"mergeable":"MERGEABLE"}
+    ]);
+    let output =
+        create_among_open_prs_command(&fixture, &checkout, "feature", &open.to_string(), "a")?
+            .env("GH_FIXTURE_PULLS", pulls.to_string())
+            .output()?;
+    assert_eq!(refusal(&output)["rule"], "pr.dependency");
+    assert!(!fixture.log()?.contains("\ncreate\n"));
+    Ok(())
 }
 
 #[test]
@@ -4473,12 +5478,329 @@ fn overlapping_prs_require_a_clean_merge_without_changing_the_checkout() -> Resu
 }
 
 #[test]
-fn create_has_no_independence_override() -> Result<()> {
+fn an_independent_creation_keeps_its_reason_in_owner_local_state() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let reason = "Urgent correction unrelated to the open stack";
+    let output = fixture
+        .command("create")?
+        .args(["--title", "fix: preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .args(["--head", "feature", "--independent", reason])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let local = fixture
+        .directory
+        .path()
+        .join(".local/state/pr-workflow/independent/owner__project");
+    let records = fs::read_dir(local)?
+        .map(|entry| fs::read_to_string(entry?.path()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    assert!(records.iter().any(|record| record.contains(reason)));
+    let log = fixture.log()?;
+    assert!(log.contains("\ncreate\n"));
+    assert!(
+        !log.contains(reason),
+        "the local reason reached GitHub: {log}"
+    );
+    Ok(())
+}
+
+#[test]
+fn existing_pr_start_preserves_unrelated_work_units() -> Result<()> {
+    for login in ["P4suta", "renovate[bot]"] {
+        let fixture = Fixture::new(BODY)?;
+        let mut pulls: Vec<_> = (1..=4)
+            .map(|number| {
+                owned_work(
+                    number,
+                    &format!("work-{number}"),
+                    "main",
+                    &fixture.base,
+                    "owner/project",
+                )
+            })
+            .collect();
+        let mut current = owned_work(10, "feature", "main", &fixture.head, "owner/project");
+        current["user"]["login"] = login.into();
+        pulls.push(current);
+        let index = fs::read(fixture.directory.path().join(".git/index"))?;
+        let output = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", serde_json::to_string(&pulls)?)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{login}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read(fixture.directory.path().join(".git/index"))?,
+            index
+        );
+        assert_eq!(
+            git(fixture.directory.path(), &["rev-parse", "HEAD"])?,
+            fixture.head
+        );
+        let creation = fixture
+            .command("create")?
+            .args(["--title", "fix: preserve edits", "--body-file"])
+            .arg(&fixture.body)
+            .args(["--head", "feature"])
+            .env("GH_FIXTURE_PULLS", serde_json::to_string(&pulls)?)
+            .output()?;
+        assert_eq!(refusal(&creation)["rule"], "pr.work-units");
+        assert!(!fixture.log()?.contains("\ncreate\n"));
+        let declaration = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", serde_json::to_string(&pulls)?)
+            .args(["--independent", "Declare independent work"])
+            .output()?;
+        assert_eq!(refusal(&declaration)["rule"], "pr.work-units");
+    }
+    Ok(())
+}
+
+#[test]
+fn existing_pr_start_rejects_foreign_and_invalid_subjects() -> Result<()> {
+    #[derive(Clone, Copy, Debug)]
+    enum Fault {
+        RepositoryId,
+        RepositoryName,
+        Unavailable,
+        Commit,
+        Destination,
+        Missing,
+        Duplicate,
+    }
+    for fault in [
+        Fault::RepositoryId,
+        Fault::RepositoryName,
+        Fault::Unavailable,
+        Fault::Commit,
+        Fault::Destination,
+        Fault::Missing,
+        Fault::Duplicate,
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let mut pulls: Vec<_> = (1..=4)
+            .map(|number| {
+                owned_work(
+                    number,
+                    &format!("work-{number}"),
+                    "main",
+                    &fixture.base,
+                    "owner/project",
+                )
+            })
+            .collect();
+        let mut current = owned_work(10, "feature", "main", &fixture.head, "owner/project");
+        current["user"]["login"] = "renovate[bot]".into();
+        match fault {
+            Fault::RepositoryId => current["head"]["repo"]["id"] = 38.into(),
+            Fault::RepositoryName => current["head"]["repo"]["full_name"] = "other/project".into(),
+            Fault::Unavailable => current["head"]["repo"] = serde_json::Value::Null,
+            Fault::Commit => current["head"]["sha"] = "incomplete".into(),
+            Fault::Destination => {
+                current["html_url"] = "https://github.com/other/project/pull/10".into();
+            }
+            Fault::Missing => current["head"]["ref"] = "other".into(),
+            Fault::Duplicate => {
+                let mut duplicate = current.clone();
+                duplicate["number"] = 11.into();
+                duplicate["html_url"] = "https://github.com/owner/project/pull/11".into();
+                pulls.push(duplicate);
+            }
+        }
+        pulls.push(current);
+        let output = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", serde_json::to_string(&pulls)?)
+            .output()?;
+        assert!(
+            !output.status.success(),
+            "{fault:?}: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert!(!fixture.log()?.contains("\ncreate\n"));
+    }
+    Ok(())
+}
+
+#[test]
+fn start_requires_the_open_stack_tip_or_an_independent_declaration() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    git(
+        fixture.directory.path(),
+        &[
+            "switch",
+            "--quiet",
+            "--create",
+            "divergent-parent",
+            &fixture.base,
+        ],
+    )?;
+    fs::write(
+        fixture.directory.path().join("parent.txt"),
+        "Parent change.\n",
+    )?;
+    git(fixture.directory.path(), &["add", "parent.txt"])?;
+    git(
+        fixture.directory.path(),
+        &["commit", "--quiet", "-m", "parent"],
+    )?;
+    let parent = git(fixture.directory.path(), &["rev-parse", "HEAD"])?;
+    git(fixture.directory.path(), &["switch", "--quiet", "feature"])?;
+    let pulls = serde_json::json!([owned_work(
+        4,
+        "divergent-parent",
+        "main",
+        &parent,
+        "owner/project"
+    )]);
+    let output = fixture
+        .command("start")?
+        .env("GH_FIXTURE_PULLS", pulls.to_string())
+        .output()?;
+    assert_eq!(refusal(&output)["rule"], "pr.stack-tip");
+    let independent = fixture
+        .command("start")?
+        .env("GH_FIXTURE_PULLS", pulls.to_string())
+        .args([
+            "--independent",
+            "Urgent correction unrelated to the divergent parent",
+        ])
+        .output()?;
+    assert!(
+        independent.status.success(),
+        "{}",
+        String::from_utf8_lossy(&independent.stderr)
+    );
+    Ok(())
+}
+
+#[test]
+fn an_independent_start_carries_its_reason_through_descendant_commits_into_creation() -> Result<()>
+{
+    let mut fixture = Fixture::new(BODY)?;
+    let reason = "Urgent correction outside the current stack";
+    let started = fixture
+        .command("start")?
+        .args(["--independent", reason])
+        .output()?;
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    fs::write(
+        fixture.directory.path().join("work.txt"),
+        "Independent change.\n",
+    )?;
+    git(fixture.directory.path(), &["add", "work.txt"])?;
+    git(
+        fixture.directory.path(),
+        &["commit", "--quiet", "-m", "work"],
+    )?;
+    fixture.head = git(fixture.directory.path(), &["rev-parse", "HEAD"])?;
+    let created = fixture
+        .command("create")?
+        .env("HOME", fixture.context_home.path())
+        .env("USERPROFILE", fixture.context_home.path())
+        .args(["--title", "fix: preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .args(["--head", "feature"])
+        .output()?;
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(!fixture.log()?.contains(reason));
+    let directory = fixture
+        .context_home
+        .path()
+        .join(".local/state/pr-workflow/independent/owner__project");
+    let records = fs::read_dir(directory)?
+        .map(|entry| {
+            Ok(serde_json::from_slice::<serde_json::Value>(&fs::read(
+                entry?.path(),
+            )?)?)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    assert!(
+        records
+            .iter()
+            .any(|record| record["reason"] == reason && record["pr"] == 17)
+    );
+    Ok(())
+}
+
+#[test]
+fn a_branch_move_after_ancestry_validation_cannot_authorize_another_head() -> Result<()> {
+    let mut fixture = Fixture::new(BODY)?;
+    git(
+        fixture.directory.path(),
+        &["switch", "--quiet", "--create", "parent", &fixture.base],
+    )?;
+    fs::write(
+        fixture.directory.path().join("parent.txt"),
+        "Parent change.\n",
+    )?;
+    git(fixture.directory.path(), &["add", "parent.txt"])?;
+    git(
+        fixture.directory.path(),
+        &["commit", "--quiet", "-m", "parent"],
+    )?;
+    let parent = git(fixture.directory.path(), &["rev-parse", "HEAD"])?;
+    git(fixture.directory.path(), &["switch", "--quiet", "feature"])?;
+    git(
+        fixture.directory.path(),
+        &["merge", "--quiet", "--no-edit", &parent],
+    )?;
+    fixture.head = git(fixture.directory.path(), &["rev-parse", "HEAD"])?;
+    let tree = git(fixture.directory.path(), &["rev-parse", "HEAD^{tree}"])?;
+    let alternate = git(
+        fixture.directory.path(),
+        &["commit-tree", &tree, "-p", &fixture.base, "-m", "alternate"],
+    )?;
+    let output = fixture
+        .command("start")?
+        .env(
+            "GH_FIXTURE_PULLS",
+            serde_json::json!([owned_work(4, "parent", "main", &parent, "owner/project")])
+                .to_string(),
+        )
+        .env("GH_FIXTURE_AFTER_ANCESTRY_HEAD", &alternate)
+        .output()?;
+    assert!(
+        !output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("work branch changed"));
+    assert_eq!(
+        git(fixture.directory.path(), &["rev-parse", "HEAD"])?,
+        alternate
+    );
+    assert_eq!(
+        git(fixture.directory.path(), &["status", "--porcelain"])?,
+        ""
+    );
+    Ok(())
+}
+
+#[test]
+fn an_independent_creation_requires_a_reason() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
     let output = fixture.command("create")?.arg("--independent").output()?;
     assert!(!output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("unexpected argument '--independent'")
+        String::from_utf8_lossy(&output.stderr)
+            .contains("a value is required for '--independent <REASON>'")
     );
     assert!(!fixture.log.exists());
     Ok(())
@@ -4605,10 +5927,30 @@ fn a_stacked_pr_is_created_on_its_parent_and_linked_down_to_the_trunk() -> Resul
     let fixture = Fixture::new(&closed)?;
     let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
     let list = r#"[{"number":4,"headRefName":"bottom","baseRefName":"main"},{"number":5,"headRefName":"parent","baseRefName":"bottom"}]"#;
+    let mut pulls = serde_json::json!([
+        owned_work(
+            4,
+            "bottom",
+            "main",
+            &git(&checkout, &["rev-parse", "origin/main"])?,
+            "P4suta/project"
+        ),
+        owned_work(
+            5,
+            "parent",
+            "bottom",
+            &git(&checkout, &["rev-parse", "parent"])?,
+            "P4suta/project"
+        )
+    ]);
+    for pull in pulls.as_array_mut().unwrap() {
+        pull["user"]["login"] = serde_json::json!("contributor");
+    }
     let create = |base: &str| -> Result<Output> {
         Ok(fixture
             .stack_command(&checkout, &lease, &["create"])?
             .env("GH_FIXTURE_LIST", list)
+            .env("GH_FIXTURE_PULLS", pulls.to_string())
             .args([
                 "--issue",
                 "23",
@@ -4765,6 +6107,154 @@ fn stack_sync_and_rebase_run_gh_stack_under_the_lease_and_release_it() -> Result
 }
 
 #[test]
+fn stack_resolves_the_owner_installation_and_refuses_an_unexpected_version() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+    fs::write(
+        checkout.join("mise.toml"),
+        "[tools]\n\"github:github/gh-stack\" = \"v0.0.1\"\n",
+    )?;
+    let output = fixture
+        .stack_command(&checkout, &lease, &["sync"])?
+        .env("GH_STACK_FIXTURE_VERSION", "0.0.1")
+        .output()?;
+    assert!(
+        !output.status.success(),
+        "a repository pin or PATH cannot choose gh-stack"
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("version"));
+    assert_eq!(fixture.stack_log(), "");
+    let output = fixture
+        .stack_command(&checkout, &lease, &["sync"])?
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+#[test]
+fn stack_merge_refuses_a_ready_member_without_its_own_open_issue_before_merging() -> Result<()> {
+    for issue in [None, Some(24)] {
+        let fixture = Fixture::new(BODY)?;
+        let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+        let parent = git(&checkout, &["rev-parse", "parent"])?;
+        let top = git(&checkout, &["rev-parse", "HEAD"])?;
+        let closed = format!("{BODY}\nCloses #23.\n\n@coderabbitai ignore\n");
+        let body = issue.map_or_else(
+            || format!("{BODY}\n@coderabbitai ignore\n"),
+            |number| format!("{BODY}\nCloses #{number}.\n\n@coderabbitai ignore\n"),
+        );
+        let mut member: serde_json::Value = serde_json::from_str(
+            read(17, &top, false, &body, PASSING, "CLEAN")
+                .split_once('=')
+                .unwrap()
+                .1,
+        )?;
+        member["closingIssuesReferences"] = serde_json::json!(
+            issue
+                .map(|number| serde_json::json!({"number":number}))
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
+        let mut merged = member.clone();
+        merged["state"] = serde_json::json!("MERGED");
+        merged["mergeStateStatus"] = serde_json::json!("MERGED");
+        let views = format!(
+            "{}\n{}\n{}\n17={member}\n17={member}\n17={merged}",
+            read(5, &parent, false, &closed, PASSING, "CLEAN"),
+            read(5, &parent, false, &closed, PASSING, "CLEAN"),
+            read(5, &parent, false, &closed, PASSING, "MERGED")
+        );
+        let issues = [
+            (23, "open"),
+            (24, "closed"),
+        ].map(|(number, state)| format!("repos/P4suta/project/issues/{number}={}", serde_json::json!({"number":number,"title":"Preserve edits","body":"Keep the input.","state":state,"html_url":format!("https://github.com/P4suta/project/issues/{number}")}))).join("\n");
+        let output = fixture.stack_command(&checkout, &lease, &["merge", "--pr", "17", "--interval", "0"])?
+            .env("GH_FIXTURE_LIST", r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":17,"headRefName":"topic","baseRefName":"parent"}]"#)
+            .env("GH_FIXTURE_VIEWS", views)
+            .env("GH_FIXTURE_ISSUES", issues)
+            .env("GH_FIXTURE_ASYNC", r#"{"status":"merged","details":{"message":"merged"}}"#)
+            .output()?;
+        assert!(
+            !output.status.success(),
+            "a member without an open issue must refuse"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("stack member #17"), "{stderr}");
+        assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());
+        assert!(!fixture.log()?.contains("/merge-async"));
+    }
+    Ok(())
+}
+
+#[test]
+fn stack_merge_checks_three_members_own_issues_or_the_explicit_common_issue() -> Result<()> {
+    for common in [false, true] {
+        let fixture = Fixture::new(BODY)?;
+        let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+        let trunk = git(&checkout, &["rev-parse", "origin/main"])?;
+        let parent = git(&checkout, &["rev-parse", "parent"])?;
+        let middle = git(&checkout, &["rev-parse", "prior-topic"])?;
+        let top = git(&checkout, &["rev-parse", "HEAD"])?;
+        let mut views = Vec::new();
+        for (pr, head, base, issue) in [
+            (5, &parent, "main", 23),
+            (11, &middle, "parent", 24),
+            (17, &top, "prior-topic", 25),
+        ] {
+            let mut body = format!("{BODY}\nCloses #{issue}.\n\n@coderabbitai ignore\n");
+            if common && issue != 23 {
+                body.push_str("\nCloses #23.\n");
+            }
+            for state in ["CLEAN", "CLEAN", "MERGED"] {
+                let response = read(pr, head, false, &body, PASSING, state);
+                let mut document: serde_json::Value =
+                    serde_json::from_str(response.split_once('=').unwrap().1)?;
+                document["baseRefName"] = serde_json::json!(base);
+                document["closingIssuesReferences"] = serde_json::json!([{"number":issue}]);
+                views.push(format!("{pr}={document}"));
+            }
+        }
+        let issues = [23, 24, 25].map(|number| format!("repos/P4suta/project/issues/{number}={}", serde_json::json!({"number":number,"title":"Preserve edits","body":"Keep the input.","state":"open","html_url":format!("https://github.com/P4suta/project/issues/{number}")}))).join("\n");
+        let mut command = fixture.stack_command(
+            &checkout,
+            &lease,
+            &["merge", "--pr", "17", "--interval", "0"],
+        )?;
+        command.env("GH_FIXTURE_LIST", r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":11,"headRefName":"prior-topic","baseRefName":"parent"},{"number":17,"headRefName":"topic","baseRefName":"prior-topic"}]"#)
+            .env("GH_FIXTURE_VIEWS", views.join("\n"))
+            .env("GH_FIXTURE_ISSUES", issues)
+            .env("GH_FIXTURE_ASYNC", r#"{"status":"merged","details":{"message":"merged"}}"#)
+            .env("GH_FIXTURE_BASES", format!("{parent}={trunk}\n{middle}={parent}\n{top}={middle}"))
+            .env("GH_FIXTURE_ASSESSMENTS", fixture.assessment_records(&checkout, "P4suta/project", &[("parent", "origin/main"), ("prior-topic", "origin/parent"), ("HEAD", "prior-topic")])?);
+        if common {
+            command.args(["--issue", "23"]);
+        }
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let log = fixture.log()?;
+        for number in [23, 24, 25] {
+            assert_eq!(
+                log.contains(&format!("\nrepos/P4suta/project/issues/{number}\n")),
+                !common || number == 23
+            );
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for number in [5, 11, 17] {
+            assert!(stdout.contains(&format!("#{number} merged")), "{stdout}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<()> {
     let closed = format!("{BODY}\nCloses #23.\n");
     let excluded = format!("{closed}\n@coderabbitai ignore\n");
@@ -4791,6 +6281,7 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
         )
         .env("GH_FIXTURE_VIEWS", views)
         .env("GH_FIXTURE_BEHIND", &stale)
+        .env("GH_FIXTURE_ASYNC", r#"{"status":"merged","details":{"message":"merged"}}"#)
         .output()?;
     assert!(
         output.status.success(),
@@ -4800,8 +6291,7 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
     assert_eq!(
         fixture.stack_log(),
         "gh-stack checkout topic repo=P4suta/project leased=true notifier=1\n\
-         gh-stack sync repo=P4suta/project leased=true notifier=1\n\
-         gh-stack merge 17 --yes --squash repo=P4suta/project leased=false notifier=1\n"
+         gh-stack sync repo=P4suta/project leased=true notifier=1\n"
     );
     assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -4810,6 +6300,85 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
             && stdout.contains(&format!("#17 merged at {top}")),
         "{stdout}"
     );
+    Ok(())
+}
+
+#[test]
+fn stack_merge_queue_tracks_every_member_until_the_whole_stack_finishes() -> Result<()> {
+    for result in ["merged", "ejected", "head_changed", "timed_out"] {
+        let fixture = Fixture::new(BODY)?;
+        let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+        let parent = git(&checkout, &["rev-parse", "parent"])?;
+        let top = git(&checkout, &["rev-parse", "HEAD"])?;
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let parent_final = match result {
+            "ejected" => queue_read(5, &parent, "OPEN", false),
+            "head_changed" => queue_read(5, &top, "OPEN", true),
+            "timed_out" => queue_read(5, &parent, "OPEN", true),
+            _ => queue_read(5, &parent, "MERGED", false),
+        };
+        let output = fixture.stack_command(&checkout, &lease, &["merge", "--pr", "17", "--interval", "0", "--timeout", if result == "timed_out" {"0"} else {"1"}])?
+            .env("GH_FIXTURE_RULES", r#"[{"type":"merge_queue"}]"#)
+            .env("GH_FIXTURE_LIST", r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":17,"headRefName":"topic","baseRefName":"parent"}]"#)
+            .env("GH_FIXTURE_VIEWS", [read(5, &parent, false, &body, PASSING, "BLOCKED"), read(17, &top, false, &body, PASSING, "BLOCKED")].join("\n"))
+            .env("GH_FIXTURE_QUEUE", [queue_read(5, &parent, "OPEN", true), parent_final, queue_read(17, &top, "OPEN", true), queue_read(17, &top, "MERGED", false)].join("\n"))
+            .output()?;
+        assert_eq!(
+            output.status.success(),
+            result == "merged",
+            "{result}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains(&format!("\"outcome\":\"{result}\"")),
+            "{stdout}"
+        );
+        let log = fixture.log()?;
+        assert!(log.contains(&format!("\"sha\":\"{top}\"")), "{log}");
+        assert_eq!(log.matches("\n--method\nPUT\n").count(), 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn stack_restack_carries_an_unchanged_diff_and_waits_for_the_updated_checks() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+    let mut command = fixture.stack_command(
+        &checkout,
+        &lease,
+        &["merge", "--pr", "17", "--interval", "0"],
+    )?;
+    let parent = git(&checkout, &["rev-parse", "parent"])?;
+    let old = git(&checkout, &["rev-parse", "HEAD"])?;
+    let tree = git(&checkout, &["rev-parse", "HEAD^{tree}"])?;
+    let new = git(
+        &checkout,
+        &["commit-tree", &tree, "-p", &parent, "-m", "restacked head"],
+    )?;
+    let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+    let output = command
+        .env("GH_FIXTURE_LIST", r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":17,"headRefName":"topic","baseRefName":"parent"}]"#)
+        .env("GH_FIXTURE_BEHIND", &old)
+        .env("GH_FIXTURE_ASYNC", r#"{"status":"merged","details":{"message":"merged"}}"#)
+        .env("GH_FIXTURE_VIEWS", [
+            read(5, &parent, false, &body, PASSING, "BLOCKED"),
+            read(5, &parent, false, &body, PASSING, "BLOCKED"),
+            read(5, &parent, false, &body, PASSING, "BLOCKED"),
+            read(5, &parent, false, &body, PASSING, "MERGED"),
+            read(17, &old, false, &body, PASSING, "BLOCKED"),
+            read(17, &new, false, &body, r#"[{"status":"IN_PROGRESS","conclusion":null}]"#, "BLOCKED"),
+            read(17, &new, false, &body, PASSING, "BLOCKED"),
+            read(17, &new, false, &body, PASSING, "MERGED"),
+        ].join("\n")).output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(fixture.stack_log().matches("gh-stack sync ").count(), 1);
+    assert!(fixture.log()?.contains(&format!("\"sha\":\"{new}\"")));
     Ok(())
 }
 

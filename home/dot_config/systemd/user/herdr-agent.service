@@ -1,0 +1,12 @@
+[Unit]
+Description=Herdr SSH agent independent of terminal sessions
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/herdr-agent serve
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+
+[Install]
+WantedBy=default.target

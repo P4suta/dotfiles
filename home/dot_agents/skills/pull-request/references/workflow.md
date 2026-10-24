@@ -16,7 +16,7 @@ pr-workflow start --repo P4suta/project --issue 23
 pr-workflow start --repo upstream/project
 ```
 
-`start` only reads and never opens an issue.
+`start` reads GitHub and records checked preparation in owner-local state without opening an issue.
 `issue check`, `create`, and `edit` refuse an empty or unfinished document, and for a personal non-fork destination a title or body that fails the prose checker.
 
 ```console
@@ -64,9 +64,48 @@ Every generation mode starts as a draft before any review request.
 `edit` replaces title and body together and leaves draft state unchanged.
 Local-file `check` never contacts GitHub and leaves the live issue prerequisite unmet, and `check --pr` only reads.
 
+## Existing PR issue references
+
+The authenticated numeric destination repository owner can add an open issue reference to an existing PR, including a contributor's fork PR.
+
+```console
+pr-workflow link-issue --repo OWNER/REPO --pr 17 --issue 23
+```
+
+The command checks the exact open issue, PR, source network, head, and base.
+It keeps the current title and body prefix, draft state, creator, labels, review requests, assessment markers, and CodeRabbit directives.
+A matching reference leaves the document unchanged.
+The command adds only one closing-reference paragraph through a body-only update.
+It rechecks state before writing and requires a matching acknowledgement and fresh readback.
+An uncertain write stops without retrying and names the PR to inspect.
+The write has no atomic comparison condition, so concurrent edits between the final read and the write remain an external assumption.
+Source approval, assessments, review completion, readiness, and merging continue through their existing gates.
+
 ## Stacks and merging
 
-The repository pins `gh-stack` through mise.
+The work-in-progress limit counts one open stack as one unit and each independent PR as one unit, with a default of three units.
+Normal `start` requires new work to include the person's current open stack tip.
+Normal `create` selects that tip as its base and links the new member into the stack.
+Existing stack members can receive fixes in place, and adding a member never consumes another unit.
+The inventory permits one owned stack and refuses branching stacks, cycles, and incomplete identities.
+
+Declare an unrelated unit with either command:
+
+```console
+pr-workflow start --repo OWNER/REPO --issue 23 --path src --independent "Urgent correction unrelated to the open stack"
+pr-workflow create --repo OWNER/REPO --issue 23 --head feature --title "fix: preserve edits" --body-file body.md --independent "Urgent correction unrelated to the open stack"
+```
+
+The reason stays in owner-local state and never enters the published document.
+A declaration from `start` carries into `create` for the same repository identities, login, branch, issue, and descendant history.
+`create` binds the declaration to the created PR number.
+Reusing a merged branch name doesn't reuse its old declaration.
+On another machine, declare an existing owned independent PR with `start --independent` from its branch before opening more work.
+Every listed independent unit names its recorded reason, and a new unit at the cap refuses with the current inventory.
+The flag keeps the issue, signing, review, dependency, and check requirements.
+
+The owner's shared mise tools pin `gh-stack` on every profile.
+pr-workflow resolves that installation outside the target repository and verifies its version.
 The stack commands run it in a checkout whose `origin` matches the target.
 
 ```console
@@ -77,17 +116,26 @@ pr-workflow stack merge --repo OWNER/REPO --pr 18
 pr-workflow merge --repo OWNER/REPO --pr 17 --pr 19
 ```
 
-`create` refuses a head that shares commits with another open PR and names `stack create` on that PR.
+`create` checks dependencies on every PR outside the selected parent chain, including when appending a stack member.
+It skips PRs opened by bots identified by an `app/` login prefix, a `[bot]` login suffix, or the `Bot` account type.
+It also skips stale PRs whose `mergeable` state is `CONFLICTING` with their own base.
+Every skipped PR appears in the output with its reason.
+For every remaining PR, `create` refuses a head that shares commits with it.
+The refusal names `stack create` on that PR, or requires resolution before extending an existing stack.
 When paths overlap, it runs `git merge-tree --write-tree` on the two heads using their merge base without changing the worktree or index.
-A clean merge permits an independent PR.
-A conflict refuses creation and names the conflicting PR and `stack create`.
+A clean merge permits creation.
+A conflict refuses creation and names the conflicting PR and the required next step.
 Git execution failures stop creation, and no flag overrides a conflict.
 `stack create` opens a draft on the parent's open PR and links the chain down to the trunk.
 `stack sync` and `stack rebase` hold the repository's stack lease, the only way dotguard admits a rebase or leased force push of a published branch besides an `ALLOW_FORCE` waiver.
 `merge` takes independent PRs in order.
-It updates a behind head by merge and waits for every head check.
+It fetches the head and base before checking evidence, updates a behind head by merge, and waits for every head check.
 It enforces the assessed review route, marks a draft ready, and merges the verified head with `--match-head-commit`.
 `stack merge` restacks instead of updating and merges the stack up to the PR together.
+When the trunk's active rulesets require a merge queue, both merge commands enqueue the verified heads and wait for every member to merge.
+Queue admission alone grants no merge completion.
+The structured result reports `merged`, `ejected`, `timed_out`, `head_changed`, or `closed`, and a stopped queue entry is never resubmitted automatically.
+The head bound to the merge request must match the verified head.
 Both stop with a structured refusal on a failed check, conflict, timeout, or missing evidence for the assessed CodeRabbit route.
 
 ## Importance assessment
@@ -108,7 +156,8 @@ Fork contributions also bind the verified source and destination repository iden
 Use the source owner's qualified head when publishing to an upstream repository.
 Preparation can assess local commits before their authorized push, while publication verifies the actual published source branch.
 It contains no private CLI output.
-Changing any part of that binding requires a new assessment.
+A base update or restack that preserves the exact diff and source identity carries the authenticated assessment to the new binding, signed again by the same trusted identity.
+Any changed diff still requires a fresh assessment.
 
 An ordinary bounded behavior change can use this input shape:
 
