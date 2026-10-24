@@ -54,6 +54,38 @@ pub enum EscapeStep {
     Opaque,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum RestRead {
+    Empty,
+    Method,
+    Endpoint,
+    Complete,
+    Refused,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum RestArgument {
+    GetMethod,
+    Endpoint,
+    Output,
+    Other,
+}
+
+#[must_use]
+pub const fn rest_read(state: RestRead, argument: RestArgument) -> RestRead {
+    match (state, argument) {
+        (RestRead::Refused, _) | (_, RestArgument::Other) => RestRead::Refused,
+        (state, RestArgument::Output) => state,
+        (RestRead::Empty, RestArgument::GetMethod) => RestRead::Method,
+        (RestRead::Empty, RestArgument::Endpoint) => RestRead::Endpoint,
+        (RestRead::Method, RestArgument::Endpoint)
+        | (RestRead::Endpoint, RestArgument::GetMethod) => RestRead::Complete,
+        _ => RestRead::Refused,
+    }
+}
+
 /// Classifies one character in a static Bash argument.
 #[must_use]
 pub const fn word_step(quote: Quote, character: char) -> WordStep {
@@ -127,6 +159,36 @@ pub const fn next_action(reason: Reason) -> &'static str {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_rest_read(state: RestRead, argument: RestArgument) {
+        let next = rest_read(state, argument);
+        assert_eq!(
+            next == RestRead::Complete,
+            matches!(
+                (state, argument),
+                (RestRead::Method, RestArgument::Endpoint)
+                    | (RestRead::Endpoint, RestArgument::GetMethod)
+                    | (RestRead::Complete, RestArgument::Output)
+            )
+        );
+        if state == RestRead::Refused || argument == RestArgument::Other {
+            assert_eq!(next, RestRead::Refused);
+        }
+        if argument == RestArgument::Output {
+            assert_eq!(next, state);
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(1)]
+    fn rest_reads_require_one_get_method_and_one_endpoint() {
+        let state: RestRead = kani::any();
+        let argument: RestArgument = kani::any();
+        spec_rest_read(state, argument);
+        kani::cover!(rest_read(state, argument) == RestRead::Complete);
+        kani::cover!(rest_read(state, argument) == RestRead::Refused);
+    }
 
     pub fn spec_word_step(quote: Quote, character: char) {
         let step = word_step(quote, character);
@@ -308,6 +370,26 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_rest_read_transition_meets_its_contract() {
+        for state in [
+            RestRead::Empty,
+            RestRead::Method,
+            RestRead::Endpoint,
+            RestRead::Complete,
+            RestRead::Refused,
+        ] {
+            for argument in [
+                RestArgument::GetMethod,
+                RestArgument::Endpoint,
+                RestArgument::Output,
+                RestArgument::Other,
+            ] {
+                proofs::spec_rest_read(state, argument);
+            }
+        }
+    }
 
     #[test]
     fn static_quote_steps_cover_ascii_and_unicode_boundaries() {

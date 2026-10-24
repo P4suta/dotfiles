@@ -738,6 +738,16 @@ source = "crates/rules/src/body_rules.rs"
 probes = '''
 #[kani::proof]
 #[kani::unwind(1)]
+fn reject_reading_without_an_endpoint() {
+    assert_eq!(production::rest_read(production::RestRead::Empty, production::RestArgument::GetMethod), production::RestRead::Complete);
+}
+#[kani::proof]
+#[kani::unwind(1)]
+fn reject_fields_after_a_complete_read() {
+    assert_eq!(production::rest_read(production::RestRead::Complete, production::RestArgument::Other), production::RestRead::Complete);
+}
+#[kani::proof]
+#[kani::unwind(1)]
 fn reject_expanding_a_single_quoted_dollar() {
     assert_eq!(production::word_step(production::Quote::Single, '$'), production::WordStep::Opaque);
 }
