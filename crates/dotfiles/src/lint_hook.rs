@@ -132,6 +132,28 @@ pub(crate) fn shell_syntax_tree(input: &str) -> Result<String> {
     Ok(completed.stdout)
 }
 
+pub(crate) fn powershell_syntax_tree(input: &str, projection: &str) -> Result<String> {
+    check_shell_syntax_source(input)?;
+    let completed = bounded(
+        Tool::Pwsh.command().args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            projection,
+        ]),
+        Some(input),
+    )?;
+    ensure!(
+        completed.outcome == Outcome::Clean,
+        "the pinned PowerShell parser could not finish: {:?}: {}",
+        completed.outcome,
+        completed.stderr
+    );
+    check_shell_syntax_output(&completed.stdout)?;
+    Ok(completed.stdout)
+}
+
 fn tool(linter: Linter) -> Tool {
     match linter {
         Linter::Shellcheck => Tool::Shellcheck,
