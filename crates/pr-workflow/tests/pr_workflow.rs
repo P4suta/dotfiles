@@ -1215,6 +1215,507 @@ fn a_new_local_project_prepares_unborn_scoped_work_without_github() -> Result<()
 }
 
 #[test]
+fn an_initial_local_import_previews_existing_artifacts_without_granting_authority() -> Result<()> {
+    let project = tempfile::tempdir()?;
+    let home = tempfile::tempdir()?;
+    let root = project.path();
+    fs::write(root.join("main.rs"), "fn main() {}\n")?;
+    assert!(
+        local_command(root, home.path(), &["init"])?
+            .output()?
+            .status
+            .success()
+    );
+    let body = home.path().join("issue.md");
+    fs::write(
+        &body,
+        "Preserve the existing source during its initial import.\n",
+    )?;
+    assert!(
+        local_command(
+            root,
+            home.path(),
+            &[
+                "create",
+                "--title",
+                "Preserve initial source",
+                "--body-file"
+            ]
+        )?
+        .arg(body)
+        .output()?
+        .status
+        .success()
+    );
+    git(root, &["add", "main.rs"])?;
+    let late = local_command(
+        root,
+        home.path(),
+        &["select", "--issue", "1", "--path", "main.rs"],
+    )?
+    .output()?;
+    assert!(!late.status.success());
+    assert!(String::from_utf8_lossy(&late.stderr).contains("late local selection"));
+    let preview = local_command(
+        root,
+        home.path(),
+        &["import-preview", "--issue", "1", "--path", "main.rs"],
+    )?
+    .output()?;
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&preview.stdout)?;
+    assert_eq!(plan["paths"], serde_json::json!(["main.rs"]));
+    assert_eq!(plan["tree"], git(root, &["write-tree"])?);
+    assert_eq!(
+        plan["snapshot"].as_str().context("snapshot digest")?.len(),
+        64
+    );
+    assert!(
+        platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home.path()).is_err()
+    );
+    assert_eq!(
+        platform::local_issues::source(root)?,
+        platform::local_issues::Source::Unborn
+    );
+    assert!(!home.path().join("offline-gh.log").exists());
+    Ok(())
+}
+
+struct InitialImportFixture {
+    project: tempfile::TempDir,
+    home: tempfile::TempDir,
+}
+
+impl InitialImportFixture {
+    fn new() -> Result<Self> {
+        let fixture = Self {
+            project: tempfile::tempdir()?,
+            home: tempfile::tempdir()?,
+        };
+        let root = fixture.project.path();
+        fs::write(root.join("main.rs"), "fn main() {}\n")?;
+        assert!(fixture.command(&["init"])?.output()?.status.success());
+        let body = fixture.home.path().join("issue.md");
+        fs::write(
+            &body,
+            "Preserve the imported source and permit future scoped repairs.\n",
+        )?;
+        let created = fixture
+            .command(&[
+                "create",
+                "--title",
+                "Preserve initial source",
+                "--body-file",
+            ])?
+            .arg(body)
+            .output()?;
+        assert!(
+            created.status.success(),
+            "{}",
+            String::from_utf8_lossy(&created.stderr)
+        );
+        git(root, &["add", "main.rs"])?;
+        Ok(fixture)
+    }
+
+    fn command(&self, arguments: &[&str]) -> Result<Command> {
+        local_command(self.project.path(), self.home.path(), arguments)
+    }
+
+    fn preview(&self) -> Result<serde_json::Value> {
+        let output = self
+            .command(&["import-preview", "--issue", "1", "--path", "main.rs"])?
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&output.stdout)?)
+    }
+
+    fn import(&self, snapshot: &str) -> Result<Output> {
+        self.command(&[
+            "import",
+            "--issue",
+            "1",
+            "--path",
+            "main.rs",
+            "--snapshot",
+            snapshot,
+        ])?
+        .output()
+        .map_err(Into::into)
+    }
+
+    fn signer(&self) -> Result<()> {
+        let root = self.project.path();
+        let key = self.home.path().join("signing-key");
+        let output = platform::tool::Tool::SshKeygen
+            .command()
+            .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+            .arg(&key)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "fixture signing key generation failed"
+        );
+        let signers = self.home.path().join("allowed-signers");
+        fs::write(
+            &signers,
+            format!(
+                "fixture@example.com {}",
+                fs::read_to_string(key.with_extension("pub"))?
+            ),
+        )?;
+        let config = self.home.path().join(".gitconfig");
+        git(
+            root,
+            &[
+                "config",
+                "--file",
+                config.to_str().context("fixture config path")?,
+                "gpg.ssh.allowedSignersFile",
+                signers.to_str().context("fixture signers path")?,
+            ],
+        )?;
+        for (name, value) in [
+            ("user.name", "Fixture"),
+            ("user.email", "fixture@example.com"),
+            ("gpg.format", "ssh"),
+            ("gpg.ssh.program", "ssh-keygen"),
+            ("user.signingkey", key.to_str().context("fixture key path")?),
+        ] {
+            git(root, &["config", "--local", name, value])?;
+        }
+        Ok(())
+    }
+
+    fn state(&self) -> Result<PathBuf> {
+        fs::read_dir(
+            self.home
+                .path()
+                .join(".local/state/pr-workflow/local-issues"),
+        )?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::io::Result<Vec<_>>>()?
+        .into_iter()
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .context("initial import state missing")
+    }
+}
+
+#[test]
+fn an_initial_local_import_attests_existing_artifacts_and_authorizes_only_future_scoped_work()
+-> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    let home = fixture.home.path();
+    fixture.signer()?;
+    let preview = fixture.preview()?;
+    let snapshot = preview["snapshot"].as_str().context("snapshot")?;
+    let imported = fixture.import(snapshot)?;
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert!(String::from_utf8_lossy(&imported.stdout).contains("no earlier issue chronology"));
+    assert_eq!(
+        platform::local_issues::source(root)?,
+        platform::local_issues::Source::Unborn
+    );
+    assert_eq!(git(root, &["for-each-ref"])?, "");
+    platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home)?;
+    assert!(
+        platform::issue_context::guard_for(root, &[PathBuf::from("outside.rs")], home).is_err()
+    );
+    let state_path = fixture.state()?;
+    let saved = fs::read(&state_path)?;
+    let state: serde_json::Value = serde_json::from_slice(&saved)?;
+    let baseline = &state["imports"][0]["baseline"];
+    assert_eq!(baseline["tree"], preview["tree"]);
+    assert_eq!(baseline["paths"], serde_json::json!(["main.rs"]));
+    fs::write(
+        root.join("main.rs"),
+        "fn main() { println!(\"repaired after import\"); }\n",
+    )?;
+    assert!(fixture.command(&["check"])?.output()?.status.success());
+    assert!(!fixture.import(snapshot)?.status.success());
+    git(root, &["add", "main.rs"])?;
+    git(
+        root,
+        &["commit", "--quiet", "-m", "fix: repair imported source"],
+    )?;
+    platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home)?;
+    let observed: serde_json::Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(&observed["imports"][0]["baseline"], baseline);
+    assert_eq!(observed["selections"][0]["source"]["kind"], "commit");
+    assert_ne!(git(root, &["rev-parse", "HEAD^{tree}"])?, preview["tree"]);
+    assert!(
+        fixture
+            .command(&["select", "--issue", "1", "--path", "future.rs"])?
+            .output()?
+            .status
+            .success()
+    );
+    let reselected: serde_json::Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(&reselected["imports"][0]["baseline"], baseline);
+    assert!(platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home).is_err());
+    platform::issue_context::guard_for(root, &[PathBuf::from("future.rs")], home)?;
+    assert!(
+        fixture
+            .command(&["status", "--issue", "1", "--state", "closed"])?
+            .output()?
+            .status
+            .success()
+    );
+    assert!(platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home).is_err());
+    assert!(!home.join("offline-gh.log").exists());
+    Ok(())
+}
+
+#[test]
+fn an_initial_local_import_refuses_changed_previews_extras_history_and_identity_changes()
+-> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    let first = fixture.preview()?;
+    let snapshot = first["snapshot"].as_str().context("snapshot")?;
+    let before = fs::read(fixture.state()?)?;
+    fs::write(root.join("main.rs"), "fn main() { }\n")?;
+    assert!(!fixture.import(snapshot)?.status.success());
+    git(root, &["add", "main.rs"])?;
+    assert!(!fixture.import(snapshot)?.status.success());
+    fs::write(root.join("extra.rs"), "extra\n")?;
+    assert!(fixture.preview().is_err());
+    git(root, &["add", "extra.rs"])?;
+    assert!(fixture.preview().is_err());
+    git(root, &["rm", "--cached", "extra.rs"])?;
+    fs::remove_file(root.join("extra.rs"))?;
+    let current = fixture.preview()?;
+    let current_snapshot = current["snapshot"].as_str().context("snapshot")?;
+    git(root, &["symbolic-ref", "HEAD", "refs/heads/other"])?;
+    assert!(!fixture.import(current_snapshot)?.status.success());
+    git(root, &["symbolic-ref", "HEAD", "refs/heads/main"])?;
+    git(
+        root,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/owner/project.git",
+        ],
+    )?;
+    assert!(!fixture.import(current_snapshot)?.status.success());
+    git(root, &["remote", "remove", "origin"])?;
+    assert_eq!(fs::read(fixture.state()?)?, before);
+    assert!(
+        fixture
+            .command(&["status", "--issue", "1", "--state", "closed"])?
+            .output()?
+            .status
+            .success()
+    );
+    assert!(!fixture.import(current_snapshot)?.status.success());
+    assert!(
+        fixture
+            .command(&["status", "--issue", "1", "--state", "open"])?
+            .output()?
+            .status
+            .success()
+    );
+    fixture.signer()?;
+    git(root, &["commit", "--quiet", "-m", "feat: existing history"])?;
+    assert!(fixture.preview().is_err());
+    assert!(!fixture.import(current_snapshot)?.status.success());
+    Ok(())
+}
+
+#[test]
+fn an_initial_local_import_refuses_project_controlled_signers() -> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    let preview = fixture.preview()?;
+    let snapshot = preview["snapshot"].as_str().context("snapshot")?;
+    let before = fs::read(fixture.state()?)?;
+    assert!(!fixture.import(snapshot)?.status.success());
+    assert_eq!(fs::read(fixture.state()?)?, before);
+    fixture.signer()?;
+    let attacker_key = fixture.home.path().join("attacker-signing-key");
+    let generated = platform::tool::Tool::SshKeygen
+        .command()
+        .args(["-q", "-t", "ed25519", "-N", "", "-f"])
+        .arg(&attacker_key)
+        .output()?;
+    assert!(generated.status.success());
+    let attacker_signers = fixture.home.path().join("attacker-signers");
+    fs::write(
+        &attacker_signers,
+        format!(
+            "fixture@example.com {}",
+            fs::read_to_string(attacker_key.with_extension("pub"))?
+        ),
+    )?;
+    git(
+        root,
+        &[
+            "config",
+            "--local",
+            "user.signingkey",
+            attacker_key.to_str().context("attacker key path")?,
+        ],
+    )?;
+    git(
+        root,
+        &[
+            "config",
+            "--local",
+            "gpg.ssh.allowedSignersFile",
+            attacker_signers.to_str().context("attacker signers path")?,
+        ],
+    )?;
+    assert!(!fixture.import(snapshot)?.status.success());
+    assert_eq!(fs::read(fixture.state()?)?, before);
+    git(
+        root,
+        &[
+            "config",
+            "--local",
+            "user.signingkey",
+            fixture
+                .home
+                .path()
+                .join("signing-key")
+                .to_str()
+                .context("owner key path")?,
+        ],
+    )?;
+    let imported = fixture.import(snapshot)?;
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], fixture.home.path())?;
+    Ok(())
+}
+
+#[test]
+fn an_initial_local_import_rejects_signed_baseline_tampering_and_global_key_revocation()
+-> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    fixture.signer()?;
+    let preview = fixture.preview()?;
+    let imported = fixture.import(preview["snapshot"].as_str().context("snapshot")?)?;
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    let state_path = fixture.state()?;
+    let saved = fs::read(&state_path)?;
+    let mut state: serde_json::Value = serde_json::from_slice(&saved)?;
+    state["imports"][0]["baseline"]["tree"] = serde_json::json!("a".repeat(40));
+    let mut forged = serde_json::to_vec(&state)?;
+    let record = state_path.with_extension("history").join(format!(
+        "{}.json",
+        platform::build_inputs::hex(&Sha256::digest(&forged))
+    ));
+    forged.push(b'\n');
+    fs::write(record, &forged)?;
+    fs::write(&state_path, &forged)?;
+    let error =
+        platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], fixture.home.path())
+            .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("signed initial import baseline differs"),
+        "{error:#}"
+    );
+    fs::write(&state_path, saved)?;
+    platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], fixture.home.path())?;
+    let untrusted = fixture.home.path().join("sibling-project-signers");
+    fs::write(
+        &untrusted,
+        fs::read(fixture.home.path().join("allowed-signers"))?,
+    )?;
+    git(
+        root,
+        &[
+            "config",
+            "--local",
+            "gpg.ssh.allowedSignersFile",
+            untrusted.to_str().context("signer path")?,
+        ],
+    )?;
+    platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], fixture.home.path())?;
+    fs::write(
+        fixture.home.path().join("allowed-signers"),
+        "untrusted@example.com ssh-ed25519 invalid\n",
+    )?;
+    assert!(
+        platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], fixture.home.path())
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn an_initial_local_import_refuses_an_alternate_or_hidden_index() -> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    let index = fixture.home.path().join("alternate-index");
+    fs::copy(root.join(".git/index"), &index)?;
+    let preview = fixture
+        .command(&["import-preview", "--issue", "1", "--path", "main.rs"])?
+        .env("GIT_INDEX_FILE", index)
+        .output()?;
+    assert!(!preview.status.success());
+    assert!(String::from_utf8_lossy(&preview.stderr).contains("alternate Git index"));
+    git(root, &["update-index", "--assume-unchanged", "main.rs"])?;
+    fs::write(root.join("main.rs"), "changed but hidden\n")?;
+    assert!(fixture.preview().is_err());
+    git(root, &["update-index", "--no-assume-unchanged", "main.rs"])?;
+    git(root, &["add", "main.rs"])?;
+    git(root, &["update-index", "--skip-worktree", "main.rs"])?;
+    assert!(fixture.preview().is_err());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn an_initial_local_import_refuses_paths_whose_normalization_changes_identity() -> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    fs::write(root.join("src\\outside.rs"), "outside\n")?;
+    git(root, &["add", "src\\outside.rs"])?;
+    let preview = fixture
+        .command(&[
+            "import-preview",
+            "--issue",
+            "1",
+            "--path",
+            "main.rs",
+            "--path",
+            "src",
+        ])?
+        .output()?;
+    assert!(!preview.status.success());
+    assert!(String::from_utf8_lossy(&preview.stderr).contains("changes identity"));
+    Ok(())
+}
+
+#[test]
 fn local_issues_keep_separate_scopes_and_refuse_closed_stale_or_late_work() -> Result<()> {
     let fixture = Fixture::new("Preserve local inputs.\n")?;
     let root = fixture.directory.path();

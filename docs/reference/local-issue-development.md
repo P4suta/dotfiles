@@ -18,6 +18,28 @@ Issue creation applies the normal issue document checks.
 Selection refuses existing dirty implementation outside open issue scopes registered before those edits.
 Local issues can register separate or overlapping scopes.
 
+An existing directory without a first commit uses an explicit initial import instead of normal selection.
+Prepare its local issue, stage the intended artifacts, and list every imported scope.
+
+```sh
+git add --all
+pr-workflow local import-preview --root . --issue 1 --path src --path Cargo.toml
+pr-workflow local import --root . --issue 1 --path src --path Cargo.toml --snapshot SHA256_FROM_PREVIEW
+```
+
+The preview prints the actual staged tree, paths, and a digest without granting edit authority.
+Import requires that exact digest, an unused local provider, an unborn branch without refs or remotes, an open issue, and no unstaged or nonignored untracked artifacts.
+Every imported artifact must fall within the explicit scopes.
+Alternate indexes and index flags that hide working changes refuse.
+The existing signing identity attests the baseline using trusted owner signers outside the project from the owner's global Git configuration.
+Project-local allowlists supply no trust.
+The evidence object has no parent and updates no branch or ref.
+
+The signed baseline records the existing artifacts and permits future scoped edits, including repairs before the first real commit.
+It doesn't claim the issue preceded those artifacts.
+Changed content, scopes, branch, issue state, or local state revision invalidate an earlier preview.
+Ordinary selection still refuses late adoption, and import refuses an existing source history or a prior selection.
+
 Supported mutation hooks require the selected open issue, actual project and branch, current source, and registered path.
 Read-only discovery and issue preparation remain available.
 Inspect an issue or close it explicitly.
@@ -37,7 +59,8 @@ A closed issue, changed branch, unrelated real source, unregistered edit, or alt
 Issue records and history remain in owner-local storage outside the project.
 Repository issue files can't grant edit authority.
 Local records rely on state that the owner controls.
-Their hashes identify records without signatures.
+Their hashes identify history records without signatures.
+An explicit initial import also retains a signed artifact baseline, which the provider verifies when it reads the active record.
 An unborn selection binds the actual named branch and Git directory.
 The first observed real commit becomes a persisted source binding under the local state lock.
 A selection with a real source binding requires its tree and ancestry.

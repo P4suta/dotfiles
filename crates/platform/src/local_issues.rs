@@ -44,6 +44,41 @@ struct Selection {
     scopes: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum BaselineKind {
+    InitialLocalImport,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct InitialBaseline {
+    kind: BaselineKind,
+    checkout: PathBuf,
+    common_git: PathBuf,
+    revision: u64,
+    branch: String,
+    issue: u64,
+    scopes: Vec<String>,
+    paths: Vec<String>,
+    tree: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Import {
+    baseline: InitialBaseline,
+    object: String,
+    signed_commit: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportPreview {
+    pub snapshot: String,
+    pub tree: String,
+    pub paths: Vec<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct RemoteLink {
@@ -64,6 +99,8 @@ struct Project {
     issues: BTreeMap<u64, Issue>,
     selections: Vec<Selection>,
     remote_links: Vec<RemoteLink>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    imports: Vec<Import>,
 }
 
 #[derive(Debug)]
@@ -134,6 +171,9 @@ fn read(root: &Path, home: &Path) -> Result<Project> {
                 "invalid local issue scope"
             );
         }
+    }
+    for import in &project.imports {
+        authenticate_import(root, home, &project, import)?;
     }
     let mut bytes = serde_json::to_vec(&project)?;
     let record = path.with_extension("history").join(format!(
@@ -251,6 +291,7 @@ pub fn init(directory: &Path) -> Result<()> {
         issues: BTreeMap::new(),
         selections: Vec::new(),
         remote_links: Vec::new(),
+        imports: Vec::new(),
     };
     save(&root, &home, &mut project, Persistence::Local)
 }
@@ -396,6 +437,217 @@ pub fn select(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<()> {
         .selections
         .retain(|previous| previous.issue != issue || previous.branch != selection.branch);
     project.selections.push(selection);
+    save(&root, &home, &mut project, Persistence::Local)
+}
+
+fn import_signers(root: &Path, home: &Path) -> Result<PathBuf> {
+    let output = crate::tool::Tool::Git
+        .command()
+        .current_dir(root)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env_remove("GIT_CONFIG_GLOBAL")
+        .args([
+            "config",
+            "--global",
+            "--path",
+            "--get",
+            "gpg.ssh.allowedSignersFile",
+        ])
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "initial import owner signers are not configured"
+    );
+    let configured = String::from_utf8(output.stdout)?;
+    let signers = crate::paths::canonical(Path::new(configured.trim()))?;
+    ensure!(
+        signers.starts_with(crate::paths::canonical(home)?) && !signers.starts_with(root),
+        "initial import requires trusted owner signers outside the project"
+    );
+    Ok(signers)
+}
+
+fn authenticate_import(root: &Path, home: &Path, project: &Project, import: &Import) -> Result<()> {
+    let verified = crate::signed_git::authenticate(
+        root,
+        &import.object,
+        &import.signed_commit,
+        &import_signers(root, home)?,
+    )?;
+    let baseline: InitialBaseline = serde_json::from_str(&verified.payload)?;
+    ensure!(
+        baseline == import.baseline
+            && baseline.checkout == project.checkout
+            && baseline.common_git == project.common_git
+            && baseline.revision != 0
+            && baseline.revision < project.revision
+            && !baseline.branch.is_empty()
+            && project.issues.contains_key(&baseline.issue)
+            && !baseline.scopes.is_empty()
+            && baseline
+                .scopes
+                .iter()
+                .all(|scope| context::relative(Path::new(scope))
+                    .is_ok_and(|relative| relative == *scope))
+            && !baseline.paths.is_empty()
+            && baseline
+                .paths
+                .iter()
+                .all(|path| context::relative(Path::new(path))
+                    .is_ok_and(|relative| relative == *path)
+                    && context::scoped(&baseline.scopes, path))
+            && verified.tree == baseline.tree
+            && verified.parents.is_empty(),
+        "signed initial import baseline differs"
+    );
+    Ok(())
+}
+
+fn initial_baseline(
+    root: &Path,
+    project: &Project,
+    issue: u64,
+    scopes: &[PathBuf],
+    expected: Option<&str>,
+) -> Result<InitialBaseline> {
+    ensure!(
+        std::env::var_os("GIT_INDEX_FILE").is_none(),
+        "initial import cannot use an alternate Git index"
+    );
+    let mut scopes = scopes
+        .iter()
+        .map(|scope| context::relative(scope))
+        .collect::<Result<Vec<_>>>()?;
+    scopes.sort();
+    scopes.dedup();
+    let paths = git(root, &["ls-files", "--cached", "-z"], None)?
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            let relative = context::relative(Path::new(path))?;
+            ensure!(
+                relative == path,
+                "initial import path changes identity during normalization"
+            );
+            Ok(relative)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let baseline = InitialBaseline {
+        kind: BaselineKind::InitialLocalImport,
+        checkout: root.to_path_buf(),
+        common_git: common_git(root)?,
+        revision: project.revision,
+        branch: context::branch(root)?,
+        issue,
+        scopes,
+        paths,
+        tree: git(root, &["write-tree"], None)?.trim().to_owned(),
+    };
+    let snapshot = baseline_digest(&baseline)?;
+    let facts = rules::pr_rules::InitialImportFacts {
+        local: git(root, &["remote"], None)?.trim().is_empty(),
+        unborn: source(root)? == Source::Unborn
+            && git(root, &["for-each-ref", "--format=%(refname)"], None)?
+                .trim()
+                .is_empty(),
+        unused: project.selections.is_empty()
+            && project.remote_links.is_empty()
+            && project.imports.is_empty(),
+        open: project
+            .issues
+            .get(&issue)
+            .is_some_and(|issue| issue.status == Status::Open),
+        nonempty: !baseline.paths.is_empty() && !baseline.scopes.is_empty(),
+        clean: git(root, &["diff", "--name-only", "--no-renames", "-z"], None)?.is_empty()
+            && git(
+                root,
+                &["ls-files", "--others", "--exclude-standard", "-z"],
+                None,
+            )?
+            .is_empty()
+            && git(root, &["ls-files", "-v", "-z"], None)?
+                .split('\0')
+                .filter(|entry| !entry.is_empty())
+                .all(|entry| entry.starts_with("H ")),
+        scoped: baseline
+            .paths
+            .iter()
+            .all(|path| context::scoped(&baseline.scopes, path)),
+        unchanged: expected.is_none_or(|expected| snapshot == expected),
+    };
+    ensure!(
+        rules::pr_rules::initial_import(facts) == rules::pr_rules::InitialImport::Ready,
+        "initial import requires a local unborn unused project, an open issue, a nonempty staged scoped baseline without unstaged or untracked extras, and an unchanged preview: {facts:?}"
+    );
+    Ok(baseline)
+}
+
+fn baseline_digest(baseline: &InitialBaseline) -> Result<String> {
+    Ok(crate::build_inputs::hex(&Sha256::digest(
+        serde_json::to_vec(baseline)?,
+    )))
+}
+
+/// # Errors
+/// Returns an error unless the existing staged artifacts qualify for an explicit initial import.
+pub fn import_preview(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<ImportPreview> {
+    let root = context::checkout(root)?;
+    no_remote(&root)?;
+    let home = home()?;
+    let _lock = lock(&root, &home)?;
+    let project = read(&root, &home)?;
+    let baseline = initial_baseline(&root, &project, issue, scopes, None)?;
+    Ok(ImportPreview {
+        snapshot: baseline_digest(&baseline)?,
+        tree: baseline.tree,
+        paths: baseline.paths,
+    })
+}
+
+/// # Errors
+/// Returns an error if the reviewed baseline changed or attestation with its owner signing identity fails.
+pub fn import_initial(root: &Path, issue: u64, scopes: &[PathBuf], expected: &str) -> Result<()> {
+    let root = context::checkout(root)?;
+    no_remote(&root)?;
+    let home = home()?;
+    let _lock = lock(&root, &home)?;
+    let mut project = read(&root, &home)?;
+    let baseline = initial_baseline(&root, &project, issue, scopes, Some(expected))?;
+    let signed =
+        crate::signed_git::create_initial(&root, &baseline.tree, &serde_json::to_vec(&baseline)?)?;
+    ensure!(
+        initial_baseline(&root, &project, issue, scopes, Some(expected))? == baseline,
+        "initial import baseline changed during signing"
+    );
+    let selection = Selection {
+        issue,
+        branch: baseline.branch.clone(),
+        source: Source::Unborn,
+        scopes: baseline.scopes.clone(),
+    };
+    let import = Import {
+        baseline,
+        object: signed.object,
+        signed_commit: signed.raw,
+    };
+    let verified = crate::signed_git::authenticate(
+        &root,
+        &import.object,
+        &import.signed_commit,
+        &import_signers(&root, &home)?,
+    )?;
+    ensure!(
+        verified.tree == import.baseline.tree && verified.parents.is_empty(),
+        "initial import signature closure differs"
+    );
+    ensure!(
+        initial_baseline(&root, &project, issue, scopes, Some(expected))? == import.baseline,
+        "initial import baseline changed before persistence"
+    );
+    project.selections.push(selection);
+    project.imports.push(import);
     save(&root, &home, &mut project, Persistence::Local)
 }
 
