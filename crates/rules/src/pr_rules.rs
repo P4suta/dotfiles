@@ -211,6 +211,45 @@ pub const fn initial_change_allowed(
     !required || !dirty || covered || owner_adoption
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InitialImport {
+    Ready,
+    Refused,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Independent observations retain the complete initial-import admission domain."
+)]
+pub struct InitialImportFacts {
+    pub local: bool,
+    pub unborn: bool,
+    pub unused: bool,
+    pub open: bool,
+    pub nonempty: bool,
+    pub clean: bool,
+    pub scoped: bool,
+    pub unchanged: bool,
+}
+
+#[must_use]
+pub const fn initial_import(facts: InitialImportFacts) -> InitialImport {
+    if facts.local
+        && facts.unborn
+        && facts.unused
+        && facts.open
+        && facts.nonempty
+        && facts.clean
+        && facts.scoped
+        && facts.unchanged
+    {
+        InitialImport::Ready
+    } else {
+        InitialImport::Refused
+    }
+}
+
 #[must_use]
 pub fn coderabbit_body_marker_allowed(request: bool, summary: bool, ignore: bool) -> bool {
     ignore || request && summary
@@ -639,6 +678,43 @@ mod proofs {
             required && present && authentic && destination && branch && source && open && scoped
         );
         assert_eq!(result == ContextGate::NotRequired, !required);
+    }
+
+    pub fn spec_initial_import(flags: [bool; 8]) {
+        let [
+            local,
+            unborn,
+            unused,
+            open,
+            nonempty,
+            clean,
+            scoped,
+            unchanged,
+        ] = flags;
+        let result = initial_import(InitialImportFacts {
+            local,
+            unborn,
+            unused,
+            open,
+            nonempty,
+            clean,
+            scoped,
+            unchanged,
+        });
+        assert_eq!(
+            result == InitialImport::Ready,
+            flags.into_iter().all(|fact| fact)
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(9)]
+    fn an_initial_import_requires_every_baseline_prerequisite() {
+        let flags = kani::any();
+        spec_initial_import(flags);
+        kani::cover!(flags.into_iter().all(|fact| fact));
+        kani::cover!(flags.into_iter().any(|fact| !fact));
     }
 
     #[cfg(kani)]
@@ -1078,6 +1154,7 @@ mod tests {
     fn every_issue_context_fact_is_required_before_admission() {
         for facts in flags() {
             proofs::spec_context(facts);
+            proofs::spec_initial_import(facts);
         }
         for facts in flags() {
             proofs::spec_initial_change(facts);

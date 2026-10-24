@@ -93,6 +93,7 @@
 | [2026-10-20 Proof verdicts never depend on time](proof-verdicts-never-depend-on-time.md) | accepted |  |
 | [2026-10-20 Keep every managed behavior the same on every host](same-behavior-on-every-host.md) | accepted |  |
 | [2026-10-21 Apply from the configured source and replace tools atomically](apply-from-the-configured-source-and-replace-tools-atomically.md) | proposed |  |
+| [2026-10-21 Attest initial local artifacts before forward issue work](attest-initial-local-artifacts-before-forward-issue-work.md) | proposed |  |
 | [2026-10-21 Check the owner's reply language at Stop](check-owner-reply-language-at-stop.md) | proposed |  |
 | [2026-10-21 Keep hosts on the merged main](keep-hosts-on-the-merged-main.md) | accepted |  |
 | [2026-10-21 Deliver purpose-scoped credentials through workload identities](purpose-scoped-doppler-workload-identities.md) | accepted |  |
