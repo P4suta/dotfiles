@@ -1,6 +1,8 @@
 //! Inspects the exact literal arguments of GitHub publication commands.
 
-use crate::body_rules::{EscapeStep, Quote, WordStep, escape_step, word_step};
+use crate::body_rules::{
+    EscapeStep, Quote, RestArgument, RestRead, WordStep, escape_step, rest_read, word_step,
+};
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde::de::{Error, MapAccess, SeqAccess, Visitor};
@@ -340,6 +342,57 @@ fn gh_start(words: &[String]) -> Result<Option<usize>> {
     Ok(None)
 }
 
+fn rest_endpoint(argument: &str) -> bool {
+    let path = argument.strip_prefix('/').unwrap_or(argument);
+    (path.starts_with("repos/") || path.starts_with("repositories/"))
+        && path
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"./_-".contains(&byte))
+        && path.split('/').all(|part| !matches!(part, "" | "." | ".."))
+}
+
+fn explicit_rest_get(arguments: &[String]) -> bool {
+    let mut state = RestRead::Empty;
+    let mut index = 0;
+    while let Some(argument) = arguments.get(index) {
+        let kind = match argument.as_str() {
+            "--method" | "-X" if arguments.get(index + 1).is_some_and(|value| value == "GET") => {
+                index += 1;
+                RestArgument::GetMethod
+            }
+            "--method=GET" | "-XGET" => RestArgument::GetMethod,
+            "--paginate" | "--slurp" | "--include" | "--silent" | "--verbose" => {
+                RestArgument::Output
+            }
+            path if rest_endpoint(path) => RestArgument::Endpoint,
+            _ => RestArgument::Other,
+        };
+        state = rest_read(state, kind);
+        index += 1;
+    }
+    state == RestRead::Complete
+}
+
+fn api_target(arguments: &[String]) -> Option<Target<'_>> {
+    if explicit_rest_get(arguments) {
+        return None;
+    }
+    let channel = if arguments
+        .iter()
+        .any(|argument| argument.contains("/pulls/"))
+    {
+        prose::Channel::Pr
+    } else {
+        prose::Channel::Issue
+    };
+    Some(Target {
+        channel,
+        verb: "api",
+        arguments,
+        api: true,
+    })
+}
+
 fn target(arguments: &[String]) -> Result<Option<Target<'_>>> {
     let mut index = 0;
     while index < arguments.len() {
@@ -356,26 +409,20 @@ fn target(arguments: &[String]) -> Result<Option<Target<'_>>> {
         return Ok(None);
     }
     if group == "api" {
-        let channel = if arguments[index..]
-            .iter()
-            .any(|argument| argument.contains("/pulls/"))
-        {
-            prose::Channel::Pr
-        } else {
-            prose::Channel::Issue
-        };
-        return Ok(Some(Target {
-            channel,
-            verb: "api",
-            arguments: &arguments[index..],
-            api: true,
-        }));
+        return Ok(api_target(&arguments[index..]));
     }
     while index < arguments.len() {
         if option(arguments, &mut index, "--repo", Some("-R"))?.is_some() {
             continue;
         }
         break;
+    }
+    if group == "release"
+        && arguments
+            .get(index)
+            .is_some_and(|verb| matches!(verb.as_str(), "view" | "list"))
+    {
+        return Ok(None);
     }
     if !matches!(group.as_str(), "pr" | "issue") {
         ensure!(
@@ -833,6 +880,75 @@ pub(crate) fn refusals(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_github_reads_do_not_require_publication_spellings() {
+        for arguments in [
+            vec![
+                "gh",
+                "api",
+                "--method",
+                "GET",
+                "repos/P4suta/beamtrace/actions/runs/1",
+            ],
+            vec![
+                "gh",
+                "api",
+                "repos/P4suta/beamtrace/pulls/60",
+                "-XGET",
+                "--paginate",
+                "--slurp",
+            ],
+            vec![
+                "gh",
+                "api",
+                "--method=GET",
+                "/repositories/123/actions/permissions/selected-actions",
+            ],
+            vec!["gh", "release", "view", "--repo", "oven-sh/bun"],
+            vec!["gh", "release", "list", "--repo", "oven-sh/bun"],
+        ] {
+            let words: Vec<String> = arguments.iter().map(|word| (*word).to_owned()).collect();
+            let bodies = collect(&words, None, None, None, false);
+            assert!(bodies.is_empty(), "{arguments:?}: {bodies:?}");
+        }
+    }
+
+    #[test]
+    fn ambiguous_or_mutating_api_arguments_still_require_inspection() {
+        for arguments in [
+            vec!["--method", "POST", "repos/o/r/issues"],
+            vec!["--method", "PUT", "repos/o/r/issues"],
+            vec!["--method", "PATCH", "repos/o/r/issues"],
+            vec!["--method", "DELETE", "repos/o/r/issues"],
+            vec!["--method", "GET", "repos/o/r", "-XPOST"],
+            vec!["--method", "GET", "repos/o/r", "-XGET"],
+            vec!["--method", "GET", "repos/o/r", "repos/o/other"],
+            vec!["repos/o/r"],
+            vec!["--method", "GET"],
+            vec!["--method", "GET", "graphql"],
+            vec!["--method", "GET", "repos/../../graphql"],
+            vec!["--method", "GET", "repos/$OWNER/r"],
+            vec!["--method", "GET", "repos/{owner}/r"],
+            vec!["--method", "GET", "repos/o/r", "--input", "request.json"],
+            vec!["--method", "GET", "repos/o/r", "-fbody=Text."],
+            vec!["--method", "GET", "repos/o/r", "-Fbody=@body.md"],
+            vec!["--method", "GET", "repos/o/r", "--unknown"],
+        ] {
+            let words: Vec<String> = ["gh", "api"]
+                .into_iter()
+                .chain(arguments.iter().copied())
+                .map(str::to_owned)
+                .collect();
+            assert!(
+                matches!(
+                    &collect(&words, None, None, None, false)[..],
+                    [Body::Unreadable(_)]
+                ),
+                "{arguments:?}"
+            );
+        }
+    }
     use anyhow::Result;
 
     #[test]
