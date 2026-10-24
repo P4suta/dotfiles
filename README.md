@@ -21,9 +21,6 @@ just check
 
 ## License
 
-Licensed under either license:
-
-- [Apache License, Version 2.0](LICENSE-APACHE)
-- [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT)
+Licensed under the [Apache License, Version 2.0](LICENSE-APACHE) or the [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT), at your option.
 
 Contributions use both licenses unless you state other terms.
