@@ -245,7 +245,7 @@ pub(crate) fn shell_command(event: &Value) -> Result<String> {
     }
 }
 
-fn execution_directory(event: &Value) -> Result<Option<PathBuf>> {
+pub(crate) fn execution_directory(event: &Value) -> Result<Option<PathBuf>> {
     let base = event
         .get("cwd")
         .filter(|value| !value.is_null())
@@ -921,6 +921,57 @@ mod tests {
         );
         let invalid = policy_refusals_with(&event("publish.sh"), test_bundle)?;
         assert!(invalid.iter().any(|finding| finding.rule == "hook.prose"));
+        Ok(())
+    }
+
+    #[test]
+    fn relative_scripts_without_an_absolute_event_directory_are_refused() -> Result<()> {
+        let events = [
+            json!({
+                "tool_name":"Bash",
+                "tool_input":{"command":"bash test/vulnerability_scan.sh"}
+            }),
+            json!({
+                "tool_name":"Bash", "cwd":".",
+                "tool_input":{"command":"bash test/vulnerability_scan.sh"}
+            }),
+            json!({
+                "tool_name":"Bash",
+                "tool_input":{"command":"bash test/vulnerability_scan.sh","workdir":"relative"}
+            }),
+        ];
+        for event in events {
+            let findings = policy_refusals_with(&event.to_string(), test_bundle)?;
+            assert!(
+                findings.iter().any(|finding| {
+                    finding.rule == "hook.lint"
+                        && finding
+                            .message
+                            .contains("known absolute execution directory")
+                }),
+                "{event}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn relative_workdir_resolves_from_the_absolute_event_cwd() -> Result<()> {
+        let session = tempfile::tempdir()?;
+        let execution = session.path().join("execution");
+        std::fs::create_dir(&execution)?;
+        std::fs::write(execution.join("check.sh"), "#!/bin/sh\nprintf 'ready\\n'\n")?;
+        let event = json!({
+            "tool_name":"exec_command", "cwd":session.path(),
+            "tool_input":{"cmd":"sh check.sh","shell":"pwsh","workdir":"execution"}
+        });
+        let findings = policy_refusals_with(&event.to_string(), test_bundle)?;
+        let diagnostic = findings
+            .iter()
+            .map(|finding| format!("{}: {}", finding.rule, finding.message))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(findings.is_empty(), "{diagnostic}");
         Ok(())
     }
 
