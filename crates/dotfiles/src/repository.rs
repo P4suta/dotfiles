@@ -93,14 +93,19 @@ fn generate(metadata: &Repository) -> Generated {
 
 fn license_section(metadata: &Repository) -> String {
     match metadata.license {
-        License::MitOrApache => concat!(
-            "## License\n\n",
-            "Licensed under either license:\n\n",
-            "- [Apache License, Version 2.0](LICENSE-APACHE)\n",
-            "- [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT)\n\n",
-            "Contributions use both licenses unless you state other terms."
-        )
-        .to_owned(),
+        License::MitOrApache => {
+            let mut section = concat!(
+                "## License\n\n",
+                "Licensed under the [Apache License, Version 2.0](LICENSE-APACHE) or the ",
+                "[Massachusetts Institute of Technology (MIT) license](LICENSE-MIT), at your option."
+            )
+            .to_owned();
+            if metadata.preserved_licenses.is_none() {
+                section
+                    .push_str("\n\nContributions use both licenses unless you state other terms.");
+            }
+            section
+        }
         License::ApacheOnly | License::AgplOnly => {
             let links = metadata
                 .preserved_licenses
@@ -652,13 +657,12 @@ mod tests {
 
     const INDEX: &str = "docs/README.md";
     const README_PATH: &str = "README.md";
-    const LEGACY_README: &str = concat!(
+    const DEFAULT_README: &str = concat!(
         "# Fixture\n\nA fixture repository.\n\n## Installation\n\n",
         "```sh\ncargo install fixture\n```\n\n## Usage\n\n",
         "```sh\nfixture --help\n```\n\n## License\n\n",
-        "Licensed under either license:\n\n",
-        "- [Apache License, Version 2.0](LICENSE-APACHE)\n",
-        "- [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT)\n\n",
+        "Licensed under the [Apache License, Version 2.0](LICENSE-APACHE) or the ",
+        "[Massachusetts Institute of Technology (MIT) license](LICENSE-MIT), at your option.\n\n",
         "Contributions use both licenses unless you state other terms.\n",
     );
 
@@ -830,10 +834,13 @@ mod tests {
         let assets = preserve_licenses(root);
         fs::write(root.join(README_PATH), "An obsolete README\n").unwrap();
         write(root).unwrap();
-        assert_eq!(
-            fs::read_to_string(root.join(README_PATH)).unwrap(),
-            LEGACY_README
+        let readme = fs::read_to_string(root.join(README_PATH)).unwrap();
+        assert!(readme.contains("[Apache License, Version 2.0](LICENSE-APACHE)"));
+        assert!(
+            readme.contains("[Massachusetts Institute of Technology (MIT) license](LICENSE-MIT)")
         );
+        assert!(!readme.contains("Contributions"));
+        assert!(!readme.lines().any(|line| line.starts_with("- ")));
         for (path, bytes) in assets {
             assert_eq!(fs::read(root.join(path)).unwrap(), bytes);
         }
@@ -1326,7 +1333,7 @@ mod tests {
         let original = generate(&metadata(root).unwrap());
         assert_eq!(
             fs::read_to_string(root.join(README_PATH)).unwrap(),
-            LEGACY_README
+            DEFAULT_README
         );
         fs::create_dir(root.join("docs")).unwrap();
         fs::write(root.join(INDEX), "# Documentation\n").unwrap();
@@ -1345,7 +1352,7 @@ mod tests {
                     "## Documentation\n\n[Read the documentation](docs/README.md).\n\n## License\n"
                 ));
             } else {
-                assert_eq!(readme, LEGACY_README);
+                assert_eq!(readme, DEFAULT_README);
             }
             for (path, text) in &original {
                 if *path != README_PATH {
