@@ -2,10 +2,12 @@
 # Vendored upstream schemas keep their upstream text.
 # Schema pins and the upstream document manifest keep imported text byte-exact.
 # The signed issue-context transport also contains opaque authenticated bytes.
+# Binary fuzz corpus entries preserve malformed input bytes.
 extend-exclude = [
   ".git/",
   "schemas/vendor/",
   ".pr-workflow/contexts.json",
+  "fuzz/corpus/",
   "xtask/schema/njutest/njutest-assurance-report-v1.json",
   "xtask/schema/njutest/rust-mutants-catalog-v1.json",
   "xtask/schema/njutest/rust-mutants-run-report-v1.json",

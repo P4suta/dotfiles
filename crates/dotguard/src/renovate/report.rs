@@ -56,6 +56,7 @@ pub(super) struct Dependency {
     pub(super) dep_type: Option<String>,
     pub(super) target: Option<String>,
     pub(super) registry_urls: Option<Vec<String>>,
+    pub(super) registry_url: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -271,7 +272,8 @@ fn parse_inner(
                 .unwrap_or_default(),
                 new_digest: candidate.new_digest.clone().unwrap_or_default(),
                 breaking: candidate.is_breaking,
-                inherited_touched: bindings.touched.contains(&index),
+                inherited_touched: bindings.touched.contains(&index)
+                    || super::mise::http_changed(found, record),
             });
         }
     }
@@ -435,7 +437,11 @@ fn covered(records: &[Record], record: &Record, found: Option<&super::Found>) ->
             .current_value
             .as_deref()
             .is_some_and(matrix_input);
-    hosted || matrix || covered_backend(records, record, found) || covered_ci_alias(records, record)
+    hosted
+        || matrix
+        || covered_backend(records, record, found)
+        || covered_ci_alias(records, record)
+        || super::ci_pin::covers(records, record, found)
 }
 
 fn matrix_input(value: &str) -> bool {
@@ -469,8 +475,17 @@ fn container_reference(value: &str) -> bool {
 }
 
 fn counterpart<'a>(records: &'a [Record], file: &str, name: &str) -> Option<&'a Dependency> {
+    counterpart_for(records, "regex", file, name)
+}
+
+fn counterpart_for<'a>(
+    records: &'a [Record],
+    manager: &str,
+    file: &str,
+    name: &str,
+) -> Option<&'a Dependency> {
     let mut matches = records.iter().filter(|record| {
-        record.manager == "regex" && record.file == file && record.dependency.dep_name == name
+        record.manager == manager && record.file == file && record.dependency.dep_name == name
     });
     let found = &matches.next()?.dependency;
     if matches.next().is_some() {
@@ -492,6 +507,10 @@ fn covered_backend(records: &[Record], record: &Record, found: Option<&super::Fo
     {
         return false;
     }
+    if dependency.dep_name.starts_with("http:") {
+        return counterpart_for(records, "jsonata", &record.file, &dependency.dep_name)
+            .is_some_and(|verified| super::mise::http_covers(found, record, verified));
+    }
     let provider = match dependency.dep_name.as_str() {
         "nu" => ("github-releases", "nushell/nushell"),
         "conda:zsh" => ("conda", "conda-forge/zsh"),
@@ -504,7 +523,11 @@ fn covered_backend(records: &[Record], record: &Record, found: Option<&super::Fo
         return false;
     };
     let matching_pin = match dependency.locked_version.as_deref() {
-        Some(version) => !version.is_empty() && verified.current_value.as_deref() == Some(version),
+        Some(version) => {
+            !version.is_empty()
+                && verified.current_value.as_deref() == Some(version)
+                && super::mise::source_matches(found, record, verified)
+        }
         None => super::mise::covers(found, record, verified),
     };
     matching_pin

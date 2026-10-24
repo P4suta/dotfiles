@@ -1,0 +1,6 @@
+version=$(awk -F'"' '/^rust[[:space:]]*=/{print $2; exit}' mise.toml)
+if [ -z "$version" ]; then
+  echo "::error::could not read the rust pin from mise.toml"; exit 1
+fi
+echo "version=$version" >> "$GITHUB_OUTPUT"
+echo "Using repository-pinned Rust $version"

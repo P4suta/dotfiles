@@ -24,7 +24,8 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 mod cargo;
-mod mise;
+pub mod ci_pin;
+pub mod mise;
 pub mod report;
 
 const DEFAULT_UPDATE_TYPES: &str = "minor patch pin pinDigest";
@@ -33,6 +34,8 @@ const LOOKUP_TMPFS: &str = "/tmp:rw,nodev,nosuid,size=2g";
 const LOOKUP_CPUS: &str = "2";
 const LOOKUP_MEMORY: &str = "3g";
 const INSPECT_ARGUMENT_COUNT: usize = 2;
+const INSPECT_REVISION_ARGUMENT_COUNT: usize = 4;
+const INSPECT_REVISION_INDEX: usize = INSPECT_REVISION_ARGUMENT_COUNT - 1;
 
 /// The exit status of a subcommand the gate doesn't serve.
 const USAGE_ERROR: i32 = 2;
@@ -76,10 +79,17 @@ pub fn dispatch(args: &[String]) -> i32 {
     match args.first().map(String::as_str) {
         Some("run") => run_local(&args[1..]),
         Some("inspect") if args.len() == INSPECT_ARGUMENT_COUNT => {
-            inspect_report(Path::new(&args[1]))
+            inspect_report(Path::new(&args[1]), None)
+        }
+        Some("inspect")
+            if args.len() == INSPECT_REVISION_ARGUMENT_COUNT && args[2] == "--revision" =>
+        {
+            inspect_report(Path::new(&args[1]), Some(&args[INSPECT_REVISION_INDEX]))
         }
         _ => {
-            eprintln!("usage: dotguard renovate run [arguments] | inspect <report.json>");
+            eprintln!(
+                "usage: dotguard renovate run [arguments] | inspect <report.json> [--revision <commit>]"
+            );
             USAGE_ERROR
         }
     }
@@ -91,10 +101,16 @@ fn update_types() -> String {
         .unwrap_or_else(|_| DEFAULT_UPDATE_TYPES.to_owned())
 }
 
-fn read_report(path: &Path) -> Result<report::CheckedReport, String> {
+fn read_report(path: &Path, found: Option<&Found>) -> Result<report::CheckedReport, String> {
     std::fs::read(path)
         .map_err(|_| "the required report could not be read".to_owned())
-        .and_then(|bytes| report::parse(&bytes, &update_types()).map_err(|error| error.to_string()))
+        .and_then(|bytes| {
+            match found {
+                Some(found) => report::parse_for_push(&bytes, &update_types(), found),
+                None => report::parse(&bytes, &update_types()),
+            }
+            .map_err(|error| error.to_string())
+        })
 }
 
 fn report_refusal(evidence: &str) -> i32 {
@@ -108,11 +124,44 @@ fn report_refusal(evidence: &str) -> i32 {
     1
 }
 
-fn inspect_report(path: &Path) -> i32 {
-    let report = match read_report(path) {
+fn inspection_source(revision: &str) -> Result<Found, String> {
+    let repository = real_git::capture(&["rev-parse", "--show-toplevel"])
+        .ok_or("source inspection requires a Git repository")?
+        .trim()
+        .to_owned();
+    let offered = real_git::capture(&[
+        "-C",
+        &repository,
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        &format!("{revision}^{{commit}}"),
+    ])
+    .ok_or("source inspection requires an existing commit")?
+    .trim()
+    .to_owned();
+    Ok(Found {
+        repository,
+        changed_files: Vec::new(),
+        added_by_file: BTreeMap::new(),
+        baselines_by_file: BTreeMap::new(),
+        offered: Some(offered),
+        scope_unknown: true,
+    })
+}
+
+fn inspect_report(path: &Path, revision: Option<&str>) -> i32 {
+    let source = match revision.map(inspection_source).transpose() {
+        Ok(source) => source,
+        Err(reason) => return report_refusal(&reason),
+    };
+    let report = match read_report(path, source.as_ref()) {
         Ok(report) => report,
         Err(evidence) => return report_refusal(&evidence),
     };
+    if let Some(offered) = source.as_ref().and_then(|source| source.offered.as_deref()) {
+        println!("Source revision: {offered}");
+    }
     println!(
         "Validated lookup evidence: {} nonfatal notices, {} selected update candidates",
         report.notices,
@@ -706,6 +755,8 @@ pub fn is_manifest(path: &str) -> bool {
         ".tool-versions",
         "bun.lock",
         "bun.lockb",
+        "action.yml",
+        "action.yaml",
     ];
     if exact.contains(&name) {
         return true;
@@ -1335,6 +1386,10 @@ mod tests {
             ".github/workflows/release.yaml",
             ".GITHUB/WORKFLOWS/CI.YML",
             "nested/.github/workflows/ci.yml",
+            "action.yml",
+            "action.yaml",
+            ".github/actions/rust-toolchain/action.yml",
+            "tools/native-action/action.yaml",
             "mise.toml",
             "home/.chezmoidata/versions.toml",
             "home/.chezmoidata/modern.toml",
@@ -1355,6 +1410,8 @@ mod tests {
             "requirements.d/notes.md",
             "notebook/DockerfileReadme.md",
             "docs/workflows/ci.yml", // no .github component
+            "docs/action.yml.md",
+            "tools/native-action/not-action.yml",
             ".githubx/workflows/ci.yml",
             "x.github/workflows/ci.yml",
             "commise.toml",

@@ -107,3 +107,4 @@ pub mod timeout_rules;
 pub mod tool_lock_rules;
 pub mod tool_rules;
 pub mod wip_rules;
+pub mod yaml_rules;

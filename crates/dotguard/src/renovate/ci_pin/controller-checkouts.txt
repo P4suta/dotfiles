@@ -1,0 +1,27 @@
+$ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
+$workspace = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\', '/')
+$separator = [IO.Path]::DirectorySeparatorChar
+function Assert-Checkout([string]$Relative, [string]$Expected) {
+  $root = [IO.Path]::GetFullPath((Join-Path $workspace $Relative)).TrimEnd('\', '/')
+  if (-not $root.StartsWith("$workspace$separator", [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Checkout '$root' escaped the Actions workspace."
+  }
+  $items = @(Get-Item -LiteralPath $root -Force) +
+    @(Get-ChildItem -LiteralPath $root -Force -Recurse)
+  if (@($items | Where-Object {
+      ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0
+    }).Count -ne 0) {
+    throw "Checkout '$Relative' contains a reparse point."
+  }
+  $actual = (git -C $root rev-parse HEAD).Trim().ToLowerInvariant()
+  if ($actual -cne $Expected) {
+    throw "Checkout '$Relative' is $actual, expected $Expected."
+  }
+  $dirty = @(git -C $root status --porcelain=v1 --untracked-files=all)
+  if ($dirty.Count -ne 0) {
+    throw "Checkout '$Relative' is dirty before mutation: $($dirty -join '; ')"
+  }
+}
+Assert-Checkout "controller" $env:CONTROLLER_SHA
+Assert-Checkout "target" $env:TARGET_SHA

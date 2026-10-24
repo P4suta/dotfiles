@@ -1,6 +1,7 @@
 //! The pre-push and post-commit gates in real repositories: each refusal reaches standard error as one complete record.
 
 use dotguard::refusal::Refusal;
+use std::fmt::Write as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -1490,8 +1491,144 @@ fn unlocked_backend_report(backend: (&str, &str, &str, &str)) -> serde_json::Val
     report
 }
 
+#[test]
+fn renovate_locked_backend_counterparts_must_match_the_offered_literal() {
+    let (repository, _, previous) = renovate_fixture("renovate-locked-source-binding");
+    let offered = changed_file(
+        &repository,
+        "mise.toml",
+        "[tools]\nnu = \"0.115.0\"\n",
+        &previous,
+    );
+    let report = backend_report(MISE_BACKENDS[0]);
+    assert_eq!(
+        refusal(&report_gate(&repository, &previous, &offered, &report)).rule,
+        "push.evidence"
+    );
+}
+
 fn regex_counterpart(report: &mut serde_json::Value) -> &mut serde_json::Value {
     &mut report["repositories"]["local"]["packageFiles"]["regex"][0]["deps"][0]
+}
+
+const HTTP_MANIFEST: &str = r#"[tools."http:winappcli"]
+version = "0.5.0"
+url = "https://github.com/microsoft/winappCli/releases/download/v{{ version }}/winappcli-x64.zip"
+version_list_url = "https://api.github.com/repos/microsoft/winappCli/releases/latest"
+version_json_path = ".tag_name"
+"#;
+
+fn http_backend_report() -> serde_json::Value {
+    serde_json::json!({"repositories":{"local":{"packageFiles":{
+        "mise":[{"packageFile":"mise.toml","deps":[{
+            "depName":"http:winappcli","packageName":"http:winappcli","depType":"tools",
+            "skipReason":"unsupported-datasource","updates":[]
+        }]}],
+        "jsonata":[{"packageFile":"mise.toml","deps":[{
+            "depName":"http:winappcli","packageName":"microsoft/winappCli","datasource":"github-releases",
+            "currentValue":"0.5.0","currentVersion":"v0.5.0","updates":[],"warnings":[]
+        }]}]
+    }}}})
+}
+
+#[test]
+fn renovate_binds_http_release_lookups_and_still_blocks_changed_table_versions() {
+    let (repository, _, initial) = renovate_fixture("renovate-http-release");
+    let before = changed_file(
+        &repository,
+        "mise.toml",
+        &HTTP_MANIFEST.replace("0.5.0", "0.4.0"),
+        &initial,
+    );
+    let offered = changed_file(&repository, "mise.toml", HTTP_MANIFEST, &before);
+    let mut report = http_backend_report();
+    let output = report_gate(&repository, &before, &offered, &report);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    report["repositories"]["local"]["packageFiles"]["jsonata"][0]["deps"][0]["updates"] =
+        serde_json::json!([{"updateType":"minor","newValue":"0.7.1"}]);
+    assert_eq!(
+        refusal(&report_gate(&repository, &before, &offered, &report)).rule,
+        "push.dependencies"
+    );
+    let comment = changed_file(
+        &repository,
+        "mise.toml",
+        &format!("{HTTP_MANIFEST}# a comment\n"),
+        &offered,
+    );
+    assert!(
+        report_gate(&repository, &offered, &comment, &report)
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn renovate_refuses_misbound_ambiguous_or_failed_http_release_evidence() {
+    let (repository, _, initial) = renovate_fixture("renovate-http-rejections");
+    for manifest in [
+        HTTP_MANIFEST.replace("version = \"0.5.0\"", "version = \"0.4.0\""),
+        HTTP_MANIFEST.replace("api.github.com", "example.invalid"),
+        HTTP_MANIFEST.replace("repos/microsoft/winappCli", "repos/other/project"),
+        HTTP_MANIFEST.replace("repos/microsoft/winappCli", "repos/microsoft/.."),
+        HTTP_MANIFEST.replace(".tag_name", ".name"),
+        format!("{HTTP_MANIFEST}version_expr = \"body\"\n"),
+        "[tools]\n\"http:winappcli\" = \"0.5.0\"\n".to_owned(),
+    ] {
+        let offered = changed_file(&repository, "mise.toml", &manifest, &initial);
+        assert_eq!(
+            refusal(&report_gate(
+                &repository,
+                &initial,
+                &offered,
+                &http_backend_report()
+            ))
+            .rule,
+            "push.evidence"
+        );
+    }
+    let offered = changed_file(&repository, "mise.toml", HTTP_MANIFEST, &initial);
+    for (field, value) in [
+        ("enabled", serde_json::json!(false)),
+        ("skipReason", serde_json::json!("ignored")),
+        ("skipReason", serde_json::json!("internal-error")),
+        ("warnings", serde_json::json!([{}])),
+        ("packageName", serde_json::json!("other/project")),
+        ("datasource", serde_json::json!("github-tags")),
+        ("currentValue", serde_json::json!("0.4.0")),
+        ("currentVersion", serde_json::json!("v0.4.0")),
+        ("registryUrl", serde_json::json!("https://example.invalid")),
+        (
+            "registryUrls",
+            serde_json::json!(["https://example.invalid"]),
+        ),
+    ] {
+        let mut report = http_backend_report();
+        report["repositories"]["local"]["packageFiles"]["jsonata"][0]["deps"][0][field] = value;
+        assert_eq!(
+            refusal(&report_gate(&repository, &initial, &offered, &report)).rule,
+            "push.evidence",
+            "{field}"
+        );
+    }
+    for duplicate in [false, true] {
+        let mut report = http_backend_report();
+        let counterpart =
+            report["repositories"]["local"]["packageFiles"]["jsonata"][0]["deps"][0].clone();
+        report["repositories"]["local"]["packageFiles"]["jsonata"][0]["deps"] = if duplicate {
+            serde_json::json!([counterpart.clone(), counterpart])
+        } else {
+            serde_json::json!([])
+        };
+        assert_eq!(
+            refusal(&report_gate(&repository, &initial, &offered, &report)).rule,
+            "push.evidence"
+        );
+    }
 }
 
 fn mise_ci_report() -> serde_json::Value {
@@ -1521,6 +1658,311 @@ fn changed_file(repository: &Repository, file: &str, contents: &str, parent: &st
     let offered = repository.git(&["commit-tree", &tree, "-p", parent, "-m", "pin change"]);
     repository.git(&["update-ref", "HEAD", &offered]);
     offered
+}
+
+const RUST_ACTION_FILE: &str = ".github/actions/rust-toolchain/action.yml";
+const RUST_CI_EXPRESSION: &str = "${{ steps.pin.outputs.version }}";
+const RUST_MANIFEST: &str = "[tools]\nrust = \"1.97\"\n";
+const RUST_ACTION: &str = r#"name: Rust
+description: Install pinned Rust.
+runs:
+  using: composite
+  steps:
+    - id: pin
+      shell: bash
+      run: |
+        version=$(awk -F'"' '/^rust[[:space:]]*=/{print $2; exit}' mise.toml)
+        if [ -z "$version" ]; then
+          echo "::error::could not read the rust pin from mise.toml"; exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "Using repository-pinned Rust $version"
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+      with:
+        toolchain: ${{ steps.pin.outputs.version }}
+"#;
+
+fn rust_ci_report(file: &str, expression: &str) -> serde_json::Value {
+    serde_json::json!({"repositories":{"local":{"packageFiles":{
+        "github-actions":[{"packageFile":file,"deps":[{
+            "depName":"rust","packageName":"rust","datasource":"rust-version",
+            "depType":"uses-with","currentValue":expression,"skipReason":"invalid-value",
+            "updates":[],"warnings":[]
+        }]}],
+        "mise":[{"packageFile":"mise.toml","deps":[{
+            "depName":"rust","packageName":"rust","datasource":"rust-version",
+            "depType":"tools","currentValue":"1.97","currentVersion":"1.97",
+            "replaceString":"rust = \"1.97\"","updates":[],"warnings":[]
+        }]}]
+    }}}})
+}
+
+#[test]
+fn renovate_binds_composite_rust_outputs_to_the_offered_reader_and_literal() {
+    let (repository, _, initial) = renovate_fixture("renovate-rust-reader");
+    let pin = changed_file(&repository, "mise.toml", RUST_MANIFEST, &initial);
+    let offered = changed_file(&repository, RUST_ACTION_FILE, RUST_ACTION, &pin);
+    let report = rust_ci_report(RUST_ACTION_FILE, RUST_CI_EXPRESSION);
+    let output = report_gate(&repository, &pin, &offered, &report);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("dependency manifests changed"));
+}
+
+#[test]
+fn renovate_inspection_requires_the_exact_source_revision_for_rust_aliases() {
+    let (repository, _, initial) = renovate_fixture("renovate-source-inspect");
+    let pin = changed_file(&repository, "mise.toml", RUST_MANIFEST, &initial);
+    let offered = changed_file(&repository, RUST_ACTION_FILE, RUST_ACTION, &pin);
+    let file = repository.scope.join("saved-report.json");
+    std::fs::write(
+        &file,
+        serde_json::to_vec(&rust_ci_report(RUST_ACTION_FILE, RUST_CI_EXPRESSION)).unwrap(),
+    )
+    .unwrap();
+    let inspected = repository.dotguard_with(
+        &[
+            "renovate",
+            "inspect",
+            file.to_str().unwrap(),
+            "--revision",
+            &offered,
+        ],
+        "",
+        &[],
+        &[],
+    );
+    assert!(
+        inspected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspected.stderr)
+    );
+    for revision in [initial.as_str(), "missing-ref"] {
+        let rejected = repository.dotguard_with(
+            &[
+                "renovate",
+                "inspect",
+                file.to_str().unwrap(),
+                "--revision",
+                revision,
+            ],
+            "",
+            &[],
+            &[],
+        );
+        assert_eq!(refusal(&rejected).rule, "push.evidence");
+    }
+    assert!(!repository.scope.join("arguments").exists());
+}
+
+const CONTROLLER_FILE: &str = ".github/workflows/mutation-controller.yml";
+const CONTROLLER_EXPRESSION: &str = "${{ steps.rust-pin.outputs.version }}";
+const CONTROLLER_WORKFLOW: &str = include_str!("../../../fuzz/corpus/ci_pin/controller.yml");
+
+#[test]
+fn renovate_binds_all_three_real_controller_readers_and_refuses_a_changed_identity() {
+    let (repository, _, initial) = renovate_fixture("renovate-controller-readers");
+    let pin = changed_file(&repository, "mise.toml", RUST_MANIFEST, &initial);
+    let offered = changed_file(&repository, CONTROLLER_FILE, CONTROLLER_WORKFLOW, &pin);
+    let report = rust_ci_report(CONTROLLER_FILE, CONTROLLER_EXPRESSION);
+    let output = report_gate(&repository, &pin, &offered, &report);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for broken in [
+        CONTROLLER_WORKFLOW.replacen("$env:GITHUB_SHA -cne $env:CONTROLLER_SHA", "$false", 1),
+        CONTROLLER_WORKFLOW.replacen("ref: ${{ inputs.controller_sha }}", "ref: main", 1),
+        CONTROLLER_WORKFLOW.replacen("Assert-Checkout \"controller\" $env:CONTROLLER_SHA", "", 1),
+        CONTROLLER_WORKFLOW.replacen(
+            "Get-Content -LiteralPath \"controller/mise.toml\"",
+            "Get-Content -LiteralPath \"target/mise.toml\"",
+            1,
+        ),
+        CONTROLLER_WORKFLOW.replacen(
+            "throw \"controller/mise.toml must contain exactly one reviewable Rust pin.\"",
+            "Write-Host \"ignored\"",
+            1,
+        ),
+        CONTROLLER_WORKFLOW.replacen(
+            "dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8",
+            "dtolnay/rust-toolchain@stable",
+            1,
+        ),
+    ] {
+        let invalid = changed_file(&repository, CONTROLLER_FILE, &broken, &offered);
+        assert_eq!(
+            refusal(&report_gate(&repository, &pin, &invalid, &report)).rule,
+            "push.evidence"
+        );
+    }
+}
+
+#[test]
+fn renovate_refuses_unbound_rust_consumers_and_ambiguous_yaml() {
+    let (repository, _, initial) = renovate_fixture("renovate-rust-consumers");
+    let pin = changed_file(&repository, "mise.toml", RUST_MANIFEST, &initial);
+    let report = rust_ci_report(RUST_ACTION_FILE, RUST_CI_EXPRESSION);
+    for broken in [
+        RUST_ACTION.replace("awk -F", "other-reader -F"),
+        RUST_ACTION.replace("@29eef336d9b2848a0b548edc03f92a220660cdb8", "@stable"),
+        RUST_ACTION.replace("    - uses:", "    - id: pin\n      uses:"),
+        RUST_ACTION.replace("      shell: bash", "      shell: pwsh\n      shell: bash"),
+        RUST_ACTION.replace(
+            "      shell: bash",
+            "      shell: bash\n      working-directory: other",
+        ),
+        RUST_ACTION.replace("      shell: bash", "      shell: bash\n      if: false"),
+        RUST_ACTION.replace(
+            "      shell: bash",
+            "      shell: bash\n      continue-on-error: true",
+        ),
+        RUST_ACTION.replace("        version=$(awk", "        \u{a0}version=$(awk"),
+        format!(
+            "{RUST_ACTION}    - uses: dtolnay/rust-toolchain@stable\n      with:\n        toolchain: {RUST_CI_EXPRESSION}\n"
+        ),
+        format!("{RUST_ACTION}\n---\njobs: {{}}\n"),
+        RUST_ACTION.replace("  steps:", "  steps: &steps"),
+        RUST_ACTION.replace("      run: |", "      run: !script |"),
+    ] {
+        let offered = changed_file(&repository, RUST_ACTION_FILE, &broken, &pin);
+        assert_eq!(
+            refusal(&report_gate(&repository, &pin, &offered, &report)).rule,
+            "push.evidence"
+        );
+    }
+}
+
+fn rust_literal(report: &mut serde_json::Value) -> &mut serde_json::Value {
+    &mut report["repositories"]["local"]["packageFiles"]["mise"][0]["deps"][0]
+}
+
+#[test]
+fn renovate_requires_one_successful_source_matched_rust_counterpart() {
+    let (repository, _, initial) = renovate_fixture("renovate-rust-counterparts");
+    let pin = changed_file(&repository, "mise.toml", RUST_MANIFEST, &initial);
+    let offered = changed_file(&repository, RUST_ACTION_FILE, RUST_ACTION, &pin);
+    for (field, value) in [
+        ("enabled", serde_json::json!(false)),
+        ("skipReason", serde_json::json!("ignored")),
+        ("skipReason", serde_json::json!("internal-error")),
+        ("warnings", serde_json::json!([{"message":"failed"}])),
+        ("currentVersion", serde_json::json!("")),
+        ("currentVersion", serde_json::json!("1.96")),
+        ("currentValue", serde_json::json!("1.96")),
+        ("datasource", serde_json::json!("github-tags")),
+        ("packageName", serde_json::json!("other")),
+        ("depType", serde_json::json!("unknown")),
+    ] {
+        let mut report = rust_ci_report(RUST_ACTION_FILE, RUST_CI_EXPRESSION);
+        rust_literal(&mut report)[field] = value;
+        assert_eq!(
+            refusal(&report_gate(&repository, &pin, &offered, &report)).rule,
+            "push.evidence",
+            "{field}"
+        );
+    }
+    for duplicate in [false, true] {
+        let mut report = rust_ci_report(RUST_ACTION_FILE, RUST_CI_EXPRESSION);
+        let counterpart = rust_literal(&mut report).clone();
+        report["repositories"]["local"]["packageFiles"]["mise"][0]["deps"] = if duplicate {
+            serde_json::json!([counterpart.clone(), counterpart])
+        } else {
+            serde_json::json!([])
+        };
+        assert_eq!(
+            refusal(&report_gate(&repository, &pin, &offered, &report)).rule,
+            "push.evidence"
+        );
+    }
+    let mut outdated = rust_ci_report(RUST_ACTION_FILE, RUST_CI_EXPRESSION);
+    rust_literal(&mut outdated)["updates"] =
+        serde_json::json!([{"updateType":"patch","newValue":"1.97.1"}]);
+    assert_eq!(
+        refusal(&report_gate(&repository, &initial, &offered, &outdated)).rule,
+        "push.dependencies"
+    );
+}
+
+#[test]
+fn renovate_checks_committed_reader_input_instead_of_the_working_copy() {
+    let (repository, _, initial) = renovate_fixture("renovate-rust-input");
+    let reader = changed_file(&repository, RUST_ACTION_FILE, RUST_ACTION, &initial);
+    let report = rust_ci_report(RUST_ACTION_FILE, RUST_CI_EXPRESSION);
+    for broken in [
+        "[tools]\nrust = \"1.96\"\n",
+        "[tools]\nrust = { version = \"1.97\" }\n",
+        "[tools]\nrust = \"1.97\"\n[other]\nrust = \"1.96\"\n",
+        "[other]\nrust = \"1.96\"\n[tools]\n\"rust\" = \"1.97\"\n",
+    ] {
+        let offered = changed_file(&repository, "mise.toml", broken, &reader);
+        std::fs::write(repository.path().join("mise.toml"), RUST_MANIFEST).unwrap();
+        assert_eq!(
+            refusal(&report_gate(&repository, &initial, &offered, &report)).rule,
+            "push.evidence"
+        );
+    }
+    let offered = changed_file(&repository, "mise.toml", RUST_MANIFEST, &reader);
+    std::fs::write(
+        repository.path().join("mise.toml"),
+        "[tools]\nrust = \"1.96\"\n",
+    )
+    .unwrap();
+    let output = report_gate(&repository, &initial, &offered, &report);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn renovate_requires_regular_utf8_reader_and_manifest_blobs() {
+    let (repository, _, initial) = renovate_fixture("renovate-regular-source-blobs");
+    let pin = changed_file(&repository, "mise.toml", RUST_MANIFEST, &initial);
+    let offered = changed_file(&repository, RUST_ACTION_FILE, RUST_ACTION, &pin);
+    let report = rust_ci_report(RUST_ACTION_FILE, RUST_CI_EXPRESSION);
+    let publish = |file: &str, mode: &str, blob: &str| {
+        repository.git(&[
+            "update-index",
+            "--cacheinfo",
+            &format!("{mode},{blob},{file}"),
+        ]);
+        let tree = repository.git(&["write-tree"]);
+        let commit = repository.git(&["commit-tree", &tree, "-p", &offered, "-m", "source mode"]);
+        repository.git(&["update-ref", "HEAD", &commit]);
+        commit
+    };
+    for (file, contents) in [
+        ("mise.toml", RUST_MANIFEST),
+        (RUST_ACTION_FILE, RUST_ACTION),
+    ] {
+        let blob = repository.git(&["rev-parse", &format!("{offered}:{file}")]);
+        for mode in ["100644", "100755", "120000"] {
+            let commit = publish(file, mode, &blob);
+            let output = report_gate(&repository, &initial, &commit, &report);
+            if mode == "120000" {
+                assert_eq!(refusal(&output).rule, "push.evidence");
+            } else {
+                assert!(output.status.success());
+            }
+        }
+        publish(file, "100644", &blob);
+        let mut invalid = contents.as_bytes().to_vec();
+        invalid.extend_from_slice(b"\n# \xff\n");
+        std::fs::write(repository.path().join(file), invalid).unwrap();
+        let invalid_blob = repository.git(&["hash-object", "-w", file]);
+        let commit = publish(file, "100644", &invalid_blob);
+        assert_eq!(
+            refusal(&report_gate(&repository, &initial, &commit, &report)).rule,
+            "push.evidence"
+        );
+        publish(file, "100644", &blob);
+    }
 }
 
 fn outdated_mise_report() -> serde_json::Value {
@@ -1714,7 +2156,17 @@ fn renovate_requires_lookup_evidence_only_for_the_known_changed_sources() {
 
 #[test]
 fn renovate_accepts_only_verified_backend_duplicates_and_still_checks_their_updates() {
-    let (repository, base, offered) = renovate_fixture("renovate-backend-coverage");
+    let (repository, base, initial) = renovate_fixture("renovate-backend-coverage");
+    let mut declarations = String::new();
+    for (name, _, _, version) in MISE_BACKENDS {
+        writeln!(declarations, "\"{name}\" = \"{version}\"").unwrap();
+    }
+    let offered = changed_file(
+        &repository,
+        "mise.toml",
+        &format!("[tools]\n{declarations}"),
+        &initial,
+    );
     let mut rejected = Vec::new();
     for backend in MISE_BACKENDS {
         let output = report_gate(&repository, &base, &offered, &backend_report(backend));
