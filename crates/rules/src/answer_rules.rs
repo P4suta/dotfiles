@@ -51,6 +51,61 @@ pub enum Check {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum ProposalRegion {
+    Prose,
+    Plan,
+    AfterPlan,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum PlanDelimiter {
+    Text,
+    Open,
+    Close,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlanError {
+    UnexpectedOpen,
+    UnexpectedClose,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProposalStep {
+    pub region: ProposalRegion,
+    pub in_plan: bool,
+}
+
+/// Advances proposal scope for one line outside fenced code.
+///
+/// # Errors
+///
+/// Refuses a nested, repeated, or unmatched plan delimiter.
+pub const fn proposal_step(
+    region: ProposalRegion,
+    delimiter: PlanDelimiter,
+) -> Result<ProposalStep, PlanError> {
+    let next = match (region, delimiter) {
+        (ProposalRegion::Prose, PlanDelimiter::Open) => ProposalRegion::Plan,
+        (ProposalRegion::Plan, PlanDelimiter::Close) => ProposalRegion::AfterPlan,
+        (_, PlanDelimiter::Text) => region,
+        (_, PlanDelimiter::Open) => return Err(PlanError::UnexpectedOpen),
+        (_, PlanDelimiter::Close) => return Err(PlanError::UnexpectedClose),
+    };
+    Ok(ProposalStep {
+        region: next,
+        in_plan: matches!(region, ProposalRegion::Plan) || matches!(next, ProposalRegion::Plan),
+    })
+}
+
+#[must_use]
+pub const fn proposal_finished(region: ProposalRegion) -> bool {
+    !matches!(region, ProposalRegion::Plan)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub struct Evidence {
     pub binding: Binding,
     pub coverage: Check,
@@ -86,6 +141,64 @@ pub const fn may_complete(evidence: Evidence) -> bool {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    fn spec_proposal(region: ProposalRegion, delimiter: PlanDelimiter) {
+        let step = proposal_step(region, delimiter);
+        assert_eq!(
+            step.is_ok(),
+            matches!(delimiter, PlanDelimiter::Text)
+                || matches!(
+                    (region, delimiter),
+                    (ProposalRegion::Prose, PlanDelimiter::Open)
+                        | (ProposalRegion::Plan, PlanDelimiter::Close)
+                )
+        );
+        if let Ok(step) = step {
+            assert_eq!(
+                step.in_plan,
+                matches!(region, ProposalRegion::Plan) || matches!(delimiter, PlanDelimiter::Open)
+            );
+            assert_eq!(
+                proposal_finished(step.region),
+                !matches!(step.region, ProposalRegion::Plan)
+            );
+            match delimiter {
+                PlanDelimiter::Text => assert_eq!(step.region, region),
+                PlanDelimiter::Open => assert_eq!(step.region, ProposalRegion::Plan),
+                PlanDelimiter::Close => assert_eq!(step.region, ProposalRegion::AfterPlan),
+            }
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn proposal_scope_requires_balanced_nonrepeating_delimiters() {
+        let region = kani::any();
+        let delimiter = kani::any();
+        spec_proposal(region, delimiter);
+        kani::cover!(proposal_step(region, delimiter).is_ok());
+        kani::cover!(proposal_step(region, delimiter).is_err());
+        assert!(!proposal_finished(ProposalRegion::Plan));
+        assert!(proposal_finished(ProposalRegion::Prose));
+        assert!(proposal_finished(ProposalRegion::AfterPlan));
+    }
+
+    #[test]
+    fn every_proposal_region_and_delimiter_preserves_scope() {
+        for region in [
+            ProposalRegion::Prose,
+            ProposalRegion::Plan,
+            ProposalRegion::AfterPlan,
+        ] {
+            for delimiter in [
+                PlanDelimiter::Text,
+                PlanDelimiter::Open,
+                PlanDelimiter::Close,
+            ] {
+                spec_proposal(region, delimiter);
+            }
+        }
+    }
 
     fn spec_rank(first: i64, second: i64, preference: Preference) {
         let result = rank(first, second, preference);

@@ -1,0 +1,13 @@
+<proposed_plan>
+# Ownership verification
+
+## Changes
+
+- Add the supplied configuration.
+
+```json
+{"enabled":true}
+```
+</proposed_plan>
+---
+{"version":1,"atoms":[],"claims":[{"id":"plan-0","text":"<proposed_plan>","basis":{"kind":"proposal","reason":"Proposed configuration change"}},{"id":"plan-1","text":"# Ownership verification","basis":{"kind":"proposal","reason":"Proposed configuration change"}},{"id":"plan-2","text":"## Changes","basis":{"kind":"proposal","reason":"Proposed configuration change"}},{"id":"plan-3","text":"- Add the supplied configuration.","basis":{"kind":"proposal","reason":"Proposed configuration change"}},{"id":"plan-4","text":"```json","basis":{"kind":"proposal","reason":"Proposed configuration change"}},{"id":"plan-5","text":"{\"enabled\":true}","basis":{"kind":"proposal","reason":"Proposed configuration change"}},{"id":"plan-6","text":"```","basis":{"kind":"proposal","reason":"Proposed configuration change"}},{"id":"plan-7","text":"</proposed_plan>","basis":{"kind":"proposal","reason":"Proposed configuration change"}}],"readings":[]}

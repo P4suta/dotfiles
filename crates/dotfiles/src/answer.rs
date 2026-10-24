@@ -30,6 +30,10 @@ const MAX_SESSION_BYTES: usize = 256;
 const MAX_GENERATION_BYTES: usize = 128;
 const SHA256_HEX_BYTES: usize = 64;
 const MAX_PROOF_BYTES: u64 = 1_048_576;
+const PLAN_OPEN: &str = "<proposed_plan>";
+const PLAN_CLOSE: &str = "</proposed_plan>";
+const MIN_FENCE_WIDTH: usize = 3;
+const MAX_FENCE_INDENT: usize = 3;
 const LEAN_TOOLCHAIN: &str = include_str!("../../../specs/lean/lean-toolchain");
 
 /// Read the same release pin as the proof package.
@@ -379,6 +383,70 @@ fn derivation(
     })
 }
 
+struct MarkdownFence {
+    marker: u8,
+    width: usize,
+}
+
+fn code_line(line: &str, fence: &mut Option<MarkdownFence>) -> bool {
+    let inside = fence.is_some();
+    let text = line.trim_start_matches(' ');
+    if line.len() - text.len() > MAX_FENCE_INDENT {
+        return inside;
+    }
+    let Some(&marker) = text.as_bytes().first() else {
+        return inside;
+    };
+    if !matches!(marker, b'`' | b'~') {
+        return inside;
+    }
+    let width = text.bytes().take_while(|&byte| byte == marker).count();
+    let Some(rest) = text.get(width..) else {
+        return inside;
+    };
+    if width < MIN_FENCE_WIDTH {
+        return inside;
+    }
+    if let Some(active) = fence {
+        if marker == active.marker
+            && width >= active.width
+            && rest.trim_matches([' ', '\t']).is_empty()
+        {
+            *fence = None;
+        }
+    } else if marker == b'~' || !rest.contains('`') {
+        *fence = Some(MarkdownFence { marker, width });
+    }
+    inside || fence.is_some()
+}
+
+fn proposal_scopes(lines: &[&str]) -> Result<Vec<bool>> {
+    use answer_rules::{PlanDelimiter, ProposalRegion};
+    let mut region = ProposalRegion::Prose;
+    let mut fence = None;
+    let mut scopes = Vec::with_capacity(lines.len());
+    for &line in lines {
+        let delimiter = if code_line(line, &mut fence) {
+            PlanDelimiter::Text
+        } else if line == PLAN_OPEN {
+            PlanDelimiter::Open
+        } else if line == PLAN_CLOSE {
+            PlanDelimiter::Close
+        } else {
+            PlanDelimiter::Text
+        };
+        let step = answer_rules::proposal_step(region, delimiter)
+            .map_err(|error| anyhow::anyhow!("invalid proposal block: {error:?}"))?;
+        region = step.region;
+        scopes.push(step.in_plan);
+    }
+    ensure!(
+        answer_rules::proposal_finished(region),
+        "proposal block is missing its closing delimiter"
+    );
+    Ok(scopes)
+}
+
 fn coverage(draft: &str, document: &Document, prompt: &str) -> Result<(String, usize)> {
     ensure!(
         document.version == VERSION,
@@ -396,10 +464,11 @@ fn coverage(draft: &str, document: &Document, prompt: &str) -> Result<(String, u
         lines.len() == document.claims.len(),
         "each nonempty draft line needs exactly one claim"
     );
+    let scopes = proposal_scopes(&lines)?;
     let mut claims: BTreeMap<&str, (&Claim, bool)> = BTreeMap::new();
     let mut proof = String::new();
     let mut count = 0;
-    for (line, claim) in lines.into_iter().zip(&document.claims) {
+    for ((line, in_plan), claim) in lines.into_iter().zip(scopes).zip(&document.claims) {
         ensure!(
             line == claim.text,
             "claim {} differs from the exact draft line",
@@ -463,7 +532,7 @@ fn coverage(draft: &str, document: &Document, prompt: &str) -> Result<(String, u
                 proof.push_str(&derived.proof);
                 count += 1;
             }
-            Basis::Proposal { reason } => labeled(line, reason, &["提案:", "提案：", "Proposal:"])?,
+            Basis::Proposal { reason } => proposal(line, reason, in_plan)?,
             Basis::Unverified { reason } => {
                 labeled(line, reason, &["未検証:", "未検証：", "Unverified:"])?;
             }
@@ -475,6 +544,15 @@ fn coverage(draft: &str, document: &Document, prompt: &str) -> Result<(String, u
         claims.insert(&claim.id, (claim, hypothetical));
     }
     Ok((proof, count))
+}
+
+fn proposal(line: &str, reason: &str, in_plan: bool) -> Result<()> {
+    if in_plan {
+        ensure!(!reason.trim().is_empty(), "a proposal needs its reason");
+        Ok(())
+    } else {
+        labeled(line, reason, &["提案:", "提案：", "Proposal:"])
+    }
 }
 
 fn labeled(line: &str, reason: &str, prefixes: &[&str]) -> Result<()> {
