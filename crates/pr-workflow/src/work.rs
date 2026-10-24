@@ -81,6 +81,27 @@ pub(super) struct Plan {
 }
 
 impl Plan {
+    fn continuation(
+        existing: ExistingPull,
+        source: platform::source_identity::Checked,
+        head: String,
+        prepared_at: String,
+        record_path: PathBuf,
+    ) -> Result<Self> {
+        source.require_current()?;
+        require_head(&head, &prepared_at)?;
+        println!("Continuing existing PR #{} ({head})", existing.number);
+        Ok(Self {
+            base: existing.base,
+            stacked: false,
+            record_path,
+            declaration: None,
+            source,
+            head,
+            prepared_at,
+        })
+    }
+
     pub(super) fn base(&self) -> &str {
         &self.base
     }
@@ -204,8 +225,24 @@ fn require_head(head: &str, expected: &str) -> Result<()> {
     Ok(())
 }
 
-fn pulls(github: &Github, target: &Target) -> Result<Vec<Pull>> {
+struct ExistingPull {
+    number: u64,
+    base: String,
+}
+
+struct OpenPulls {
+    mine: Vec<Pull>,
+    existing: Option<ExistingPull>,
+}
+
+fn pulls(
+    github: &Github,
+    target: &Target,
+    head: &str,
+    source: &platform::source_identity::Checked,
+) -> Result<OpenPulls> {
     let mut mine = Vec::new();
+    let mut existing = None;
     let mut identities = BTreeSet::new();
     for page in 1_u32..=u32::MAX {
         let endpoint = format!(
@@ -219,7 +256,15 @@ fn pulls(github: &Github, target: &Target) -> Result<Vec<Pull>> {
                 pull.number != 0 && identities.insert(pull.number),
                 "duplicate or invalid open PR identity"
             );
-            if pull.user.login.eq_ignore_ascii_case(&github.login) {
+            let owned = pull.user.login.eq_ignore_ascii_case(&github.login);
+            let current = pull.head.name == head
+                && pull.head.repo.as_ref().is_some_and(|repository| {
+                    repository.id == source.binding().source_id()
+                        && repository
+                            .full_name
+                            .eq_ignore_ascii_case(source.binding().source())
+                });
+            if owned || current {
                 ensure!(
                     pull.html_url.eq_ignore_ascii_case(&format!(
                         "{}/{}/pull/{}",
@@ -242,11 +287,20 @@ fn pulls(github: &Github, target: &Target) -> Result<Vec<Pull>> {
                         .is_some_and(|repository| repository.id != 0),
                     "open PR source repository is unavailable"
                 );
+            }
+            if current {
+                ensure!(existing.is_none(), "ambiguous open PR source branch");
+                existing = Some(ExistingPull {
+                    number: pull.number,
+                    base: pull.base.name.clone(),
+                });
+            }
+            if owned {
                 mine.push(pull);
             }
         }
         if complete {
-            return Ok(mine);
+            return Ok(OpenPulls { mine, existing });
         }
     }
     anyhow::bail!("open PR pagination overflow")
@@ -437,7 +491,8 @@ pub(super) fn prepare(
     let head = head.rsplit_once(':').map_or(head, |(_, branch)| branch);
     let source = super::source_identity(github, &std::env::current_dir()?, &target.repo)?;
     let prepared_at = branch_head(head)?;
-    let mine = pulls(github, target)?;
+    let open = pulls(github, target, head, &source)?;
+    let mine = open.mine;
     let mut active = pending(
         github,
         target,
@@ -447,6 +502,18 @@ pub(super) fn prepare(
         operation,
         &prepared_at,
     )?;
+    if matches!(operation, Operation::Start)
+        && independent.is_none()
+        && let Some(continuation) = open.existing
+    {
+        return Plan::continuation(
+            continuation,
+            source,
+            head.to_owned(),
+            prepared_at,
+            record_path(target, &github.login, head)?,
+        );
+    }
     let existing = mine.iter().find(|pull| pull.head.name == head);
     if let (Some(record), Some(pull)) = (&mut active, existing) {
         ensure!(
