@@ -14,11 +14,4 @@
 {usage}
 ```
 
-{documentation}## License
-
-Licensed under either license:
-
-- [Apache License, Version 2.0](LICENSE-APACHE)
-- [Massachusetts Institute of Technology (MIT) license](LICENSE-MIT)
-
-Contributions use both licenses unless you state other terms.
+{documentation}{license}

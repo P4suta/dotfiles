@@ -11,11 +11,15 @@ Issue 145 requires one small metadata file and a drift check.
 
 ## Decision
 
-`repository.toml` names the repository, summary, installation, usage, copyright holder, and dual license.
+`repository.toml` names the repository, summary, installation, usage, and existing license state.
 The typed model rejects unknown fields and invalid required values.
-`dotfiles repository generate` writes the minimal README and both license files from embedded templates.
-`dotfiles repository check` compares those artifacts and every tracked package manifest with the metadata.
-Contributor identities require the owner's copyright identity, a bot identity, or a recorded consent.
+`dotfiles repository generate` writes the minimal README and generates license files only for the owner's existing dual-license state.
+Apache-only and Affero General Public License repositories preserve reviewed license files by their root-level paths and SHA-256 digests.
+An unlicensed state generates no license files or README license section.
+`dotfiles repository check` compares generated artifacts and tracked package manifests with the metadata.
+The dual-license state requires the owner's copyright identity, a bot identity, or recorded consent for each other contributor.
+Preserving an existing license state requires no new contributor consent record.
+The two SPDX operand orders of the existing dual license are equivalent for package manifest checks.
 
 The GitHub description participates when an exact `--remote OWNER/REPO` is supplied.
 Generation changes that external description only with that explicit option.

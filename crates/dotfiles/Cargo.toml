@@ -31,6 +31,7 @@ model = { path = "../model" }
 platform = { path = "../platform" }
 prose = { path = "../prose" }
 rules = { path = "../rules" }
+same-file = "=1.0.6"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11.0"
