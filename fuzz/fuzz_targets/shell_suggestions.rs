@@ -8,4 +8,5 @@ fuzz_target!(|data: &[u8]| {
     };
     let (source, tree) = text.split_once("\n---\n").unwrap_or(("jq a", text));
     let _ = dotfiles::legacy::check_shell_spelling_tree(source, tree);
+    let _ = dotfiles::legacy::check_powershell_spelling_tree(source, tree);
 });

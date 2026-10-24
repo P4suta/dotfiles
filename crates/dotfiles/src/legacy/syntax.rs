@@ -3,6 +3,82 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::borrow::Cow;
 
+const POWERSHELL_TREE: &str = r"
+$ErrorActionPreference = 'Stop'
+$source = [Console]::In.ReadToEnd()
+$tokens = $null
+$errors = $null
+$tree = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$errors)
+$span = {
+    param([System.Management.Automation.Language.IScriptExtent]$extent)
+    @{
+        Pos = @{
+            Offset = [Text.Encoding]::UTF8.GetByteCount($source.Substring(0, $extent.StartOffset))
+            Line = $extent.StartLineNumber
+            Col = $extent.StartColumnNumber
+        }
+        End = @{
+            Offset = [Text.Encoding]::UTF8.GetByteCount($source.Substring(0, $extent.EndOffset))
+            Line = $extent.EndLineNumber
+            Col = $extent.EndColumnNumber
+        }
+    }
+}
+$commands = @($tree.FindAll({param($node) $node -is [System.Management.Automation.Language.CommandAst]}, $true))
+$statements = @($tree.EndBlock.Statements)
+@{
+    source = $source
+    errors = @($errors | ForEach-Object { $_.Message })
+    calls = @($commands | ForEach-Object {
+        $call = $_
+        @{
+            span = (& $span $call.Extent)
+            file_inputs_safe = $null -eq $tree.ParamBlock -and $null -eq $tree.BeginBlock -and
+                $null -eq $tree.ProcessBlock -and $null -eq $tree.DynamicParamBlock -and
+                $null -eq $tree.CleanBlock -and $tree.UsingStatements.Count -eq 0 -and
+                $statements.Count -eq 1 -and $statements[0] -is [System.Management.Automation.Language.PipelineAst] -and
+                -not $statements[0].Background -and $statements[0].PipelineElements.Count -eq 1 -and
+                $statements[0].PipelineElements[0] -eq $call -and $call.Redirections.Count -eq 0 -and
+                $call.InvocationOperator -in @('Unknown', 'Ampersand')
+            words = @($call.CommandElements | ForEach-Object {
+                @{
+                    span = (& $span $_.Extent)
+                    value = if ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                        $_.Value
+                    } elseif ($_ -is [System.Management.Automation.Language.CommandParameterAst] -and $null -eq $_.Argument) {
+                        $_.Extent.Text
+                    } elseif ($_ -is [System.Management.Automation.Language.ConstantExpressionAst]) {
+                        [Convert]::ToString($_.Value, [Globalization.CultureInfo]::InvariantCulture)
+                    } else {
+                        $null
+                    }
+                }
+            })
+        }
+    })
+} | ConvertTo-Json -Depth 8 -Compress
+";
+
+#[derive(Deserialize)]
+struct PowerShellWord {
+    span: Span,
+    value: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PowerShellCall {
+    span: Span,
+    words: Vec<PowerShellWord>,
+    file_inputs_safe: bool,
+}
+
+#[derive(Deserialize)]
+struct PowerShellTree {
+    source: String,
+    errors: Vec<String>,
+    calls: Vec<PowerShellCall>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct Position {
@@ -396,13 +472,174 @@ pub(super) fn parse(source: &str) -> Result<Vec<Invocation<'_>>> {
     decode(source, &crate::lint_hook::shell_syntax_tree(source)?)
 }
 
+fn decode_powershell<'a>(source: &'a str, tree: &str) -> Result<Vec<Invocation<'a>>> {
+    crate::lint_hook::check_shell_syntax_source(source)?;
+    crate::lint_hook::check_shell_syntax_output(tree)?;
+    let tree: PowerShellTree = serde_json::from_str(tree)?;
+    ensure!(
+        tree.source == source,
+        "PowerShell metadata names another source"
+    );
+    ensure!(tree.errors.is_empty(), "PowerShell source has parse errors");
+    let mut calls = Vec::new();
+    for call in tree.calls {
+        call.span.text(source)?;
+        ensure!(!call.words.is_empty(), "PowerShell call has no words");
+        let mut end = call.span.pos.offset;
+        let words = call
+            .words
+            .into_iter()
+            .map(|word| {
+                ensure!(
+                    end <= word.span.pos.offset && word.span.end.offset <= call.span.end.offset,
+                    "PowerShell words overlap or leave their call"
+                );
+                end = word.span.end.offset;
+                let spelling = word.span.text(source)?;
+                let literal = word.value.filter(|value| {
+                    crate::claude_hook::github::literal_word(spelling).as_deref()
+                        == Some(value.as_str())
+                });
+                Ok(Word {
+                    spelling: literal.as_ref().map(|_| spelling),
+                    value: literal.unwrap_or_else(|| spelling.to_owned()),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let file_inputs_safe =
+            call.file_inputs_safe && words.iter().all(|word| word.spelling.is_some());
+        calls.push(Invocation {
+            offset: call.span.pos.offset,
+            words,
+            inputs: Vec::new(),
+            literal_stdin: None,
+            file_inputs_safe,
+        });
+    }
+    calls.sort_by_key(|call| call.offset);
+    Ok(calls)
+}
+
+pub(super) fn parse_powershell(source: &str) -> Result<Vec<Invocation<'_>>> {
+    decode_powershell(
+        source,
+        &crate::lint_hook::powershell_syntax_tree(source, POWERSHELL_TREE)?,
+    )
+}
+
 pub(super) fn check(source: &str, tree: &str) -> Result<()> {
     decode(source, tree).map(|_| ())
+}
+
+pub(super) fn check_powershell(source: &str, tree: &str) -> Result<()> {
+    decode_powershell(source, tree).map(|_| ())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_powershell_keeps_literal_arguments_and_utf8_ranges() -> Result<()> {
+        let source = "bash 'fixtures/é🚀 check.sh' --verify 21 ''";
+        let calls = parse_powershell(source)?;
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].file_inputs_safe());
+        assert_eq!(
+            calls[0].values(),
+            ["bash", "fixtures/é🚀 check.sh", "--verify", "21", ""]
+        );
+        assert_eq!(
+            calls[0]
+                .arguments(1)?
+                .iter()
+                .map(|word| word.spelling)
+                .collect::<Vec<_>>(),
+            ["'fixtures/é🚀 check.sh'", "--verify", "21", "''"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn powershell_dynamic_or_compound_contexts_never_trust_file_inputs() -> Result<()> {
+        for source in [
+            "bash $script",
+            "bash \"$script\"",
+            "bash (Join-Path root check.sh)",
+            "bash check.sh > output.txt",
+            "bash check.sh | Write-Output",
+            "Set-Location other; bash check.sh",
+            "function Invoke-Check { bash check.sh }",
+            ". check.sh",
+            "bash check.sh &",
+            "bash 'a''b.sh'",
+        ] {
+            let calls = parse_powershell(source)?;
+            assert!(!calls.is_empty(), "{source}");
+            assert!(
+                calls.iter().all(|call| !call.file_inputs_safe()),
+                "{source}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn native_powershell_parsing_never_executes_the_submitted_source() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let marker = directory.path().join("must-not-exist");
+        let path = marker.to_string_lossy().replace('\'', "''");
+        let source = format!("New-Item -ItemType File -Path '{path}'");
+        let calls = parse_powershell(&source)?;
+        assert_eq!(calls.len(), 1);
+        assert!(!marker.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn powershell_metadata_rejects_wrong_sources_and_invalid_spans() {
+        let source = "é check.sh";
+        let position = |offset| serde_json::json!({"Offset":offset,"Line":1,"Col":1});
+        let span = |start, end| serde_json::json!({"Pos":position(start),"End":position(end)});
+        let tree = serde_json::json!({
+            "source":source,"errors":[],"calls":[{
+                "span":span(0, source.len()),"file_inputs_safe":true,
+                "words":[{"span":span(0, 2),"value":"é"}]
+            }]
+        });
+        for (mut broken, expected) in [
+            (tree.clone(), "another source"),
+            (tree.clone(), "UTF-8 boundaries"),
+            (tree.clone(), "overlap or leave"),
+        ] {
+            if expected == "another source" {
+                broken["source"] = "other".into();
+            } else if expected == "UTF-8 boundaries" {
+                broken["calls"][0]["words"][0]["span"] = span(1, 2);
+            } else {
+                broken["calls"][0]["words"][0]["span"] = span(0, source.len() + 1);
+            }
+            let error = decode_powershell(source, &broken.to_string())
+                .err()
+                .expect("invalid metadata passed");
+            assert!(format!("{error:#}").contains(expected), "{error:#}");
+        }
+        assert!(decode_powershell(source, "{}").is_err());
+        assert!(parse_powershell("bash '").is_err());
+    }
+
+    #[test]
+    fn powershell_corpus_covers_valid_argument_metadata() -> Result<()> {
+        let seed = include_str!("../../../../fuzz/corpus/shell_suggestions/powershell-literals");
+        let (source, tree) = seed
+            .split_once("\n---\n")
+            .context("missing source separator")?;
+        check_powershell(source, tree)?;
+        let calls = decode_powershell(source, tree)?;
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].file_inputs_safe());
+        Ok(())
+    }
 
     #[test]
     fn the_pinned_parser_keeps_source_words_separate_from_redirections() -> Result<()> {

@@ -469,7 +469,13 @@ impl Shell {
                 .collect()
         };
         match self {
-            Self::PowerShell => unparsed(),
+            Self::PowerShell => match syntax::parse_powershell(command) {
+                Ok(invocations) => invocations,
+                Err(error) => {
+                    findings.unavailable.push(format!("Refused: PowerShell argument spelling could not be verified: {error:#}.\nNext action: correct the PowerShell syntax or restore the pinned parser before using a suggested command."));
+                    unparsed()
+                }
+            },
             Self::Bash => match syntax::parse(command) {
                 Ok(invocations) => invocations,
                 Err(error) => {
@@ -496,6 +502,14 @@ pub(crate) fn findings_in_shell(
 /// Returns an error for unreadable syntax metadata, unsupported source, or an invalid source range.
 pub fn check_shell_spelling_tree(source: &str, tree: &str) -> Result<()> {
     syntax::check(source, tree)
+}
+
+/// Checks native PowerShell argument metadata for the submitted source.
+///
+/// # Errors
+/// Returns an error for malformed metadata, another source, or invalid argument ranges.
+pub fn check_powershell_spelling_tree(source: &str, tree: &str) -> Result<()> {
+    syntax::check_powershell(source, tree)
 }
 
 /// The joined diagnostics, or `None` when every supported inspection admits the command.
@@ -738,6 +752,17 @@ fn dynamic_xargs_script(words: &[String], command: &[String], path: Option<&str>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn powershell_literal_script_keeps_inspectable_file_inputs() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(directory.path().join("check.sh"), "printf 'ready\\n'\n")?;
+        let report = findings_in_shell("bash check.sh", Some(directory.path()), Shell::PowerShell)?;
+        assert!(report.bodies.is_empty(), "{report:?}");
+        assert!(report.unavailable.is_empty(), "{report:?}");
+        assert!(report.refusals.is_empty(), "{report:?}");
+        Ok(())
+    }
 
     thread_local! {
         /// The bypasses a test admitted, which stay out of the owner's Git bypass log.

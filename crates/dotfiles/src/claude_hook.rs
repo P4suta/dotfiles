@@ -892,6 +892,39 @@ mod tests {
     }
 
     #[test]
+    fn powershell_literal_scripts_use_the_tool_workdir_and_keep_body_checks() -> Result<()> {
+        let session = tempfile::tempdir()?;
+        let execution = tempfile::tempdir()?;
+        std::fs::write(
+            execution.path().join("check.sh"),
+            "#!/bin/sh\nprintf 'ready\\n'\n",
+        )?;
+        std::fs::write(
+            execution.path().join("publish.sh"),
+            "gh issue close 3 --comment 'The check passed. The issue is complete.'\n",
+        )?;
+        let event = |script: &str| {
+            json!({
+            "tool_name":"exec_command","cwd":session.path(),
+            "tool_input":{"cmd":format!("sh {script}"),"shell":"pwsh","workdir":execution.path()}
+        }).to_string()
+        };
+        let valid = policy_refusals_with(&event("check.sh"), test_bundle)?;
+        assert!(
+            valid.is_empty(),
+            "{}",
+            valid
+                .iter()
+                .map(|finding| finding.message.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let invalid = policy_refusals_with(&event("publish.sh"), test_bundle)?;
+        assert!(invalid.iter().any(|finding| finding.rule == "hook.prose"));
+        Ok(())
+    }
+
+    #[test]
     fn github_opaque_inputs_never_claim_to_have_checked_body_content() -> Result<()> {
         for command in [
             "gh pr create --body \"$(printf 'The checks passed.')\"",
