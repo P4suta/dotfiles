@@ -818,8 +818,18 @@ fn script_findings(command: &str, directory: Option<&Path>, depth: usize) -> Vec
         let rules::ScriptPath::Literal(path) = rules::resolve_script(path, &facts) else {
             continue;
         };
-        let path =
-            directory.map_or_else(|| PathBuf::from(&path), |directory| directory.join(&path));
+        let script = Path::new(&path);
+        let path = if script.is_absolute() {
+            script.to_path_buf()
+        } else if let Some(directory) = directory.filter(|directory| directory.is_absolute()) {
+            directory.join(script)
+        } else {
+            findings.push(format!(
+                "Refused: cannot lint relative script {} without a known absolute execution directory.\nNext action: provide an absolute cwd or workdir in the hook event.",
+                script.display()
+            ));
+            continue;
+        };
         let interpreter = matches!(name.as_str(), "bash" | "sh" | "dash" | "ksh" | "zsh")
             .then_some(first.as_str());
         match file(&path, interpreter) {
@@ -927,5 +937,18 @@ mod tests {
         assert!(message.contains("SC2250: 221 finding(s)"), "{message}");
         assert_eq!(message.matches("Prefer braces").count(), MAX_LOCATIONS);
         assert!(message.contains(SC2016_HINT), "{message}");
+    }
+
+    #[test]
+    fn relative_scripts_require_a_known_absolute_execution_directory() {
+        for directory in [None, Some(Path::new("."))] {
+            let findings = script_findings("bash test/vulnerability_scan.sh", directory, 0);
+            assert_eq!(findings.len(), 1, "{directory:?}: {findings:?}");
+            assert!(
+                findings[0].contains("known absolute execution directory"),
+                "{directory:?}: {}",
+                findings[0]
+            );
+        }
     }
 }
