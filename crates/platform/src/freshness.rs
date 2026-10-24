@@ -350,13 +350,32 @@ fn bound_build(root: &Path, mut stamp: Embedded, built: Built) -> Result<Embedde
             &stamp.root,
         )
     })?;
-    if producing != requested || !valid_hash(&stamp.hash) || content_hash(&requested)? != stamp.hash
-    {
+    if producing != requested {
         return Err(origin_refusal(
             built,
-            "the artifact was not built from the requested checkout's current sources",
+            "the artifact's producing checkout differs from the requested checkout",
             &producing,
         )
+        .evidence(format!("requested checkout: {}", requested.display()))
+        .into());
+    }
+    if !valid_hash(&stamp.hash) {
+        return Err(origin_refusal(
+            built,
+            "the artifact's compiled source digest is malformed",
+            &producing,
+        )
+        .into());
+    }
+    let current = content_hash(&requested)?;
+    if current != stamp.hash {
+        return Err(origin_refusal(
+            built,
+            "the artifact's compiled source digest differs from the requested checkout",
+            &producing,
+        )
+        .evidence(format!("artifact source digest: {}", stamp.hash))
+        .evidence(format!("current source digest: {current}"))
         .into());
     }
     stamp.root = producing;
@@ -522,6 +541,14 @@ pub fn reinstall_lagging(home: &Path, root: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_embedded_digest_matches_the_unchanged_producing_checkout() -> Result<()> {
+        let stamp = embedded();
+        let current = content_hash(&stamp.root)?;
+        assert_eq!(current, stamp.hash);
+        Ok(())
+    }
 
     #[test]
     fn automatic_refresh_preserves_disabled_skill_records_and_refuses_active_legacy_origins()
