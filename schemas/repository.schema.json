@@ -33,6 +33,18 @@
       "description": "The project name, which titles the README.",
       "type": "string"
     },
+    "preserved_licenses": {
+      "description": "Preserve both reviewed license files at these SHA-256 digests.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PreservedLicenses"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "summary": {
       "description": "One line without a final period, which serves as the GitHub description and the README's first sentence.",
       "type": "string"
@@ -74,6 +86,25 @@
       "required": [
         "contributor",
         "evidence"
+      ]
+    },
+    "PreservedLicenses": {
+      "description": "The reviewed bytes of the existing dual-license assets.",
+      "type": "object",
+      "properties": {
+        "apache_sha256": {
+          "description": "The SHA-256 digest of `LICENSE-APACHE`.",
+          "type": "string"
+        },
+        "mit_sha256": {
+          "description": "The SHA-256 digest of `LICENSE-MIT`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "mit_sha256",
+        "apache_sha256"
       ]
     }
   }

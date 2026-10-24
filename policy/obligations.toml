@@ -598,7 +598,7 @@ fn reject_a_stream_reader_that_names_a_file() {
 verifier = "kani"
 source = "crates/rules/src/repository_rules.rs"
 probes = '''
-use production::{Drift, drift};
+use production::{Drift, Generation, LicenseAssets, drift, generation};
 #[kani::proof]
 fn reject_passing_a_repository_with_a_single_license() {
     assert!(drift(false, true, true, true) == Drift::Current);
@@ -606,6 +606,14 @@ fn reject_passing_a_repository_with_a_single_license() {
 #[kani::proof]
 fn reject_passing_an_edited_readme() {
     assert!(drift(true, true, false, true) == Drift::Current);
+}
+#[kani::proof]
+fn reject_rewriting_reviewed_licenses() {
+    assert!(generation(LicenseAssets::Preserved { mit_matches: true, apache_matches: true }) == Generation::All);
+}
+#[kani::proof]
+fn reject_generating_a_readme_with_changed_reviewed_licenses() {
+    assert!(generation(LicenseAssets::Preserved { mit_matches: true, apache_matches: false }) == Generation::Readme);
 }
 '''
 

@@ -12,6 +12,38 @@ pub enum Drift {
     Description,
 }
 
+/// Whether the repository generates license texts or preserves reviewed assets.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum LicenseAssets {
+    Generated,
+    Preserved {
+        mit_matches: bool,
+        apache_matches: bool,
+    },
+}
+
+/// The files generation may write after checking the license assets.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Generation {
+    All,
+    Readme,
+    Refused,
+}
+
+/// README generation requires both preserved assets to match.
+#[must_use]
+pub fn generation(assets: LicenseAssets) -> Generation {
+    match assets {
+        LicenseAssets::Generated => Generation::All,
+        LicenseAssets::Preserved {
+            mit_matches: true,
+            apache_matches: true,
+        } => Generation::Readme,
+        LicenseAssets::Preserved { .. } => Generation::Refused,
+    }
+}
+
 /// The first drift to fix.
 /// The license and the consent decide what the generated files may say, so they come first.
 /// The description comes last, because only the owner's account changes it.
@@ -38,6 +70,45 @@ pub fn drift(license: bool, consent: bool, generated: bool, description: bool) -
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_generation(assets: LicenseAssets) {
+        let result = generation(assets);
+        assert_eq!(
+            result == Generation::All,
+            assets == LicenseAssets::Generated
+        );
+        assert_eq!(
+            result == Generation::Readme,
+            assets
+                == LicenseAssets::Preserved {
+                    mit_matches: true,
+                    apache_matches: true
+                }
+        );
+        assert_eq!(
+            result == Generation::Refused,
+            matches!(
+                assets,
+                LicenseAssets::Preserved {
+                    mit_matches: false,
+                    ..
+                } | LicenseAssets::Preserved {
+                    apache_matches: false,
+                    ..
+                }
+            )
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_matching_reviewed_licenses_allow_readme_generation() {
+        let assets: LicenseAssets = kani::any();
+        spec_generation(assets);
+        kani::cover!(generation(assets) == Generation::All);
+        kani::cover!(generation(assets) == Generation::Readme);
+        kani::cover!(generation(assets) == Generation::Refused);
+    }
 
     /// A repository passes only when every part matches, and a failing license or consent always names itself first.
     #[expect(
@@ -68,6 +139,17 @@ mod proofs {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_license_asset_state_meets_the_specification() {
+        super::proofs::spec_generation(super::LicenseAssets::Generated);
+        for [mit_matches, apache_matches] in crate::domain::flags() {
+            super::proofs::spec_generation(super::LicenseAssets::Preserved {
+                mit_matches,
+                apache_matches,
+            });
+        }
+    }
+
     #[test]
     fn every_input_meets_the_specification() {
         for [license, consent, generated, description] in crate::domain::flags() {
