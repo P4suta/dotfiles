@@ -678,6 +678,24 @@ fn reject_a_new_record_that_takes_the_next_number() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/yaml_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_accepting_a_raw_nul() {
+    assert!(production::raw_character('\0'));
+}
+#[kani::proof]
+fn reject_accepting_a_raw_vertical_tab() {
+    assert!(production::raw_character('\u{b}'));
+}
+#[kani::proof]
+fn reject_dropping_a_raw_line_feed() {
+    assert!(!production::raw_character('\n'));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/freshness_rules.rs"
 probes = '''
 use production::{Facts, Verdict, verdict};

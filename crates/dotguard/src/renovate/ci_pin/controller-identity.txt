@@ -1,0 +1,13 @@
+$ErrorActionPreference = "Stop"
+if ($env:GITHUB_REF -cne "refs/heads/main") {
+  throw "Mutation controller must be called from protected main, got '$env:GITHUB_REF'."
+}
+foreach ($identity in @($env:CONTROLLER_SHA, $env:TARGET_SHA, $env:WORKFLOW_SHA)) {
+  if ($identity -cnotmatch '^[0-9a-f]{40}$') {
+    throw "Mutation identity '$identity' is not an exact lowercase commit SHA."
+  }
+}
+if ($env:GITHUB_SHA -cne $env:CONTROLLER_SHA -or
+    $env:WORKFLOW_SHA -cne $env:CONTROLLER_SHA) {
+  throw "Caller, controller input, and reusable workflow are not one immutable commit."
+}

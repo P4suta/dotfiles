@@ -1,0 +1,4 @@
+[tools."http:winappcli"]
+version = "0.5.0"
+version_list_url = "https://api.github.com/repos/microsoft/winappCli/releases/latest"
+version_json_path = ".tag_name"

@@ -127,6 +127,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "ci_pin"
+path = "fuzz_targets/ci_pin.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "review_completion"
 path = "fuzz_targets/review_completion.rs"
 test = false

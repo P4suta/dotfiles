@@ -1,0 +1,23 @@
+name: Rust toolchain (repository-pinned)
+description: Install the repository-pinned Rust toolchain without invoking mise.
+inputs:
+  components:
+    description: Comma-separated rustup components (e.g. "clippy, rustfmt").
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - id: pin
+      shell: bash
+      run: |
+        version=$(awk -F'"' '/^rust[[:space:]]*=/{print $2; exit}' mise.toml)
+        if [ -z "$version" ]; then
+          echo "::error::could not read the rust pin from mise.toml"; exit 1
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "Using repository-pinned Rust $version"
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+      with:
+        toolchain: ${{ steps.pin.outputs.version }}
+        components: ${{ inputs.components }}
