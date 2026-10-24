@@ -2,7 +2,7 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Drift {
     Current,
-    /// The license expression or a package manifest names another license.
+    /// Package manifests differ from the license state declared in metadata.
     License,
     /// A contributor besides the copyright holder and bots has no recorded consent to the dual license.
     Consent,
@@ -17,10 +17,14 @@ pub enum Drift {
 #[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum LicenseAssets {
     Generated,
-    Preserved {
+    PreservedDual {
         mit_matches: bool,
         apache_matches: bool,
     },
+    PreservedExisting {
+        all_match: bool,
+    },
+    Unlicensed,
 }
 
 /// The files generation may write after checking the license assets.
@@ -31,16 +35,20 @@ pub enum Generation {
     Refused,
 }
 
-/// README generation requires both preserved assets to match.
+/// Selects generated artifacts from the license state and its reviewed assets.
 #[must_use]
 pub fn generation(assets: LicenseAssets) -> Generation {
     match assets {
         LicenseAssets::Generated => Generation::All,
-        LicenseAssets::Preserved {
+        LicenseAssets::PreservedDual {
             mit_matches: true,
             apache_matches: true,
         } => Generation::Readme,
-        LicenseAssets::Preserved { .. } => Generation::Refused,
+        LicenseAssets::PreservedExisting { all_match: true } | LicenseAssets::Unlicensed => {
+            Generation::Readme
+        }
+        LicenseAssets::PreservedDual { .. }
+        | LicenseAssets::PreservedExisting { all_match: false } => Generation::Refused,
     }
 }
 
@@ -79,23 +87,26 @@ mod proofs {
         );
         assert_eq!(
             result == Generation::Readme,
-            assets
-                == LicenseAssets::Preserved {
+            matches!(
+                assets,
+                LicenseAssets::PreservedDual {
                     mit_matches: true,
                     apache_matches: true
-                }
+                } | LicenseAssets::PreservedExisting { all_match: true }
+                    | LicenseAssets::Unlicensed
+            )
         );
         assert_eq!(
             result == Generation::Refused,
             matches!(
                 assets,
-                LicenseAssets::Preserved {
+                LicenseAssets::PreservedDual {
                     mit_matches: false,
                     ..
-                } | LicenseAssets::Preserved {
+                } | LicenseAssets::PreservedDual {
                     apache_matches: false,
                     ..
-                }
+                } | LicenseAssets::PreservedExisting { all_match: false }
             )
         );
     }
@@ -105,8 +116,16 @@ mod proofs {
     fn only_matching_reviewed_licenses_allow_readme_generation() {
         let assets: LicenseAssets = kani::any();
         spec_generation(assets);
-        kani::cover!(generation(assets) == Generation::All);
-        kani::cover!(generation(assets) == Generation::Readme);
+        kani::cover!(assets == LicenseAssets::Generated);
+        kani::cover!(
+            assets
+                == LicenseAssets::PreservedDual {
+                    mit_matches: true,
+                    apache_matches: true
+                }
+        );
+        kani::cover!(assets == LicenseAssets::PreservedExisting { all_match: true });
+        kani::cover!(assets == LicenseAssets::Unlicensed);
         kani::cover!(generation(assets) == Generation::Refused);
     }
 
@@ -143,11 +162,15 @@ mod tests {
     fn every_license_asset_state_meets_the_specification() {
         super::proofs::spec_generation(super::LicenseAssets::Generated);
         for [mit_matches, apache_matches] in crate::domain::flags() {
-            super::proofs::spec_generation(super::LicenseAssets::Preserved {
+            super::proofs::spec_generation(super::LicenseAssets::PreservedDual {
                 mit_matches,
                 apache_matches,
             });
+            super::proofs::spec_generation(super::LicenseAssets::PreservedExisting {
+                all_match: mit_matches,
+            });
         }
+        super::proofs::spec_generation(super::LicenseAssets::Unlicensed);
     }
 
     #[test]
