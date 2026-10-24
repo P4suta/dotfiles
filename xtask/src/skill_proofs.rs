@@ -1512,6 +1512,7 @@ pub const FUZZ_VERSION: &str = "0.13.2";
 
 /// The cargo-fuzz directory of this repository's parser targets, which `assure.toml` names as their owners.
 pub const FUZZ_DIRECTORY: &str = "fuzz";
+const FUZZ_REPLAY_CODEGEN_UNITS: &str = "16";
 const FUZZ_COMPILE_OPERATION: &str = "fuzz target compilation prerequisite";
 const FUZZ_COMPILE_MANIFEST: &str = "fuzz/Cargo.toml";
 const FUZZ_SHARED_SOURCE: &str = "crates/dotfiles/examples/support";
@@ -1645,7 +1646,7 @@ fn nightly_host(root: &Path) -> Result<String> {
 /// Replays the committed corpus of `target` once for the pinned compiler's host, with no new input.
 fn replay(root: &Path, directory: &str, target: &str, host: &str) -> Result<std::process::Output> {
     let mut command = nightly_cargo(root);
-    command.args(["fuzz", "run"]);
+    command.args(["fuzz", "run", "--codegen-units", FUZZ_REPLAY_CODEGEN_UNITS]);
     if directory == FUZZ_DIRECTORY && target == "answer_plan" {
         command.arg("--no-default-features");
     }

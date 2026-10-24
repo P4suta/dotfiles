@@ -113,3 +113,4 @@
 | [2026-10-24 Prefer the supported native Windows sandbox](prefer-native-windows-sandbox.md) | proposed |  |
 | [2026-10-24 Preserve shell argument source spellings](preserve-shell-argument-source-spellings.md) | proposed |  |
 | [2026-10-24 Preserve reviewed repository license assets](preserved-repository-license-assets.md) | proposed |  |
+| [2026-10-24 Use plan delimiters as proposal context](use-plan-delimiters-as-proposal-context.md) | proposed |  |

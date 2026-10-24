@@ -28,6 +28,16 @@ fn reject_a_stale_draft_reusing_a_proof() {
         proof: production::Proof::Verified,
     }));
 }
+#[kani::proof]
+fn reject_proposal_scope_without_an_opening_delimiter() {
+    assert!(production::proposal_step(
+        production::ProposalRegion::Prose, production::PlanDelimiter::Text,
+    ).is_ok_and(|step| step.in_plan));
+}
+#[kani::proof]
+fn reject_an_unclosed_proposal_block() {
+    assert!(production::proposal_finished(production::ProposalRegion::Plan));
+}
 '''
 
 [[obligation]]
