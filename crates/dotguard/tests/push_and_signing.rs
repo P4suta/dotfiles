@@ -1631,13 +1631,8 @@ fn renovate_refuses_misbound_ambiguous_or_failed_http_release_evidence() {
     }
 }
 
-fn mise_ci_report() -> serde_json::Value {
-    let alias = serde_json::json!({
-        "depName":"jdx/mise","packageName":"jdx/mise","datasource":"github-release-attachments",
-        "depType":"uses-with","currentValue":MISE_CI_EXPRESSION,"skipReason":"invalid-value","updates":[],"warnings":[]
-    });
+fn mise_literal_report() -> serde_json::Value {
     serde_json::json!({"repositories":{"local":{"packageFiles":{
-        "github-actions":[{"packageFile":".github/workflows/ci.yml","deps":[alias.clone(),alias.clone(),alias.clone(),alias.clone(),alias]}],
         "regex":[{"packageFile":MISE_LITERAL_FILE,"deps":[{
             "depName":"jdx/mise","packageName":"jdx/mise","datasource":"github-releases",
             "currentValue":"2026.10.0","currentVersion":"2026.10.0","replaceString":MISE_LITERAL_MANIFEST.trim_end(),"updates":[],"warnings":[]
@@ -1645,8 +1640,18 @@ fn mise_ci_report() -> serde_json::Value {
     }}}})
 }
 
-fn mise_ci_alias(report: &mut serde_json::Value) -> &mut serde_json::Value {
-    &mut report["repositories"]["local"]["packageFiles"]["github-actions"][0]["deps"][0]
+#[test]
+fn renovate_refuses_obsolete_mise_ci_inputs_even_with_successful_literal_records() {
+    let (repository, base, offered) = renovate_fixture("obsolete-mise-ci-input");
+    let mut report = mise_literal_report();
+    report["repositories"]["local"]["packageFiles"]["github-actions"] = serde_json::json!([{
+        "packageFile":".github/workflows/ci.yml","deps":[{
+            "depName":"jdx/mise","packageName":"jdx/mise","datasource":"github-release-attachments",
+            "depType":"uses-with","currentValue":MISE_CI_EXPRESSION,"skipReason":"invalid-value","updates":[],"warnings":[]
+        }]
+    }]);
+    let output = report_gate(&repository, &base, &offered, &report);
+    assert_eq!(refusal(&output).rule, "push.evidence");
 }
 
 fn changed_file(repository: &Repository, file: &str, contents: &str, parent: &str) -> String {
@@ -1966,7 +1971,7 @@ fn renovate_requires_regular_utf8_reader_and_manifest_blobs() {
 }
 
 fn outdated_mise_report() -> serde_json::Value {
-    let mut report = mise_ci_report();
+    let mut report = mise_literal_report();
     regex_counterpart(&mut report)["updates"] = serde_json::json!([{
         "updateType":"patch","newValue":"2026.10.6","isBreaking":false
     }]);
@@ -2012,101 +2017,6 @@ fn renovate_never_borrows_another_pins_or_files_matching_version() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stderr).contains("dependency manifests changed"));
-}
-
-#[test]
-fn renovate_requires_the_verified_literal_mise_source_for_its_exact_ci_aliases() {
-    let (repository, base, offered) = renovate_fixture("renovate-ci-alias");
-    let mut report = mise_ci_report();
-    let output = report_gate(&repository, &base, &offered, &report);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    regex_counterpart(&mut report)["updates"] = serde_json::json!([{
-        "updateType":"patch","newValue":"2026.10.6","isBreaking":false
-    }]);
-    let rejected = refusal(&report_gate(&repository, &base, &offered, &report));
-    assert_eq!(rejected.rule, "push.dependencies");
-    assert!(
-        rejected
-            .evidence
-            .iter()
-            .any(|line| line.contains(MISE_LITERAL_FILE))
-    );
-}
-
-#[test]
-fn renovate_refuses_other_ci_aliases_and_missing_ambiguous_or_failed_literal_sources() {
-    let (repository, base, offered) = renovate_fixture("renovate-ci-alias-refusals");
-    let mut reports = Vec::new();
-    for (field, value) in [
-        ("currentValue", serde_json::json!("${{ env.MISE_VERSION }}")),
-        ("datasource", serde_json::json!("github-tags")),
-        ("depName", serde_json::json!("other/tool")),
-        ("packageName", serde_json::json!("other/tool")),
-        ("depType", serde_json::json!("action")),
-        ("skipReason", serde_json::json!("internal-error")),
-        ("warnings", serde_json::json!([{"message":"failed lookup"}])),
-        ("updates", serde_json::json!([{"updateType":"major"}])),
-    ] {
-        let mut report = mise_ci_report();
-        mise_ci_alias(&mut report)[field] = value;
-        reports.push((field, report));
-    }
-    for (field, value) in [
-        ("depName", serde_json::json!("other/tool")),
-        ("datasource", serde_json::json!("github-tags")),
-        ("packageName", serde_json::json!("other/tool")),
-        ("currentValue", serde_json::json!("")),
-        ("currentVersion", serde_json::json!("")),
-        ("skipReason", serde_json::json!("github-token-required")),
-        ("enabled", serde_json::json!(false)),
-        ("warnings", serde_json::json!([{"message":"failed lookup"}])),
-        ("updates", serde_json::json!([null])),
-        (
-            "updates",
-            serde_json::json!([{"updateType":"major","pendingChecks":"true"}]),
-        ),
-    ] {
-        let mut report = mise_ci_report();
-        regex_counterpart(&mut report)[field] = value;
-        reports.push((field, report));
-    }
-    let mut missing = mise_ci_report();
-    missing["repositories"]["local"]["packageFiles"]
-        .as_object_mut()
-        .unwrap()
-        .remove("regex");
-    reports.push(("missing-source", missing));
-    let mut duplicate = mise_ci_report();
-    let counterpart = regex_counterpart(&mut duplicate).clone();
-    duplicate["repositories"]["local"]["packageFiles"]["regex"][0]["deps"]
-        .as_array_mut()
-        .unwrap()
-        .push(counterpart);
-    reports.push(("ambiguous-source", duplicate));
-    for manager in ["regex", "github-actions"] {
-        let mut wrong = mise_ci_report();
-        wrong["repositories"]["local"]["packageFiles"][manager][0]["packageFile"] =
-            "mise.toml".into();
-        reports.push(("wrong-file", wrong));
-    }
-    let mut wrong_manager = mise_ci_report();
-    let managers = wrong_manager["repositories"]["local"]["packageFiles"]
-        .as_object_mut()
-        .unwrap();
-    let alias = managers.remove("github-actions").unwrap();
-    managers.insert("cargo".to_owned(), alias);
-    reports.push(("wrong-manager", wrong_manager));
-    for (name, report) in reports {
-        assert_eq!(
-            refusal(&report_gate(&repository, &base, &offered, &report)).rule,
-            "push.evidence",
-            "{name}"
-        );
-    }
 }
 
 #[test]
