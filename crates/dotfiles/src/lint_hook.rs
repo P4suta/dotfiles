@@ -793,58 +793,15 @@ pub fn check(event: &Value) -> Result<Report> {
     Ok(report)
 }
 
-pub(crate) fn scripts(command: &str, directory: Option<&Path>) -> Vec<String> {
-    script_findings(command, directory, 0)
-}
-
-fn script_findings(command: &str, directory: Option<&Path>, depth: usize) -> Vec<String> {
+pub(crate) fn scripts(scripts: &[crate::legacy::InspectedScript]) -> Vec<String> {
     let mut findings = Vec::new();
-    let mut variables = BTreeMap::new();
-    for words in crate::shell_write_rules::segments(command) {
-        crate::legacy::assigned(&words, &mut variables);
-        let (words, _) = crate::legacy::command_words(&words);
-        let Some((first, arguments)) = words.split_first() else {
-            continue;
-        };
-        let name = crate::shell_write_rules::program(first);
-        let Some(path) = crate::legacy::script_path(name.as_str(), first, arguments, directory)
-        else {
-            continue;
-        };
-        let facts: Vec<_> = variables
-            .iter()
-            .map(|(key, value)| (key.as_str(), value.as_str()))
-            .collect();
-        let rules::ScriptPath::Literal(path) = rules::resolve_script(path, &facts) else {
-            continue;
-        };
-        let script = Path::new(&path);
-        let path = if script.is_absolute() {
-            script.to_path_buf()
-        } else if let Some(directory) = directory.filter(|directory| directory.is_absolute()) {
-            directory.join(script)
-        } else {
-            findings.push(format!(
-                "Refused: cannot lint relative script {} without a known absolute execution directory.\nNext action: provide an absolute cwd or workdir in the hook event.",
-                script.display()
-            ));
-            continue;
-        };
-        let interpreter = matches!(name.as_str(), "bash" | "sh" | "dash" | "ksh" | "zsh")
-            .then_some(first.as_str());
-        match file(&path, interpreter) {
-            Ok(report) => findings.extend(report.findings),
-            Err(error) => findings.push(format!("Refused: cannot lint script {}: {error:#}\nNext action: use a literal path to a readable script.", path.display())),
-        }
-        if depth < crate::legacy::DEPTH
-            && let Ok(text) = fs::read_to_string(&path)
-        {
-            findings.extend(script_findings(&text, directory, depth + 1));
-        }
-    }
-    if depth < crate::legacy::DEPTH {
-        for nested in crate::legacy::nested_scripts(command) {
-            findings.extend(script_findings(&nested, directory, depth + 1));
+    for script in scripts {
+        match script {
+            crate::legacy::InspectedScript::Unavailable(reason) => findings.push(reason.clone()),
+            crate::legacy::InspectedScript::File { path, interpreter } => match file(path, interpreter.as_deref()) {
+                Ok(report) => findings.extend(report.findings),
+                Err(error) => findings.push(format!("Refused: cannot lint script {}: {error:#}\nNext action: use a literal path to a readable script.", path.display())),
+            },
         }
     }
     findings
@@ -942,12 +899,16 @@ mod tests {
     #[test]
     fn relative_scripts_require_a_known_absolute_execution_directory() {
         for directory in [None, Some(Path::new("."))] {
-            let findings = script_findings("bash test/vulnerability_scan.sh", directory, 0);
-            assert_eq!(findings.len(), 1, "{directory:?}: {findings:?}");
+            let report =
+                crate::legacy::findings("bash test/vulnerability_scan.sh", directory).unwrap();
+            let findings = scripts(&report.scripts);
+            assert_eq!(findings.len(), 1, "{directory:?}: {report:?}");
+            assert!(findings[0].contains("known absolute execution directory"));
+            assert_eq!(report.unavailable.len(), 1, "{directory:?}: {report:?}");
             assert!(
-                findings[0].contains("known absolute execution directory"),
+                report.unavailable[0].contains("execution directory"),
                 "{directory:?}: {}",
-                findings[0]
+                report.unavailable[0]
             );
         }
     }

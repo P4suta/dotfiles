@@ -26,13 +26,31 @@ $span = {
 }
 $commands = @($tree.FindAll({param($node) $node -is [System.Management.Automation.Language.CommandAst]}, $true))
 $statements = @($tree.EndBlock.Statements)
+$flowSafe = $null -eq $tree.ParamBlock -and $null -eq $tree.BeginBlock -and
+    $null -eq $tree.ProcessBlock -and $null -eq $tree.DynamicParamBlock -and
+    $null -eq $tree.CleanBlock -and $tree.UsingStatements.Count -eq 0 -and
+    $tree.EndBlock.Traps.Count -eq 0
 @{
     source = $source
     errors = @($errors | ForEach-Object { $_.Message })
+    flow = @(if ($flowSafe) {
+        $statements | ForEach-Object {
+            if ($_ -is [System.Management.Automation.Language.PipelineAst] -and
+                -not $_.Background -and $_.PipelineElements.Count -eq 1 -and
+                $_.PipelineElements[0] -is [System.Management.Automation.Language.CommandAst] -and
+                $_.PipelineElements[0].InvocationOperator -in @('Unknown', 'Ampersand')) {
+                @{ offset = [Text.Encoding]::UTF8.GetByteCount($source.Substring(0, $_.PipelineElements[0].Extent.StartOffset)) }
+            } else { @{ offset = $null } }
+        }
+    } else { @{ offset = $null } })
     calls = @($commands | ForEach-Object {
         $call = $_
         @{
             span = (& $span $call.Extent)
+            opaque_effect = @($call.FindAll({ param($node)
+                $node -is [System.Management.Automation.Language.ScriptBlockExpressionAst] -or
+                $node -is [System.Management.Automation.Language.SubExpressionAst]
+            }, $true)).Count -ne 0
             file_inputs_safe = $null -eq $tree.ParamBlock -and $null -eq $tree.BeginBlock -and
                 $null -eq $tree.ProcessBlock -and $null -eq $tree.DynamicParamBlock -and
                 $null -eq $tree.CleanBlock -and $tree.UsingStatements.Count -eq 0 -and
@@ -43,6 +61,7 @@ $statements = @($tree.EndBlock.Statements)
             words = @($call.CommandElements | ForEach-Object {
                 @{
                     span = (& $span $_.Extent)
+                    parameter = $_ -is [System.Management.Automation.Language.CommandParameterAst] -and $null -eq $_.Argument
                     value = if ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
                         $_.Value
                     } elseif ($_ -is [System.Management.Automation.Language.CommandParameterAst] -and $null -eq $_.Argument) {
@@ -63,6 +82,8 @@ $statements = @($tree.EndBlock.Statements)
 struct PowerShellWord {
     span: Span,
     value: Option<String>,
+    #[serde(default)]
+    parameter: bool,
 }
 
 #[derive(Deserialize)]
@@ -70,6 +91,8 @@ struct PowerShellCall {
     span: Span,
     words: Vec<PowerShellWord>,
     file_inputs_safe: bool,
+    #[serde(default)]
+    opaque_effect: bool,
 }
 
 #[derive(Deserialize)]
@@ -77,6 +100,13 @@ struct PowerShellTree {
     source: String,
     errors: Vec<String>,
     calls: Vec<PowerShellCall>,
+    #[serde(default)]
+    flow: Vec<PowerShellFlow>,
+}
+
+#[derive(Deserialize)]
+struct PowerShellFlow {
+    offset: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -265,6 +295,7 @@ impl Redirect {
 struct Word<'a> {
     value: String,
     spelling: Option<&'a str>,
+    parameter: bool,
 }
 
 pub(super) struct Argument<'a> {
@@ -274,7 +305,10 @@ pub(super) struct Argument<'a> {
 }
 
 pub(super) struct Invocation<'a> {
-    offset: usize,
+    pub(super) offset: usize,
+    pub(super) directory: super::directory::Context,
+    pub(super) unresolved_wrapper: bool,
+    pub(super) opaque_effect: bool,
     words: Vec<Word<'a>>,
     inputs: Vec<Input<'a>>,
     literal_stdin: Option<String>,
@@ -310,6 +344,7 @@ impl<'a> Invocation<'a> {
                 Ok(Word {
                     value,
                     spelling: Some(spelling),
+                    parameter: false,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -335,6 +370,9 @@ impl<'a> Invocation<'a> {
         }
         Ok(Self {
             offset: span.pos.offset,
+            directory: super::directory::Context::new(None).invalidate(),
+            unresolved_wrapper: false,
+            opaque_effect: false,
             words,
             inputs,
             literal_stdin,
@@ -349,11 +387,15 @@ impl<'a> Invocation<'a> {
     pub(super) fn unparsed(values: Vec<String>) -> Self {
         Self {
             offset: 0,
+            directory: super::directory::Context::new(None).invalidate(),
+            unresolved_wrapper: false,
+            opaque_effect: false,
             words: values
                 .into_iter()
                 .map(|value| Word {
                     value,
                     spelling: None,
+                    parameter: false,
                 })
                 .collect(),
             inputs: Vec::new(),
@@ -364,6 +406,18 @@ impl<'a> Invocation<'a> {
 
     pub(super) fn inputs(&self) -> &[Input<'_>] {
         &self.inputs
+    }
+
+    pub(super) fn literal(&self, index: usize) -> Option<String> {
+        let word = self.words.get(index)?;
+        let value = crate::claude_hook::github::literal_word(word.spelling?)?;
+        (value == word.value).then_some(value)
+    }
+
+    pub(super) fn parameter(&self, index: usize, name: &str) -> bool {
+        self.words
+            .get(index)
+            .is_some_and(|word| word.parameter && word.value.eq_ignore_ascii_case(name))
     }
 
     pub(super) fn literal_stdin(&self) -> Option<&str> {
@@ -448,10 +502,16 @@ fn collect<'a>(
     Ok(())
 }
 
-fn decode<'a>(source: &'a str, tree: &str) -> Result<Vec<Invocation<'a>>> {
+fn decode_in<'a>(
+    source: &'a str,
+    tree: &str,
+    directory: Option<&std::path::Path>,
+) -> Result<Vec<Invocation<'a>>> {
     crate::lint_hook::check_shell_syntax_source(source)?;
     crate::lint_hook::check_shell_syntax_output(tree)?;
-    let tree: File = serde_json::from_str(tree)?;
+    let value: Value = serde_json::from_str(tree)?;
+    let flow = super::directory::bash(&value);
+    let tree: File = serde_json::from_value(value)?;
     ensure!(tree.kind == "File", "shell syntax output is not a File");
     source
         .get(tree.span.pos.offset..tree.span.end.offset)
@@ -465,14 +525,35 @@ fn decode<'a>(source: &'a str, tree: &str) -> Result<Vec<Invocation<'a>>> {
         }
     }
     calls.sort_by_key(|call| call.offset);
+    super::directory::locate(&flow, &mut calls, directory, super::Shell::Bash);
     Ok(calls)
 }
 
+fn decode<'a>(source: &'a str, tree: &str) -> Result<Vec<Invocation<'a>>> {
+    decode_in(source, tree, None)
+}
+
+#[cfg(test)]
 pub(super) fn parse(source: &str) -> Result<Vec<Invocation<'_>>> {
     decode(source, &crate::lint_hook::shell_syntax_tree(source)?)
 }
 
-fn decode_powershell<'a>(source: &'a str, tree: &str) -> Result<Vec<Invocation<'a>>> {
+pub(super) fn parse_in<'a>(
+    source: &'a str,
+    directory: Option<&std::path::Path>,
+) -> Result<Vec<Invocation<'a>>> {
+    decode_in(
+        source,
+        &crate::lint_hook::shell_syntax_tree(source)?,
+        directory,
+    )
+}
+
+fn decode_powershell_in<'a>(
+    source: &'a str,
+    tree: &str,
+    directory: Option<&std::path::Path>,
+) -> Result<Vec<Invocation<'a>>> {
     crate::lint_hook::check_shell_syntax_source(source)?;
     crate::lint_hook::check_shell_syntax_output(tree)?;
     let tree: PowerShellTree = serde_json::from_str(tree)?;
@@ -482,6 +563,17 @@ fn decode_powershell<'a>(source: &'a str, tree: &str) -> Result<Vec<Invocation<'
     );
     ensure!(tree.errors.is_empty(), "PowerShell source has parse errors");
     let mut calls = Vec::new();
+    let flow = super::directory::Flow::Sequence(
+        tree.flow
+            .into_iter()
+            .map(|item| {
+                item.offset.map_or(
+                    super::directory::Flow::Unresolved,
+                    super::directory::Flow::Call,
+                )
+            })
+            .collect(),
+    );
     for call in tree.calls {
         call.span.text(source)?;
         ensure!(!call.words.is_empty(), "PowerShell call has no words");
@@ -503,6 +595,7 @@ fn decode_powershell<'a>(source: &'a str, tree: &str) -> Result<Vec<Invocation<'
                 Ok(Word {
                     spelling: literal.as_ref().map(|_| spelling),
                     value: literal.unwrap_or_else(|| spelling.to_owned()),
+                    parameter: word.parameter,
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -510,6 +603,9 @@ fn decode_powershell<'a>(source: &'a str, tree: &str) -> Result<Vec<Invocation<'
             call.file_inputs_safe && words.iter().all(|word| word.spelling.is_some());
         calls.push(Invocation {
             offset: call.span.pos.offset,
+            directory: super::directory::Context::new(None).invalidate(),
+            unresolved_wrapper: false,
+            opaque_effect: call.opaque_effect,
             words,
             inputs: Vec::new(),
             literal_stdin: None,
@@ -517,13 +613,30 @@ fn decode_powershell<'a>(source: &'a str, tree: &str) -> Result<Vec<Invocation<'
         });
     }
     calls.sort_by_key(|call| call.offset);
+    super::directory::locate(&flow, &mut calls, directory, super::Shell::PowerShell);
     Ok(calls)
 }
 
+fn decode_powershell<'a>(source: &'a str, tree: &str) -> Result<Vec<Invocation<'a>>> {
+    decode_powershell_in(source, tree, None)
+}
+
+#[cfg(test)]
 pub(super) fn parse_powershell(source: &str) -> Result<Vec<Invocation<'_>>> {
     decode_powershell(
         source,
         &crate::lint_hook::powershell_syntax_tree(source, POWERSHELL_TREE)?,
+    )
+}
+
+pub(super) fn parse_powershell_in<'a>(
+    source: &'a str,
+    directory: Option<&std::path::Path>,
+) -> Result<Vec<Invocation<'a>>> {
+    decode_powershell_in(
+        source,
+        &crate::lint_hook::powershell_syntax_tree(source, POWERSHELL_TREE)?,
+        directory,
     )
 }
 

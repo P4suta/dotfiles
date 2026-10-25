@@ -467,7 +467,7 @@ fn policy_refusals_with(
     for message in legacy.refusals {
         findings.push(blocked(LEGACY, GateRefusal, message));
     }
-    for message in crate::lint_hook::scripts(command, directory.as_deref()) {
+    for message in crate::lint_hook::scripts(&legacy.scripts) {
         findings.push(blocked("hook.lint", GateRefusal, message));
     }
     for message in legacy.unavailable {
@@ -887,6 +887,36 @@ mod tests {
         assert!(
             findings.iter().any(|finding| finding.rule == "hook.prose"),
             "checked the session directory instead of the execution directory"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_native_wrapper_quotes_never_read_the_event_directory() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let execution = directory.path().join("project's files");
+        std::fs::create_dir(&execution)?;
+        std::fs::write(directory.path().join("check.sh"), "cat wrong\n")?;
+        std::fs::write(execution.join("check.sh"), "grep selected input\n")?;
+        let target = execution
+            .to_string_lossy()
+            .replace('\\', "/")
+            .replace('\'', "''");
+        let event = json!({
+            "tool_name":"Bash", "cwd":directory.path(),
+            "tool_input":{"command":["pwsh","-NoProfile","-Command",format!("Set-Location -LiteralPath '{target}'; bash check.sh")]}
+        });
+        let findings = policy_refusals_with(&event.to_string(), test_bundle)?;
+        assert!(
+            findings.iter().any(|finding| finding.rule == INSPECTION
+                && finding.message.contains("execution directory"))
+        );
+        assert!(findings.iter().any(|finding| finding.rule == "hook.lint"
+            && finding.message.contains("execution directory")));
+        assert!(
+            !findings
+                .iter()
+                .any(|finding| finding.message.contains("`cat` is a legacy command"))
         );
         Ok(())
     }
