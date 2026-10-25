@@ -537,6 +537,23 @@ pub struct Gap {
     key: Vec<u8>,
 }
 
+impl Gap {
+    fn key_at(&self, path: &str) -> Result<Vec<u8>> {
+        let prefix = [self.shape.as_bytes(), self.path.as_bytes()].join(&0);
+        let suffix = self
+            .key
+            .strip_prefix(prefix.as_slice())
+            .context("finding identity has an invalid prefix")?;
+        ensure!(
+            suffix.starts_with(&[0]),
+            "finding identity has no site separator"
+        );
+        let mut key = [self.shape.as_bytes(), path.as_bytes()].join(&0);
+        key.extend_from_slice(suffix);
+        Ok(key)
+    }
+}
+
 /// What the gate read from one state of a repository.
 #[derive(Debug, Default)]
 pub struct Survey {
@@ -922,6 +939,150 @@ pub fn changed(root: &Path, before: &Tree, after: &Tree) -> Result<BTreeSet<Stri
         }
     };
     Ok(listed.into_iter().collect())
+}
+
+fn renames_from_diff(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
+    const MAX_SIMILARITY: u8 = 100;
+    if bytes.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let text = std::str::from_utf8(bytes)?
+        .strip_suffix('\0')
+        .context("Git diff status is not NUL-terminated")?;
+    let mut fields = text.split('\0');
+    let mut renames = BTreeMap::new();
+    let mut destinations = BTreeSet::new();
+    let path = |value: Option<&str>| -> Result<String> {
+        let value = value.context("Git diff path is missing")?;
+        ensure!(!value.is_empty(), "Git diff path is invalid");
+        Ok(value.to_owned())
+    };
+    while let Some(status) = fields.next() {
+        let score = status
+            .strip_prefix('R')
+            .context("unexpected Git rename status")?;
+        ensure!(
+            !score.is_empty()
+                && score.bytes().all(|byte| byte.is_ascii_digit())
+                && score.parse::<u8>()? <= MAX_SIMILARITY,
+            "invalid Git rename similarity"
+        );
+        let old = path(fields.next())?;
+        let new = path(fields.next())?;
+        ensure!(
+            old != new && destinations.insert(new.clone()),
+            "Git rename destination is ambiguous"
+        );
+        ensure!(
+            renames.insert(old, new).is_none(),
+            "Git rename source is ambiguous"
+        );
+    }
+    Ok(renames)
+}
+
+fn renamed_paths(root: &Path, before: &Tree, after: &Tree) -> Result<BTreeMap<String, String>> {
+    let base = match before {
+        Tree::Commit(Some(commit)) => commit.clone(),
+        Tree::Commit(None) => empty_tree(root)?,
+        Tree::Index | Tree::WorkingTree => bail!("rename comparison starts from a commit"),
+    };
+    let mut arguments = vec![
+        "diff",
+        "--name-status",
+        "-z",
+        "--find-renames=50%",
+        "--diff-filter=R",
+    ];
+    match after {
+        Tree::Commit(None) => return Ok(BTreeMap::new()),
+        Tree::Index => arguments.push("--cached"),
+        Tree::Commit(Some(_)) | Tree::WorkingTree => {}
+    }
+    arguments.push(&base);
+    if let Tree::Commit(Some(commit)) = after {
+        arguments.push(commit);
+    }
+    renames_from_diff(&git(root, &arguments)?)
+}
+
+fn preceding_survey(
+    root: &Path,
+    catalog: &Catalog,
+    map: &OwnerMap,
+    before: &Tree,
+    after: &Tree,
+    scope: Option<&BTreeSet<String>>,
+) -> Result<Survey> {
+    let renames = renamed_paths(root, before, after)?;
+    let scope = scope.map(|paths| {
+        let mut old = paths.clone();
+        old.extend(
+            renames
+                .iter()
+                .filter(|(_, new)| paths.contains(*new))
+                .map(|(old, _)| old.clone()),
+        );
+        old
+    });
+    let mut survey = survey_with(root, catalog, map, before, scope.as_ref())?;
+    for gap in &mut survey.gaps {
+        if let Some(new) = renames.get(&gap.path) {
+            gap.key = gap.key_at(new)?;
+        }
+    }
+    Ok(survey)
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::{Gap, Kind, renames_from_diff};
+    use crate::shape_rules::Cause;
+
+    #[test]
+    fn git_rename_records_preserve_paths_and_refuse_malformed_or_ambiguous_fields() {
+        let paths =
+            renames_from_diff(b"R100\0old path\0new path\0R50\0old\nline\0new\nline\0").unwrap();
+        assert_eq!(paths.get("old path").map(String::as_str), Some("new path"));
+        assert_eq!(
+            paths.get("old\nline").map(String::as_str),
+            Some("new\nline")
+        );
+        assert!(renames_from_diff(b"").unwrap().is_empty());
+        for invalid in [
+            &b"R100\0old\0"[..],
+            &b"R100\0\0new\0"[..],
+            &b"R100\0old\0new"[..],
+            &b"R101\0old\0new\0"[..],
+            &b"R+1\0old\0new\0"[..],
+            &b"C100\0old\0new\0"[..],
+            &b"M\0file\0"[..],
+            &b"R100\0old\0new\0R100\0old\0another\0"[..],
+            &b"R100\0old\0new\0R100\0another\0new\0"[..],
+            &b"R100\0same\0same\0"[..],
+            &b"R100\0old\0\xff\0"[..],
+            &b"R100\0old\0new\0\0"[..],
+        ] {
+            assert!(renames_from_diff(invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn relocating_a_key_preserves_the_complete_site_suffix() {
+        let gap = Gap {
+            shape: "parser".into(),
+            path: "old.rs".into(),
+            line: 1,
+            kind: Kind::Shape(Cause::Unowned),
+            key: b"parser\x00old.rs\x00site\x00with a NUL\x002".to_vec(),
+        };
+        assert_eq!(
+            gap.key_at("new.rs").unwrap(),
+            b"parser\x00new.rs\x00site\x00with a NUL\x002"
+        );
+        assert_eq!(gap.path, "old.rs");
+        assert_eq!(gap.key, b"parser\x00old.rs\x00site\x00with a NUL\x002");
+    }
 }
 
 /// The empty tree of this repository's object format.
@@ -1365,7 +1526,7 @@ fn decide_with(
     let old = if point == Point::Start {
         Survey::default()
     } else {
-        survey_with(root, catalog, map, before, limit.as_ref())?
+        preceding_survey(root, catalog, map, before, after, limit.as_ref())?
     };
     if !old.owner_input.is_empty() {
         inputs.owners.insert(old.owner_input.clone());
@@ -1374,7 +1535,7 @@ fn decide_with(
     inputs.owners.insert(new.owner_input.clone());
     let mut known = Vec::new();
     for tree in &inherited {
-        let survey = survey_with(root, catalog, map, tree, limit.as_ref())?;
+        let survey = preceding_survey(root, catalog, map, tree, after, limit.as_ref())?;
         inputs.owners.insert(survey.owner_input.clone());
         known.push(survey);
         if point == Point::Stop {
