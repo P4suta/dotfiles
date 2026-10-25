@@ -1607,7 +1607,6 @@ pub(super) fn preserve_edit(
     pr: u64,
     checked: &Checked,
 ) -> Result<()> {
-    require_resolved_threads(github, target, pr, &checked.binding.head)?;
     if let Some(prior) = previous(github, target, pr, &checked.signer, &checked.root)? {
         if policy::route(prior.assessment.level.into()) == ReviewRoute::Cli
             && checked.route != ReviewRoute::Cli

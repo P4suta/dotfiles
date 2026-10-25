@@ -4589,6 +4589,76 @@ fn live_final_check_is_read_only_and_rejects_malformed_or_pending_documents() ->
 }
 
 #[test]
+fn document_edits_with_open_findings_keep_completion_blocked() -> Result<()> {
+    let body = format!("{BODY}\nReview findings remain open during the repair.\n\nCloses #23.\n");
+    for outdated in [false, true] {
+        let fixture = Fixture::new(&body)?;
+        let graph = serde_json::json!({"data":{"repository":{"pullRequest":{
+            "headRefOid":fixture.head,"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{
+                "id":"thread-fixture-1","isResolved":false,"isOutdated":outdated,
+                "comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"author":{"login":"coderabbitai"},"body":"The supported invariant still needs its fix."}]}
+            }]}
+        }}}});
+        let output = fixture
+            .personal_command("edit")?
+            .args(["--title", "fix: document pending repairs", "--body-file"])
+            .arg(&fixture.body)
+            .args(["--pr", "17", "--issue", "23"])
+            .env(
+                "GH_FIXTURE_VIEW",
+                serde_json::json!({
+                    "title":"fix: preserve edits", "body":body,
+                    "state":"OPEN", "isDraft":true
+                })
+                .to_string(),
+            )
+            .env("GH_FIXTURE_GRAPHQL", graph.to_string())
+            .output()?;
+        assert!(
+            output.status.success(),
+            "outdated={outdated}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let edited = fixture.assessed_body(&body);
+        let log = fixture.log()?;
+        assert_eq!(mutations(&log), ["edit"]);
+        assert!(log.contains(&edited));
+        assert!(!log.contains("resolveReviewThread"));
+        for operation in ["check", "ready", "merge"] {
+            let mut command = fixture.personal_command(operation)?;
+            command.args(["--pr", "17", "--issue", "23"]);
+            if operation == "check" {
+                command.arg("--final");
+            } else if operation == "merge" {
+                command.args(["--interval", "0", "--timeout", "0"]);
+            }
+            let output = command
+                .env(
+                    "GH_FIXTURE_VIEWS",
+                    read(
+                        17,
+                        &fixture.head,
+                        operation != "merge",
+                        &edited,
+                        PASSING,
+                        "CLEAN",
+                    ),
+                )
+                .env("GH_FIXTURE_GRAPHQL", graph.to_string())
+                .output()?;
+            assert!(!output.status.success(), "{operation}, outdated={outdated}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("unresolved"),
+                "{operation}, outdated={outdated}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(mutations(&fixture.log()?), ["edit"]);
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn standing_suppression_never_hides_an_unresolved_outdated_bot_thread() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
     let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
