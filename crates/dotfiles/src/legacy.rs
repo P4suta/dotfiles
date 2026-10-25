@@ -137,6 +137,7 @@ pub(crate) fn script_path<'a>(
     first: &'a str,
     arguments: &'a [String],
     directory: Option<&Path>,
+    first_literal: bool,
 ) -> Option<&'a str> {
     if SHELLS.contains(&name) {
         let inline = arguments.iter().any(|argument| {
@@ -159,7 +160,9 @@ pub(crate) fn script_path<'a>(
             .any(|name| extension.eq_ignore_ascii_case(name))
     });
     let shebang = if first.contains('/') && Path::new(first).extension().is_none() {
-        if Path::new(first).is_relative() && !directory.is_some_and(Path::is_absolute) {
+        if !first_literal
+            || (Path::new(first).is_relative() && !directory.is_some_and(Path::is_absolute))
+        {
             return Some(first);
         }
         let path =
@@ -187,11 +190,16 @@ pub(crate) fn script_path<'a>(
 pub(crate) fn assigned(
     words: &[String],
     variables: &mut std::collections::BTreeMap<String, String>,
-) {
-    for word in words.iter().skip_while(|word| word.as_str() == "export") {
-        if !is_assignment(word) {
-            break;
-        }
+) -> bool {
+    let assignments = if words.first().is_some_and(|word| word == "export") {
+        &words[1..]
+    } else {
+        words
+    };
+    if assignments.is_empty() || !assignments.iter().all(|word| is_assignment(word)) {
+        return false;
+    }
+    for word in assignments {
         if let Some((name, value)) = word.split_once('=') {
             let facts: Vec<_> = variables
                 .iter()
@@ -207,6 +215,7 @@ pub(crate) fn assigned(
             }
         }
     }
+    true
 }
 
 fn excepted(table: &Modern, path: &Path, directory: Option<&Path>) -> bool {
@@ -274,6 +283,15 @@ struct ScriptContext<'a> {
 }
 
 impl Findings {
+    fn inspect_wrapper(&mut self, invocation: &syntax::Invocation<'_>) {
+        if invocation.unresolved_wrapper {
+            let reason = "Refused: the wrapper can change its execution directory through startup files or unsupported options.\nNext action: use an explicit absolute workdir without a directory-changing wrapper.";
+            self.unavailable.push(reason.to_owned());
+            self.scripts
+                .push(InspectedScript::Unavailable(reason.to_owned()));
+        }
+    }
+
     fn inspect_legacy(
         &mut self,
         invocation: &syntax::Invocation<'_>,
@@ -685,28 +703,42 @@ fn inspect_shell(
 ) -> Findings {
     let nested = depth < DEPTH;
     let mut findings = Findings::default();
-    let mut variables = std::collections::BTreeMap::new();
+    let mut scopes = std::collections::BTreeMap::<
+        directory::VariableScope,
+        std::collections::BTreeMap<String, String>,
+    >::new();
     let invocations = shell.invocations(command, directory, &mut findings);
     let files_safe = depth == 0 && invocations.len() == 1;
     for invocation in invocations {
         let directory = invocation.directory.directory().map(PathBuf::as_path);
-        if invocation.unresolved_wrapper {
-            let reason = "Refused: the wrapper changes its execution directory through unsupported options.\nNext action: use an explicit absolute workdir without a directory-changing wrapper.";
-            findings.unavailable.push(reason.to_owned());
-            findings
-                .scripts
-                .push(InspectedScript::Unavailable(reason.to_owned()));
+        let mut variables = invocation
+            .variable_scope
+            .and_then(|scope| scopes.remove(&scope))
+            .unwrap_or_default();
+        if directory.is_none() {
+            variables.clear();
         }
+        findings.inspect_wrapper(&invocation);
         let words = findings.inspect_publications(&invocation, directory, files_safe);
         let spelled = invocation.arguments(0).ok();
-        assigned(&words, &mut variables);
+        let assignment = assigned(&words, &mut variables);
         let (command_words, _) = command_words(&words);
         let Some((first, rest)) = command_words.split_first() else {
+            if assignment && let Some(scope) = invocation.variable_scope {
+                scopes.insert(scope, variables);
+            }
             continue;
         };
         let name = program(first);
         let name = name.as_str();
-        let path = script_path(name, first, rest, directory);
+        let start = words.len() - rest.len() - 1;
+        let path = script_path(
+            name,
+            first,
+            rest,
+            directory,
+            invocation.literal(start).is_some(),
+        );
         let inline = rest.iter().position(|word| {
             word.starts_with('-') && !word.starts_with("--") && word.contains('c')
         });
@@ -764,6 +796,9 @@ fn inspect_shell(
             );
         }
         findings.inspect_legacy(&invocation, &words, table);
+        if assignment && let Some(scope) = invocation.variable_scope {
+            scopes.insert(scope, variables);
+        }
     }
     findings
 }
@@ -799,6 +834,72 @@ fn dynamic_xargs_script(words: &[String], command: &[String], path: Option<&str>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_flow_child_and_prefix_assignments_never_select_the_parent_script() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let wrong = directory.path().join("wrong.sh");
+        std::fs::write(&wrong, "cat wrong\n")?;
+        std::fs::write(
+            directory.path().join("selected.sh"),
+            "grep selected input\n",
+        )?;
+        for command in [
+            "script=selected.sh; (script=wrong.sh); bash \"$script\"",
+            "script=selected.sh; script=wrong.sh bash \"$script\"",
+            "script=selected.sh; printf '%s' \"$(script=wrong.sh)\"; bash \"$script\"",
+            "script=selected.sh; false && script=wrong.sh; bash \"$script\"",
+        ] {
+            let report = findings(command, Some(directory.path()))?;
+            assert!(
+                !report.scripts.iter().any(|script| matches!(script,
+                InspectedScript::File { path, .. } if path == &wrong)),
+                "{command}: {report:?}"
+            );
+            assert!(
+                report
+                    .refusals
+                    .iter()
+                    .any(|message| message.contains("`grep`"))
+                    || report
+                        .refusals
+                        .iter()
+                        .any(|message| message.contains("cannot resolve script path"))
+                    || !report.unavailable.is_empty(),
+                "{command}: {report:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_startup_and_environment_wrappers_refuse_stale_script_reads() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let wrong = directory.path().join("check.sh");
+        std::fs::write(&wrong, "cat wrong\n")?;
+        std::fs::write(directory.path().join("reset.sh"), "cd /unresolved\n")?;
+        for command in [
+            "BASH_ENV=reset.sh bash check.sh",
+            "env -C/unresolved bash check.sh",
+            "env -S 'bash check.sh'",
+            "bash --rcfile reset.sh -i check.sh",
+            "bash --login check.sh",
+            "export BASH_ENV=reset.sh; bash check.sh",
+            "declare -x BASH_ENV=reset.sh; bash check.sh",
+            "read -r BASH_ENV; bash check.sh",
+            "printf -v BASH_ENV '%s' reset.sh; bash check.sh",
+            "bash -i check.sh",
+        ] {
+            let report = findings(command, Some(directory.path()))?;
+            assert!(
+                !report.scripts.iter().any(|script| matches!(script,
+                InspectedScript::File { path, .. } if path == &wrong)),
+                "{command}: {report:?}"
+            );
+            assert!(!report.unavailable.is_empty(), "{command}: {report:?}");
+        }
+        Ok(())
+    }
 
     #[test]
     fn directory_flow_successful_bash_change_selects_the_child_directory() -> Result<()> {

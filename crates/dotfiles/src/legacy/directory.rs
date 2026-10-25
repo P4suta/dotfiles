@@ -7,12 +7,29 @@ const POWERSHELL_ERROR_ACTION_INDEX: usize = 3;
 
 pub(super) type Context = DirectoryContext<PathBuf>;
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) enum VariableScope {
+    Event,
+    Child(usize),
+}
+
 pub(super) enum Flow {
     Call(usize),
     Sequence(Vec<Self>),
     And(Box<Self>, Box<Self>),
-    Child(Box<Self>),
+    Child(usize, Box<Self>),
     Unresolved,
+}
+
+impl Flow {
+    fn linear_assignments(&self) -> bool {
+        match self {
+            Self::Call(_) => true,
+            Self::Sequence(items) => items.iter().all(Self::linear_assignments),
+            Self::Child(_, child) => child.linear_assignments(),
+            Self::And(_, _) | Self::Unresolved => false,
+        }
+    }
 }
 
 struct Outcome {
@@ -44,10 +61,27 @@ fn target(invocation: &Invocation<'_>, index: usize) -> Option<PathBuf> {
 
 fn binding_change(shell: Shell, name: &str, words: &[String]) -> bool {
     match shell {
-        Shell::Bash => matches!(
-            name,
-            "." | "source" | "eval" | "alias" | "unalias" | "shopt" | "enable" | "trap" | "builtin"
-        ),
+        Shell::Bash => {
+            matches!(
+                name,
+                "." | "source"
+                    | "eval"
+                    | "alias"
+                    | "unalias"
+                    | "shopt"
+                    | "enable"
+                    | "trap"
+                    | "builtin"
+                    | "read"
+                    | "readarray"
+                    | "mapfile"
+                    | "unset"
+                    | "declare"
+                    | "typeset"
+                    | "local"
+                    | "readonly"
+            ) || (name == "printf" && words.iter().any(|word| word == "-v"))
+        }
         Shell::PowerShell => {
             matches!(
                 name,
@@ -101,6 +135,33 @@ fn powershell_script_or_qualified_call(first: &str) -> bool {
         || (first.contains('\\') && !path.is_absolute())
 }
 
+fn uncertain_startup(words: &[String], shell: Shell) -> bool {
+    let (command, _) = super::command_words(words);
+    let prefix = if command.first().is_some_and(|word| word == "export") {
+        &command[1..]
+    } else {
+        &words[..words.len() - command.len()]
+    };
+    let changed_environment = matches!(shell, Shell::Bash)
+        && prefix.iter().any(|word| {
+            let name = word.split_once('=').map_or(word.as_str(), |(name, _)| name);
+            matches!(name, "BASH_ENV" | "ENV" | "ZDOTDIR" | "PWD" | "OLDPWD")
+        });
+    let startup = command.split_first().is_some_and(|(first, arguments)| {
+        super::SHELLS.contains(&crate::shell_write_rules::program(first).as_str())
+            && arguments
+                .iter()
+                .filter(|word| word.starts_with('-'))
+                .any(|word| {
+                    matches!(
+                        word.as_str(),
+                        "--rcfile" | "--init-file" | "--login" | "--interactive"
+                    ) || (!word.starts_with("--") && (word.contains('l') || word.contains('i')))
+                })
+    });
+    changed_environment || startup
+}
+
 fn call(invocation: &mut Invocation<'_>, context: Context, shell: Shell) -> Outcome {
     invocation.directory = context.clone();
     if invocation.opaque_effect {
@@ -108,6 +169,12 @@ fn call(invocation: &mut Invocation<'_>, context: Context, shell: Shell) -> Outc
         return Outcome::stable(context.invalidate());
     }
     let words = invocation.values();
+    if uncertain_startup(&words, shell) {
+        invocation.directory = context.clone().invalidate();
+        invocation.unresolved_wrapper = true;
+        return Outcome::stable(context.invalidate());
+    }
+    let (command, _) = super::command_words(&words);
     let Some(first) = invocation.literal(0) else {
         return Outcome::stable(context.invalidate());
     };
@@ -123,7 +190,6 @@ fn call(invocation: &mut Invocation<'_>, context: Context, shell: Shell) -> Outc
         if matches!(shell, Shell::PowerShell) && powershell_script_or_qualified_call(&first) {
             return Outcome::stable(context.invalidate());
         }
-        let (command, _) = super::command_words(&words);
         if name == "command"
             && command.first().is_some_and(|word| {
                 matches!(
@@ -141,6 +207,12 @@ fn call(invocation: &mut Invocation<'_>, context: Context, shell: Shell) -> Outc
                     "-C" | "--chdir" | "-D" | "--directory" | "--cd"
                 ) || word.starts_with("--chdir=")
                     || word.starts_with("--cd=")
+                    || (name == "env"
+                        && (word.starts_with("-C")
+                            || word == "-S"
+                            || word == "--split-string"
+                            || word.starts_with("--split-string=")))
+                    || (name == "sudo" && word.starts_with("-D"))
             })
         {
             invocation.directory = context.clone().changed(None);
@@ -183,33 +255,48 @@ fn call(invocation: &mut Invocation<'_>, context: Context, shell: Shell) -> Outc
     }
 }
 
-fn walk(flow: &Flow, calls: &mut [Invocation<'_>], context: Context, shell: Shell) -> Outcome {
+fn walk(
+    flow: &Flow,
+    calls: &mut [Invocation<'_>],
+    context: Context,
+    shell: Shell,
+    scope: VariableScope,
+) -> Outcome {
     match flow {
         Flow::Call(offset) => calls
             .iter_mut()
             .find(|call| call.offset == *offset)
             .map_or_else(
                 || Outcome::stable(context.clone().invalidate()),
-                |invocation| call(invocation, context.clone(), shell),
+                |invocation| {
+                    invocation.variable_scope = Some(scope);
+                    call(invocation, context.clone(), shell)
+                },
             ),
         Flow::Sequence(items) => {
             let mut outcome = Outcome::stable(context);
             for item in items {
-                outcome = walk(item, calls, outcome.next, shell);
+                outcome = walk(item, calls, outcome.next, shell, scope);
             }
             outcome
         }
         Flow::And(left, right) => {
-            let left = walk(left, calls, context, shell);
-            let right = walk(right, calls, left.success, shell);
+            let left = walk(left, calls, context, shell, scope);
+            let right = walk(right, calls, left.success, shell, scope);
             Outcome {
                 success: right.success,
                 failure: left.failure.clone().joined(&right.failure),
                 next: left.failure.joined(&right.next),
             }
         }
-        Flow::Child(child) => {
-            walk(child, calls, context.clone(), shell);
+        Flow::Child(offset, child) => {
+            walk(
+                child,
+                calls,
+                context.clone(),
+                shell,
+                VariableScope::Child(*offset),
+            );
             Outcome::stable(context)
         }
         Flow::Unresolved => Outcome::stable(context.invalidate()),
@@ -227,7 +314,12 @@ pub(super) fn locate(
             .filter(|path| path.is_absolute())
             .map(Path::to_path_buf),
     );
-    walk(flow, calls, context, shell);
+    walk(flow, calls, context, shell, VariableScope::Event);
+    if !flow.linear_assignments() {
+        for call in calls {
+            call.variable_scope = None;
+        }
+    }
 }
 
 fn sequence(node: &Value) -> Flow {
@@ -250,7 +342,12 @@ pub(super) fn bash(node: &Value) -> Flow {
     }
     match node.get("Type").and_then(Value::as_str) {
         Some("File" | "Block") => sequence(node),
-        Some("Subshell") => Flow::Child(Box::new(sequence(node))),
+        Some("Subshell") => node["Pos"]["Offset"]
+            .as_u64()
+            .and_then(|offset| usize::try_from(offset).ok())
+            .map_or(Flow::Unresolved, |offset| {
+                Flow::Child(offset, Box::new(sequence(node)))
+            }),
         Some("BinaryCmd") if node.get("Op").and_then(Value::as_str) == Some("&&") => {
             match (node.get("X"), node.get("Y")) {
                 (Some(left), Some(right)) => Flow::And(Box::new(bash(left)), Box::new(bash(right))),

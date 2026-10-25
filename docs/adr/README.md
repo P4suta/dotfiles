@@ -116,4 +116,5 @@
 | [2026-10-24 Preserve reviewed repository license assets](preserved-repository-license-assets.md) | proposed |  |
 | [2026-10-24 Use plan delimiters as proposal context](use-plan-delimiters-as-proposal-context.md) | proposed |  |
 | [2026-10-25 Hold mutation campaign temporary ownership](hold-mutation-campaign-temporary-ownership.md) | proposed |  |
+| [2026-10-25 Resolve script inspection from invocation directories](resolve-script-inspection-from-invocation-directories.md) | proposed |  |
 | [2026-10-25 Verify CI pin readers from the offered source](verify-ci-pin-readers-from-offered-source.md) | proposed |  |
