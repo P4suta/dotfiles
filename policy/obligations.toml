@@ -510,6 +510,18 @@ source = "crates/rules/src/legacy_rules.rs"
 probes = '''
 use production::{Verdict, verdict};
 #[kani::proof]
+fn reject_restoring_a_location_after_binding_invalidation() {
+    assert!(production::DirectoryContext::new(Some(1_u8)).invalidate().changed(Some(2)).directory().is_some());
+}
+#[kani::proof]
+fn reject_selecting_one_side_of_an_ambiguous_directory_join() {
+    assert!(production::DirectoryContext::new(Some(1_u8)).joined(&production::DirectoryContext::new(Some(2))).directory().is_some());
+}
+#[kani::proof]
+fn reject_forgetting_an_identical_directory_join() {
+    assert!(production::DirectoryContext::new(Some(1_u8)).joined(&production::DirectoryContext::new(Some(1))).directory().is_none());
+}
+#[kani::proof]
 fn reject_a_reversed_dynamic_spelling_order() {
     assert!(production::spelling_follows(Some(1), 0));
 }

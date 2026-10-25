@@ -5,7 +5,7 @@ use crate::shell_write_rules::{program, segments};
 use anyhow::{Context, Result, ensure};
 use model::data::{Modern, ModernTool};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// The table every profile pins through mise, which the hooks read as built.
@@ -25,6 +25,7 @@ pub(crate) const DEPTH: usize = 4;
 /// The shells whose script argument the hook reads.
 const SHELLS: [&str; 5] = ["sh", "bash", "zsh", "dash", "ksh"];
 
+mod directory;
 mod syntax;
 mod translate;
 
@@ -158,6 +159,9 @@ pub(crate) fn script_path<'a>(
             .any(|name| extension.eq_ignore_ascii_case(name))
     });
     let shebang = if first.contains('/') && Path::new(first).extension().is_none() {
+        if Path::new(first).is_relative() && !directory.is_some_and(Path::is_absolute) {
+            return Some(first);
+        }
         let path =
             directory.map_or_else(|| Path::new(first).to_path_buf(), |root| root.join(first));
         let mut prefix = Vec::new();
@@ -249,6 +253,16 @@ pub struct Findings {
     pub refusals: Vec<String>,
     pub unavailable: Vec<String>,
     pub(crate) bodies: Vec<crate::claude_hook::github::Body>,
+    pub(crate) scripts: Vec<InspectedScript>,
+}
+
+#[derive(Debug)]
+pub(crate) enum InspectedScript {
+    File {
+        path: PathBuf,
+        interpreter: Option<String>,
+    },
+    Unavailable(String),
 }
 
 struct ScriptContext<'a> {
@@ -256,6 +270,7 @@ struct ScriptContext<'a> {
     table: &'a Modern,
     depth: usize,
     variables: &'a std::collections::BTreeMap<String, String>,
+    interpreter: Option<&'a str>,
 }
 
 impl Findings {
@@ -384,25 +399,45 @@ impl Findings {
                 .and_then(|suffix| suffix.strip_prefix(':'))
                 .map_or("", str::trim);
             record_bypass(reason, words);
-            match script_refusal(path, context.directory, context.table, context.depth) {
+            match script_refusal(
+                path,
+                context.directory,
+                context.table,
+                context.depth,
+                context.interpreter,
+            ) {
                 Ok(report) => {
                     self.bodies.extend(report.bodies);
                     self.unavailable.extend(report.unavailable);
+                    self.scripts.extend(report.scripts);
                 }
-                Err(error) => self
-                    .bodies
-                    .push(crate::claude_hook::github::Body::Unreadable(format!(
+                Err(error) => {
+                    self.scripts.push(InspectedScript::Unavailable(format!(
+                        "Refused: cannot lint script {path}: {error:#}"
+                    )));
+                    self.bodies.push(crate::claude_hook::github::Body::Unreadable(format!(
                         "the bypassed script could not be inspected for GitHub bodies: {error:#}"
-                    ))),
+                    )));
+                }
             }
         } else {
-            match script_refusal(path, context.directory, context.table, context.depth)
-                .with_context(|| format!("inspect the script {path}"))
+            match script_refusal(
+                path,
+                context.directory,
+                context.table,
+                context.depth,
+                context.interpreter,
+            )
+            .with_context(|| format!("inspect the script {path}"))
             {
                 Ok(report) => self.append(report),
-                Err(error) => self
-                    .unavailable
-                    .push(format!("{error:#}\n{}", script_bypass_hint(path))),
+                Err(error) => {
+                    self.scripts.push(InspectedScript::Unavailable(format!(
+                        "Refused: cannot lint script {path}: {error:#}"
+                    )));
+                    self.unavailable
+                        .push(format!("{error:#}\n{}", script_bypass_hint(path)));
+                }
             }
         }
     }
@@ -411,6 +446,7 @@ impl Findings {
         self.refusals.extend(other.refusals);
         self.unavailable.extend(other.unavailable);
         self.bodies.extend(other.bodies);
+        self.scripts.extend(other.scripts);
     }
 
     fn inspect_stdin(
@@ -460,6 +496,7 @@ impl Shell {
     fn invocations<'a>(
         self,
         command: &'a str,
+        directory: Option<&Path>,
         findings: &mut Findings,
     ) -> Vec<syntax::Invocation<'a>> {
         let unparsed = || {
@@ -469,14 +506,14 @@ impl Shell {
                 .collect()
         };
         match self {
-            Self::PowerShell => match syntax::parse_powershell(command) {
+            Self::PowerShell => match syntax::parse_powershell_in(command, directory) {
                 Ok(invocations) => invocations,
                 Err(error) => {
                     findings.unavailable.push(format!("Refused: PowerShell argument spelling could not be verified: {error:#}.\nNext action: correct the PowerShell syntax or restore the pinned parser before using a suggested command."));
                     unparsed()
                 }
             },
-            Self::Bash => match syntax::parse(command) {
+            Self::Bash => match syntax::parse_in(command, directory) {
                 Ok(invocations) => invocations,
                 Err(error) => {
                     findings.unavailable.push(format!("Refused: shell argument spelling could not be verified: {error:#}.\nNext action: correct the shell syntax or restore the pinned shfmt parser before using a suggested command."));
@@ -532,10 +569,11 @@ fn script_refusal(
     directory: Option<&Path>,
     table: &Modern,
     depth: usize,
+    interpreter: Option<&str>,
 ) -> Result<Findings> {
     ensure!(
         Path::new(path).is_absolute() || directory.is_some_and(Path::is_absolute),
-        "the relative script has no known execution directory"
+        "the relative script has no known absolute execution directory"
     );
     let resolved = match directory {
         Some(directory) if Path::new(path).is_relative() => directory.join(path),
@@ -559,6 +597,10 @@ fn script_refusal(
     let text = String::from_utf8(bytes)
         .with_context(|| format!("read the script {}", resolved.display()))?;
     let mut findings = inspect(&text, directory, table, depth + 1);
+    findings.scripts.push(InspectedScript::File {
+        path: resolved,
+        interpreter: interpreter.map(str::to_owned),
+    });
     if skip_legacy {
         findings.refusals.clear();
     }
@@ -644,10 +686,17 @@ fn inspect_shell(
     let nested = depth < DEPTH;
     let mut findings = Findings::default();
     let mut variables = std::collections::BTreeMap::new();
-    let mut inline_scripts = Vec::new();
-    let invocations = shell.invocations(command, &mut findings);
+    let invocations = shell.invocations(command, directory, &mut findings);
     let files_safe = depth == 0 && invocations.len() == 1;
     for invocation in invocations {
+        let directory = invocation.directory.directory().map(PathBuf::as_path);
+        if invocation.unresolved_wrapper {
+            let reason = "Refused: the wrapper changes its execution directory through unsupported options.\nNext action: use an explicit absolute workdir without a directory-changing wrapper.";
+            findings.unavailable.push(reason.to_owned());
+            findings
+                .scripts
+                .push(InspectedScript::Unavailable(reason.to_owned()));
+        }
         let words = findings.inspect_publications(&invocation, directory, files_safe);
         let spelled = invocation.arguments(0).ok();
         assigned(&words, &mut variables);
@@ -669,7 +718,13 @@ fn inspect_shell(
                     .as_ref()
                     .and_then(|arguments| arguments.get(argument)),
             ) {
-                inline_scripts.push(script);
+                if nested {
+                    findings.append(inspect(&script, directory, table, depth + 1));
+                } else {
+                    findings
+                        .unavailable
+                        .push("script nesting exceeds the inspection limit".to_owned());
+                }
             }
         }
         if SHELLS.contains(&name) && path.is_none() && inline.is_none() {
@@ -704,19 +759,11 @@ fn inspect_shell(
                     table,
                     depth,
                     variables: &variables,
+                    interpreter: SHELLS.contains(&name).then_some(first.as_str()),
                 },
             );
         }
         findings.inspect_legacy(&invocation, &words, table);
-    }
-    for script in inline_scripts {
-        if nested {
-            findings.append(inspect(script.as_str(), directory, table, depth + 1));
-        } else {
-            findings
-                .unavailable
-                .push("script nesting exceeds the inspection limit".to_owned());
-        }
     }
     findings
 }
@@ -752,6 +799,419 @@ fn dynamic_xargs_script(words: &[String], command: &[String], path: Option<&str>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_flow_successful_bash_change_selects_the_child_directory() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let child = directory.path().join("selected");
+        std::fs::create_dir(&child)?;
+        std::fs::write(directory.path().join("check.sh"), "cat wrong\n")?;
+        std::fs::write(child.join("check.sh"), "grep selected input\n")?;
+        let target = child.to_string_lossy().replace('\\', "/");
+        let report = findings(
+            &format!("cd -- '{target}' && bash check.sh"),
+            Some(directory.path()),
+        )?;
+        assert!(
+            report
+                .refusals
+                .iter()
+                .any(|message| message.contains("`grep`")),
+            "{report:?}"
+        );
+        assert!(
+            !report
+                .refusals
+                .iter()
+                .any(|message| message.contains("`cat`")),
+            "{report:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_unknown_changes_refuse_before_relative_script_reads() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(directory.path().join("check.sh"), "cat wrong\n")?;
+        std::fs::write(directory.path().join("check"), "#!/bin/sh\ncat wrong\n")?;
+        std::fs::write(directory.path().join("reset.sh"), "cd -- /unresolved\n")?;
+        for command in [
+            "cd -- /unresolved; bash check.sh",
+            "cd -- \"$target\" && bash check.sh",
+            "if ready; then cd -- /unresolved; fi; bash check.sh",
+            "cd() { :; }; cd -- /unresolved && bash check.sh",
+            "cd -- /unresolved; ./check",
+            "source reset.sh; bash check.sh",
+            "pushd /unresolved; bash check.sh",
+            "command cd /unresolved; bash check.sh",
+            "env --chdir=/unresolved bash check.sh",
+        ] {
+            let report = findings(command, Some(directory.path()))?;
+            assert!(
+                report
+                    .unavailable
+                    .iter()
+                    .any(|message| message.contains("execution directory")),
+                "{command}: {report:?}"
+            );
+            assert!(
+                !report
+                    .refusals
+                    .iter()
+                    .any(|message| message.contains("`cat`")),
+                "{command}: {report:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_powershell_continue_and_bindings_refuse_relative_reads() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(directory.path().join("check.sh"), "cat wrong\n")?;
+        for prefix in [
+            "Set-Location -LiteralPath 'unresolved'",
+            "try { Set-Location -LiteralPath 'unresolved' -ErrorAction Stop } catch { }",
+            "function Set-Location { }; Set-Location -LiteralPath 'unresolved' -ErrorAction Stop",
+            "Set-Location '-LiteralPath' 'unresolved' '-ErrorAction' 'Stop'",
+            "Push-Location 'unresolved'",
+        ] {
+            let report = findings_in_shell(
+                &format!("{prefix}; bash check.sh"),
+                Some(directory.path()),
+                Shell::PowerShell,
+            )?;
+            assert!(
+                report
+                    .unavailable
+                    .iter()
+                    .any(|message| message.contains("execution directory")),
+                "{prefix}: {report:?}"
+            );
+            assert!(
+                !report
+                    .refusals
+                    .iter()
+                    .any(|message| message.contains("`cat`")),
+                "{prefix}: {report:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_absolute_entries_keep_the_callers_directory() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let entry = directory.path().join("entries");
+        std::fs::create_dir(&entry)?;
+        std::fs::write(entry.join("outer.sh"), "bash child.sh\n")?;
+        std::fs::write(entry.join("child.sh"), "cat wrong\n")?;
+        std::fs::write(directory.path().join("child.sh"), "grep selected input\n")?;
+        let path = entry.join("outer.sh").to_string_lossy().replace('\\', "/");
+        let report = findings(&format!("bash '{path}'"), Some(directory.path()))?;
+        assert!(
+            report
+                .refusals
+                .iter()
+                .any(|message| message.contains("`grep`")),
+            "{report:?}"
+        );
+        assert!(
+            !report
+                .refusals
+                .iter()
+                .any(|message| message.contains("`cat`")),
+            "{report:?}"
+        );
+        assert!(report.scripts.iter().any(|script| matches!(script, InspectedScript::File { path, .. } if path == &directory.path().join("child.sh"))), "{report:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_children_do_not_change_later_parent_invocations() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let child = directory.path().join("selected");
+        std::fs::create_dir(&child)?;
+        std::fs::write(directory.path().join("parent.sh"), "cat parent\n")?;
+        std::fs::write(child.join("parent.sh"), "wc -l wrong\n")?;
+        std::fs::write(child.join("check.sh"), "grep selected input\n")?;
+        let target = child.to_string_lossy().replace('\\', "/");
+        for command in [
+            format!("(cd -- '{target}' && bash check.sh); bash parent.sh"),
+            format!("bash -c \"cd -- '{target}' && bash check.sh\"; bash parent.sh"),
+        ] {
+            let report = findings(&command, Some(directory.path()))?;
+            for expected in ["`grep`", "`cat`"] {
+                assert!(
+                    report
+                        .refusals
+                        .iter()
+                        .any(|message| message.contains(expected)),
+                    "{command}: {report:?}"
+                );
+            }
+            assert!(
+                !report
+                    .refusals
+                    .iter()
+                    .any(|message| message.contains("`wc`")),
+                "{command}: {report:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_an_external_cd_file_does_not_change_the_parent_directory() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let child = directory.path().join("selected");
+        std::fs::create_dir(&child)?;
+        std::fs::write(
+            directory.path().join("cd"),
+            "#!/bin/sh\nprintf 'ready\\n'\n",
+        )?;
+        std::fs::write(directory.path().join("check.sh"), "cat parent\n")?;
+        std::fs::write(child.join("check.sh"), "grep wrong input\n")?;
+        let target = child.to_string_lossy().replace('\\', "/");
+        for executable in ["./cd", "CD", "cd.exe"] {
+            let report = findings(
+                &format!("{executable} -- '{target}' && bash check.sh"),
+                Some(directory.path()),
+            )?;
+            assert!(
+                report
+                    .refusals
+                    .iter()
+                    .any(|message| message.contains("`cat`")),
+                "{executable}: {report:?}"
+            );
+            assert!(
+                !report
+                    .refusals
+                    .iter()
+                    .any(|message| message.contains("`grep`")),
+                "{executable}: {report:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_powershell_argument_effects_invalidate_the_invocation_directory() -> Result<()>
+    {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(directory.path().join("check.sh"), "cat wrong\n")?;
+        for command in [
+            "Write-Output $(Set-Location -LiteralPath 'unresolved'); bash check.sh",
+            "ForEach-Object -Begin { Set-Location -LiteralPath 'unresolved' }; bash check.sh",
+            "bash check.sh $(Set-Location -LiteralPath 'unresolved')",
+        ] {
+            let report = findings_in_shell(command, Some(directory.path()), Shell::PowerShell)?;
+            assert!(
+                report
+                    .unavailable
+                    .iter()
+                    .any(|message| message.contains("execution directory")),
+                "{command}: {report:?}"
+            );
+            assert!(
+                !report
+                    .refusals
+                    .iter()
+                    .any(|message| message.contains("`cat`")),
+                "{command}: {report:?}"
+            );
+        }
+        Ok(())
+    }
+
+    fn assert_powershell_builtin_location_refuses_stale_read(command: &str) -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let initial = directory.path().join("initial");
+        std::fs::create_dir(&initial)?;
+        let stale = initial.join("check.sh");
+        std::fs::write(&stale, "cat wrong\n")?;
+        std::fs::write(directory.path().join("check.sh"), "grep selected input\n")?;
+        let report = findings_in_shell(command, Some(&initial), Shell::PowerShell)?;
+        assert!(
+            !report.scripts.iter().any(
+                |script| matches!(script, InspectedScript::File { path, .. } if path == &stale)
+            ),
+            "{command}: {report:?}"
+        );
+        assert!(
+            !report
+                .refusals
+                .iter()
+                .any(|message| message.contains("`cat`")),
+            "{command}: {report:?}"
+        );
+        assert!(
+            report
+                .unavailable
+                .iter()
+                .any(|message| message.contains("execution directory")),
+            "{command}: {report:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_powershell_builtin_parent_refuses_stale_reads() -> Result<()> {
+        assert_powershell_builtin_location_refuses_stale_read("cd..; bash check.sh")
+    }
+
+    #[test]
+    fn directory_flow_powershell_builtin_home_refuses_stale_reads() -> Result<()> {
+        assert_powershell_builtin_location_refuses_stale_read("& 'cd~'; bash check.sh")
+    }
+
+    #[test]
+    fn directory_flow_powershell_builtin_root_refuses_stale_reads() -> Result<()> {
+        for command in [r"cd\; bash check.sh", r"& 'cd\'; bash check.sh"] {
+            assert_powershell_builtin_location_refuses_stale_read(command)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_powershell_builtin_drives_refuse_stale_reads() -> Result<()> {
+        for drive in b'A'..=b'Z' {
+            assert_powershell_builtin_location_refuses_stale_read(&format!(
+                "{}:; bash check.sh",
+                char::from(drive)
+            ))?;
+        }
+        assert_powershell_builtin_location_refuses_stale_read("c:; bash check.sh")
+    }
+
+    #[test]
+    fn directory_flow_qualified_powershell_location_never_reads_the_old_directory() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let child = directory.path().join("selected files");
+        std::fs::create_dir(&child)?;
+        std::fs::write(directory.path().join("check.sh"), "cat wrong\n")?;
+        std::fs::write(child.join("check.sh"), "grep selected input\n")?;
+        let target = child.to_string_lossy().replace('\\', "/");
+        let qualified = r"Microsoft.PowerShell.Management\Set-Location";
+        let command =
+            format!("& '{qualified}' -LiteralPath '{target}' -ErrorAction Stop; bash check.sh");
+        let calls = syntax::parse_powershell_in(&command, Some(directory.path()))?;
+        assert_eq!(
+            calls.first().and_then(|call| call.literal(0)).as_deref(),
+            Some(qualified)
+        );
+        let report = findings_in_shell(&command, Some(directory.path()), Shell::PowerShell)?;
+        assert!(
+            !report
+                .refusals
+                .iter()
+                .any(|message| message.contains("`cat`")),
+            "{report:?}"
+        );
+        assert!(
+            report
+                .refusals
+                .iter()
+                .any(|message| message.contains("`grep`"))
+                || report
+                    .unavailable
+                    .iter()
+                    .any(|message| message.contains("execution directory")),
+            "{report:?}"
+        );
+        assert!(
+            report.scripts.iter().any(|script| matches!(script, InspectedScript::File { path, .. } if path == &child.join("check.sh"))),
+            "{report:?}"
+        );
+        let unknown = command.replace(qualified, r"Other.Module\Set-Location");
+        let report = findings_in_shell(&unknown, Some(directory.path()), Shell::PowerShell)?;
+        assert!(
+            report
+                .unavailable
+                .iter()
+                .any(|message| message.contains("execution directory")),
+            "{report:?}"
+        );
+        assert!(
+            !report
+                .refusals
+                .iter()
+                .any(|message| message.contains("`cat`")),
+            "{report:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_powershell_script_scope_never_preserves_a_stale_location() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let child = directory.path().join("selected files");
+        std::fs::create_dir(&child)?;
+        let target = child.to_string_lossy().replace('\\', "/");
+        std::fs::write(
+            directory.path().join("move.ps1"),
+            format!("Set-Location -LiteralPath '{target}' -ErrorAction Stop\n"),
+        )?;
+        std::fs::write(directory.path().join("check.sh"), "cat wrong\n")?;
+        std::fs::write(child.join("check.sh"), "grep selected input\n")?;
+        let command = "& './move.ps1'; bash check.sh";
+        let report = findings_in_shell(command, Some(directory.path()), Shell::PowerShell)?;
+        assert!(
+            !report
+                .refusals
+                .iter()
+                .any(|message| message.contains("`cat`")),
+            "{report:?}"
+        );
+        assert!(
+            report
+                .refusals
+                .iter()
+                .any(|message| message.contains("`grep`"))
+                || report
+                    .unavailable
+                    .iter()
+                    .any(|message| message.contains("execution directory")),
+            "{report:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn directory_flow_powershell_stop_and_stable_calls_share_resolved_lint_entries() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let child = directory.path().join("selected files");
+        std::fs::create_dir(&child)?;
+        std::fs::write(directory.path().join("check.sh"), "cat wrong\n")?;
+        std::fs::write(child.join("check.sh"), "grep selected input\n")?;
+        let target = child.to_string_lossy().replace('\\', "/");
+        for (command, root) in [
+            (
+                format!("Set-Location -LiteralPath '{target}' -ErrorAction Stop; bash check.sh"),
+                directory.path(),
+            ),
+            ("bash check.sh".to_owned(), child.as_path()),
+        ] {
+            let report = findings_in_shell(&command, Some(root), Shell::PowerShell)?;
+            assert!(
+                report
+                    .refusals
+                    .iter()
+                    .any(|message| message.contains("`grep`")),
+                "{report:?}"
+            );
+            assert!(
+                !report
+                    .refusals
+                    .iter()
+                    .any(|message| message.contains("`cat`")),
+                "{report:?}"
+            );
+            assert!(report.scripts.iter().any(|script| matches!(script, InspectedScript::File { path, .. } if path == &child.join("check.sh"))), "{report:?}");
+        }
+        Ok(())
+    }
 
     #[test]
     fn powershell_literal_script_keeps_inspectable_file_inputs() -> Result<()> {

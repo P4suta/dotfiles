@@ -9,6 +9,57 @@ pub enum Verdict {
     Refuse,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DirectoryContext<T> {
+    directory: Option<T>,
+    native_binding: bool,
+}
+
+impl<T> DirectoryContext<T> {
+    #[must_use]
+    pub const fn new(directory: Option<T>) -> Self {
+        Self {
+            directory,
+            native_binding: true,
+        }
+    }
+
+    #[must_use]
+    pub const fn directory(&self) -> Option<&T> {
+        self.directory.as_ref()
+    }
+
+    #[must_use]
+    pub fn invalidate(self) -> Self {
+        Self {
+            directory: None,
+            native_binding: false,
+        }
+    }
+
+    #[must_use]
+    pub fn changed(self, directory: Option<T>) -> Self {
+        Self {
+            directory: if self.native_binding { directory } else { None },
+            ..self
+        }
+    }
+}
+
+impl<T: Eq> DirectoryContext<T> {
+    #[must_use]
+    pub fn joined(self, other: &Self) -> Self {
+        if !self.native_binding || !other.native_binding {
+            return self.invalidate();
+        }
+        if self.directory == other.directory {
+            self
+        } else {
+            self.changed(None)
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SourceRange {
     start: usize,
@@ -163,6 +214,49 @@ fn line(text: &str) -> Option<u64> {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    fn spec_directory_context(left: Option<u8>, right: Option<u8>) {
+        let joined = DirectoryContext::new(left).joined(&DirectoryContext::new(right));
+        assert_eq!(
+            joined.directory().copied(),
+            if left == right { left } else { None }
+        );
+        assert!(
+            DirectoryContext::new(left)
+                .invalidate()
+                .changed(right)
+                .directory()
+                .is_none()
+        );
+        assert!(
+            DirectoryContext::new(left)
+                .joined(&DirectoryContext::new(right).invalidate())
+                .changed(left)
+                .directory()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn directory_flow_joins_and_binding_invalidation_preserve_uncertainty() {
+        for left in [None, Some(0), Some(1)] {
+            for right in [None, Some(0), Some(1)] {
+                spec_directory_context(left, right);
+            }
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn directory_flow_never_invents_a_known_location_or_restores_an_unknown_binding() {
+        let left: Option<u8> = kani::any();
+        let right: Option<u8> = kani::any();
+        spec_directory_context(left, right);
+        kani::cover!(left.is_some() && left == right);
+        kani::cover!(left != right);
+        kani::cover!(left.is_none());
+    }
 
     pub fn spec_spelling_order(previous: Option<usize>, current: usize) {
         assert_eq!(
