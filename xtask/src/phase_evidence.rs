@@ -28,12 +28,17 @@ const MUTABLE_OR_SHARED_ANCHOR_BITS: u32 = 0o277;
 const SEALED_FILE_MODE: u32 = 0o400;
 #[cfg(unix)]
 const SEALED_DIRECTORY_MODE: u32 = 0o500;
-const ENGINE_INPUTS: [&str; 41] = [
+const ENGINE_INPUTS: [&str; 46] = [
     "xtask/src/skill_proofs.rs",
     "xtask/src/phase_evidence.rs",
     "xtask/src/obligations.rs",
     "xtask/src/checks.rs",
     "xtask/src/lib.rs",
+    "xtask/src/native_refinement.rs",
+    "xtask/src/elapsed_refinement.rs",
+    "xtask/src/proof_ci_phase.rs",
+    "xtask/tests/native_refinement.rs",
+    "xtask/tests/elapsed_refinement.rs",
     "xtask/tests/container_proofs.rs",
     "xtask/tests/support/incident_fixture.rs",
     "crates/platform/src/lib.rs",
@@ -726,6 +731,12 @@ fn local_reuse(root: &Path) -> bool {
             .is_ok_and(|bytes| bytes == include_bytes!("checks.rs"))
         && fs::read(root.join("xtask/src/lib.rs"))
             .is_ok_and(|bytes| bytes == include_bytes!("lib.rs"))
+        && fs::read(root.join("xtask/src/native_refinement.rs"))
+            .is_ok_and(|bytes| bytes == include_bytes!("native_refinement.rs"))
+        && fs::read(root.join("xtask/src/elapsed_refinement.rs"))
+            .is_ok_and(|bytes| bytes == include_bytes!("elapsed_refinement.rs"))
+        && fs::read(root.join("xtask/src/proof_ci_phase.rs"))
+            .is_ok_and(|bytes| bytes == include_bytes!("proof_ci_phase.rs"))
         && platform::build_inputs::content_hash(root).is_ok_and(|hash| hash == platform::BUILD_HASH)
     {
         #[cfg(unix)]

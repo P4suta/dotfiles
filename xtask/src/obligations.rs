@@ -330,15 +330,23 @@ fn lean_bridge_registered(root: &Path, manifest: &Manifest, theorem: &LeanTheore
                     crate::elapsed_refinement::THEOREMS.contains(&theorem.name.as_str())
                         && theorem.bridge == crate::elapsed_refinement::BRIDGE
                         && modes.contains(&EvidenceMode::Test)
-                        && evidence_modes(
-                            root,
-                            &(
-                                crate::elapsed_refinement::SOURCE.to_owned(),
-                                crate::elapsed_refinement::HARNESS.to_owned(),
-                            ),
-                            manifest,
-                        )
-                        .contains(&EvidenceMode::Kani)
+                        && [
+                            crate::elapsed_refinement::HARNESS,
+                            crate::elapsed_refinement::CAMPAIGN_HARNESS,
+                            crate::elapsed_refinement::ZERO_HARNESS,
+                        ]
+                        .iter()
+                        .all(|harness| {
+                            evidence_modes(
+                                root,
+                                &(
+                                    crate::elapsed_refinement::SOURCE.to_owned(),
+                                    (*harness).to_owned(),
+                                ),
+                                manifest,
+                            )
+                            .contains(&EvidenceMode::Kani)
+                        })
                         && crate::elapsed_refinement::with_source(root, || Ok(())).is_ok()
                 }
                 LeanRefinement::SourceTranslation => {

@@ -237,11 +237,24 @@ fn docker_inspect_confirms_limits_and_oom_and_timeout_are_inconclusive() -> Resu
             && container["Config"]["Cmd"][1] == "2s",
         "deadline differs"
     );
-    let (_timeout, output) = bounded(&image, root.path(), Some(&policy), &["sleep", "20"])?;
+    let (_timeout, output) = bounded(
+        &image,
+        root.path(),
+        Some(&policy),
+        &[
+            "bash",
+            "-c",
+            "printf 'proof-diagnostic-before-stop\\n'; exec sleep 20",
+        ],
+    )?;
     ensure!(
         !output.status.success()
             && String::from_utf8_lossy(&output.stderr).contains("time limit 2s"),
         "timeout supplied passing evidence"
+    );
+    ensure!(
+        String::from_utf8_lossy(&output.stdout).contains("proof-diagnostic-before-stop"),
+        "limit stop discarded the container diagnostic"
     );
     Ok(())
 }

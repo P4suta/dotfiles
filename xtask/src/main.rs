@@ -162,6 +162,10 @@ enum Action {
         /// Verify only these registered Kani rule modules and their rejecting probes.
         #[arg(long = "source")]
         sources: Vec<String>,
+        /// Limit an owner-side bounded run to this explicit time window.
+        /// A limit stop leaves verification incomplete.
+        #[arg(long)]
+        window_seconds: Option<std::num::NonZeroU32>,
     },
     /// Run the CI proof campaign, deferring mutation and its fixture to the full native campaign.
     ProofsCi {
@@ -442,7 +446,17 @@ fn report_benchmark_observation(root: &Path) -> Result<()> {
     })
 }
 
-fn proofs(root: &Path, scope: &xtask::change::Scope, sources: &[String]) -> Result<()> {
+fn proofs(
+    root: &Path,
+    scope: &xtask::change::Scope,
+    sources: &[String],
+    window: Option<std::num::NonZeroU32>,
+) -> Result<()> {
+    if (!sources.is_empty() || scope.resolve(root)?.contains(Gate::Proofs))
+        && let Some(window) = window
+    {
+        return xtask::skill_proofs::verify_window(root, sources, window);
+    }
     if !sources.is_empty() {
         return xtask::skill_proofs::verify_sources(root, sources);
     }
@@ -506,7 +520,11 @@ fn run() -> Result<()> {
             xtask::skill_proofs::verify_answer(&cli.root, policy.as_deref())?;
         }
         Action::InstallProse => install_prose(&cli.root)?,
-        Action::Proofs { scope, sources } => proofs(&cli.root, &scope, &sources)?,
+        Action::Proofs {
+            scope,
+            sources,
+            window_seconds,
+        } => proofs(&cli.root, &scope, &sources, window_seconds)?,
         Action::ProofsCi { phase: Some(phase) } => xtask::proof_ci_phase::verify(&cli.root, phase)?,
         Action::ProofsCi { phase: None } => xtask::skill_proofs::verify_ci(&cli.root)?,
         Action::VerificationEnv(request) => xtask::verification_env::run(&cli.root, &request)?,
@@ -1001,6 +1019,34 @@ mod tests {
         for option in ["--staged", "--base", "--no-verify"] {
             assert!(Cli::try_parse_from(["xtask", "proofs-ci", option]).is_err());
         }
+    }
+
+    #[test]
+    fn owner_proof_windows_require_positive_seconds_and_preserve_selected_sources() {
+        let cli = Cli::try_parse_from([
+            "xtask",
+            "proofs",
+            "--source",
+            "crates/rules/src/proof_budget_rules.rs",
+            "--window-seconds",
+            "900",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Action::Proofs { sources, window_seconds: Some(seconds), .. }
+                if sources == ["crates/rules/src/proof_budget_rules.rs"] && seconds.get() == 900
+        ));
+        for value in ["0", "-1", "4294967296", "unknown"] {
+            assert!(Cli::try_parse_from(["xtask", "proofs", "--window-seconds", value]).is_err());
+        }
+        assert!(matches!(
+            Cli::try_parse_from(["xtask", "proofs"]).unwrap().command,
+            Action::Proofs {
+                window_seconds: None,
+                ..
+            }
+        ));
     }
 
     #[test]

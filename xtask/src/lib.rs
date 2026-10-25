@@ -23,6 +23,7 @@ pub mod lint;
 pub mod linux_profiles;
 pub mod manifest_model;
 pub mod modern;
+pub mod native_refinement;
 pub mod next_action;
 pub mod njutest_assessment;
 pub mod obligations;

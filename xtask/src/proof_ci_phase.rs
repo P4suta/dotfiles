@@ -35,7 +35,7 @@ pub fn verify(root: &Path, phase: Phase) -> Result<()> {
         cfg!(target_os = "linux") && !dotfiles::bounded::requires_container(),
         "proof partitions require Linux CI or a bounded container; use `just proofs` or `dotfiles bounded run`"
     );
-    crate::elapsed_refinement::with_source(root, || {
+    crate::native_refinement::with_source(root, || {
         crate::quality::with_locked_workspaces(root, || verify_prepared(root, phase))
     })
 }

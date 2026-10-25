@@ -322,11 +322,22 @@ pub fn run_campaign(
     harnesses: u32,
     parallelism: u16,
     overhead: u32,
+    window: Option<std::num::NonZeroU32>,
 ) -> Result<Output> {
     let mut policy = Policy::load(None)?;
+    let safety = rules::proof_budget_rules::campaign_seconds(harnesses, parallelism, overhead)
+        .context("proof campaign requires a nonempty finite inventory and parallelism")?;
+    ensure!(
+        window.is_none_or(|seconds| seconds.get() <= policy.limits.seconds),
+        "requested proof window exceeds the installed owner time limit"
+    );
     policy.limits.seconds =
-        rules::proof_budget_rules::campaign_seconds(harnesses, parallelism, overhead)
-            .context("proof campaign requires a nonempty finite inventory and parallelism")?;
+        rules::proof_budget_rules::campaign_window(safety, window.map(std::num::NonZeroU32::get))
+            .context("proof campaign window must be positive")?;
+    eprintln!(
+        "Proof campaign: {harnesses} harnesses, parallelism={parallelism}, safety cap={safety}s, execution window={}s; a limit stop remains incomplete",
+        policy.limits.seconds
+    );
     run_with(&policy, arguments, image, false)
 }
 
@@ -390,6 +401,10 @@ fn run_with(policy: &Policy, arguments: &[OsString], image: &str, keep: bool) ->
     let mut output = docker(&["logs", "--tail", LOG_LINES, &container.id])?;
     output.status = exit_status(state.exit_code)?;
     let timed_out = matches!(state.exit_code, TIMEOUT_EXIT | KILLED_EXIT) && !state.oom_killed;
+    if state.oom_killed || timed_out {
+        std::io::stdout().write_all(&output.stdout)?;
+        std::io::stderr().write_all(&output.stderr)?;
+    }
     match bounded_rules::completion(state.oom_killed, timed_out, output.status.success()) {
         Completion::MemoryLimit => anyhow::bail!(
             "inconclusive: bounded container {} exceeded memory limit {} bytes (memory+swap {} bytes)",

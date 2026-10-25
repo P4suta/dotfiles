@@ -130,7 +130,7 @@ mod proofs {
         assert!(joins_stack || !admitted || units.saturating_add(1) <= limit);
     }
 
-    pub fn spec_workload(members: &[StackMember]) {
+    pub fn spec_workload(members: &[StackMember]) -> Result<Workload, InvalidWork> {
         let parents = members.iter().all(|member| match member.parent {
             None => true,
             Some(parent) => {
@@ -175,6 +175,7 @@ mod proofs {
                 assert!(!members.iter().any(|member| member.parent == Some(tip)));
             }
         }
+        result
     }
 
     #[cfg(kani)]
@@ -191,16 +192,40 @@ mod proofs {
     #[cfg(kani)]
     #[kani::proof]
     #[kani::unwind(12)]
-    fn every_graph_of_up_to_three_members_matches_parent_path_validation() {
+    fn the_empty_graph_matches_parent_path_validation() {
+        let result = spec_workload(&[]);
+        assert!(result.is_ok_and(|work| work.units() == 0 && work.tip().is_none()));
+        kani::cover!(result.is_ok());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn every_graph_of_one_member_matches_parent_path_validation() {
+        let members: [StackMember; 1] = kani::any();
+        let result = spec_workload(&members);
+        kani::cover!(result.is_ok());
+        kani::cover!(result.is_err());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn every_graph_of_two_members_matches_parent_path_validation() {
+        let members: [StackMember; 2] = kani::any();
+        let result = spec_workload(&members);
+        kani::cover!(result.is_ok_and(|work| work.units() == 2 && work.tip().is_some()));
+        kani::cover!(result.is_err());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn every_graph_of_three_members_matches_parent_path_validation() {
         let members: [StackMember; 3] = kani::any();
-        let length: usize = kani::any();
-        kani::assume(length <= members.len());
-        let selected = &members[..length];
-        spec_workload(selected);
-        kani::cover!(
-            workload(selected).is_ok_and(|work| work.units() == 2 && work.tip().is_some())
-        );
-        kani::cover!(workload(selected).is_err());
+        let result = spec_workload(&members);
+        kani::cover!(result.is_ok_and(|work| work.units() == 2 && work.tip().is_some()));
+        kani::cover!(result.is_err());
     }
 
     #[cfg(kani)]
@@ -252,7 +277,7 @@ mod tests {
                 for third in choices {
                     let members = [first, second, third];
                     for length in 0..=members.len() {
-                        proofs::spec_workload(&members[..length]);
+                        let _ = proofs::spec_workload(&members[..length]);
                     }
                 }
             }
@@ -272,7 +297,7 @@ mod tests {
             parent: None,
             independent: true,
         };
-        proofs::spec_workload(&members);
+        let _ = proofs::spec_workload(&members);
         let work = workload(&members).unwrap();
         assert_eq!(work.units(), 2);
         assert_eq!(work.tip(), Some(31));
