@@ -676,6 +676,172 @@ fn old_gaps_do_not_block_unrelated_prs_but_a_touched_file_must_close_them_at_sto
     Ok(())
 }
 
+#[test]
+fn renamed_files_retain_existing_gaps_at_commit_push_and_ready() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.write("src/original file.rs", &format!("{PARSER}\n{MAGIC}"))?;
+    let base = fixture.commit("older gaps")?;
+    fixture.git(&["config", "diff.renames", "false"])?;
+    fs::create_dir(fixture.root.join("tools"))?;
+    fixture.git(&["mv", "src/original file.rs", "tools/renamed file's.rs"])?;
+    let outcome = assure::decide(
+        &fixture.root,
+        &catalog,
+        dotfiles::shape_rules::Point::Commit,
+        &assure::Tree::Commit(Some(base.clone())),
+        &assure::Tree::Index,
+    )?;
+    assert!(outcome.change.before > 0);
+    assert_eq!(outcome.change.added, 0);
+    assert_eq!(outcome.change.closed, 0);
+    assert_eq!(outcome.verdict, Verdict::Admit);
+    assert_eq!(rule(assure::commit(&fixture.root, &catalog)), None);
+    let head = fixture.commit("move the existing code")?;
+    let pushed = format!("refs/heads/main {head} refs/heads/main {base}\n");
+    assert_eq!(
+        rule(assure::push(
+            &fixture.root,
+            &catalog,
+            "origin",
+            pushed.as_bytes()
+        )),
+        None
+    );
+    assert_eq!(
+        rule(assure::ready(&fixture.root, &catalog, &base, &head)),
+        None
+    );
+    Ok(())
+}
+
+#[test]
+fn renamed_files_do_not_hide_new_sites_or_duplicate_occurrences() -> Result<()> {
+    for added in ["pub fn another() -> u32 { 17 }\n", MAGIC] {
+        let fixture = Fixture::new()?;
+        let catalog = fixture.catalog()?;
+        let original = format!("{PARSER}\n{MAGIC}");
+        fixture.write("src/original.rs", &original)?;
+        let base = fixture.commit("older gaps")?;
+        fs::create_dir(fixture.root.join("tools"))?;
+        fixture.git(&["mv", "src/original.rs", "tools/renamed.rs"])?;
+        fixture.write("tools/renamed.rs", &format!("{original}\n{added}"))?;
+        fixture.stage()?;
+        let outcome = assure::decide(
+            &fixture.root,
+            &catalog,
+            dotfiles::shape_rules::Point::Commit,
+            &assure::Tree::Commit(Some(base.clone())),
+            &assure::Tree::Index,
+        )?;
+        assert_eq!(outcome.verdict, Verdict::Added);
+        assert_eq!(outcome.change.added, 1);
+        assert_eq!(outcome.gaps.len(), 1);
+        assert!(outcome.gaps.iter().all(|gap| gap.path == "tools/renamed.rs"
+            && gap.shape == "magic-number"
+            && gap.line > original.lines().count()));
+        assert_eq!(
+            rule(assure::commit(&fixture.root, &catalog)).as_deref(),
+            Some("assure.added")
+        );
+        let head = fixture.commit("move and add a violation")?;
+        assert_eq!(
+            rule(assure::ready(&fixture.root, &catalog, &base, &head)).as_deref(),
+            Some("assure.added")
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn copied_files_do_not_inherit_existing_gaps() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let original = format!("{PARSER}\n{MAGIC}");
+    fixture.write("src/original.rs", &original)?;
+    let base = fixture.commit("older gaps")?;
+    fixture.write("tools/copied.rs", &original)?;
+    fixture.stage()?;
+    assert_eq!(
+        rule(assure::commit(&fixture.root, &catalog)).as_deref(),
+        Some("assure.added")
+    );
+    let head = fixture.commit("copy the existing code")?;
+    assert_eq!(
+        rule(assure::ready(&fixture.root, &catalog, &base, &head)).as_deref(),
+        Some("assure.added")
+    );
+    Ok(())
+}
+
+#[test]
+fn renamed_files_use_the_destination_ownership() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.write("src/lib.rs", PARSER)?;
+    fixture.write("fuzz/fuzz_targets/parse.rs", TARGET)?;
+    fixture.write("fuzz/corpus/parse/seed", "1")?;
+    fixture.owners(OWNERS)?;
+    let base = fixture.commit("owned parser")?;
+    assert_eq!(
+        assure::survey(
+            &fixture.root,
+            &catalog,
+            &assure::Tree::Commit(Some(base.clone())),
+            None
+        )?
+        .gaps,
+        Vec::<assure::Gap>::new()
+    );
+    fs::create_dir(fixture.root.join("tools"))?;
+    fixture.git(&["mv", "src/lib.rs", "tools/parser.rs"])?;
+    let outcome = assure::decide(
+        &fixture.root,
+        &catalog,
+        dotfiles::shape_rules::Point::Commit,
+        &assure::Tree::Commit(Some(base)),
+        &assure::Tree::Index,
+    )?;
+    assert_eq!(outcome.verdict, Verdict::Added);
+    assert!(
+        outcome
+            .gaps
+            .iter()
+            .any(|gap| gap.path == "tools/parser.rs" && gap.kind == Kind::Shape(Cause::Unowned))
+    );
+    Ok(())
+}
+
+#[test]
+fn inherited_renamed_files_read_the_previous_parent_path() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.git(&["switch", "--quiet", "-c", "topic"])?;
+    fixture.write("topic.md", "Topic work.\n")?;
+    fixture.commit("topic documentation")?;
+    fixture.git(&["switch", "--quiet", "main"])?;
+    fixture.write("src/original.rs", &format!("{PARSER}\n{MAGIC}"))?;
+    let incoming = fixture.commit("existing gaps on main")?;
+    fixture.git(&["switch", "--quiet", "topic"])?;
+    fixture.git(&["merge", "--no-commit", "--no-ff", "main"])?;
+    fs::create_dir(fixture.root.join("tools"))?;
+    fixture.git(&["mv", "src/original.rs", "tools/renamed.rs"])?;
+    assert_eq!(rule(assure::commit(&fixture.root, &catalog)), None);
+    fixture.write("tools/renamed.rs", &format!("{PARSER}\n{MAGIC}\n{MAGIC}"))?;
+    fixture.stage()?;
+    let outcome = assure::decide(
+        &fixture.root,
+        &catalog,
+        dotfiles::shape_rules::Point::Commit,
+        &assure::Tree::Commit(assure::resolve(&fixture.root, "HEAD")?),
+        &assure::Tree::Index,
+    )?;
+    assert!(outcome.inputs.inherited.contains(&incoming));
+    assert_eq!(outcome.verdict, Verdict::Added);
+    assert_eq!(outcome.change.added, 1);
+    Ok(())
+}
+
 /// One violation of each catalog rule that applies outside a decision core, in each language the catalog checks.
 const ANTI_PATTERNS: [(&str, &str, &str); 7] = [
     (
