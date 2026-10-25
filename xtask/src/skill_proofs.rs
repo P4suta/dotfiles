@@ -1843,13 +1843,66 @@ const MUTANT_TEST_THREADS: &str = "1";
 const MUTANT_OUTPUT_DIRECTORY: &str = "mutation-evidence";
 const MUTANT_OUTPUT_PREFIX: &str = "campaign-";
 const MUTANT_SOURCE_PREFIX: &str = "mutation-source-";
+const MUTANT_OWNER_SCHEMA: &str = "dotfiles-mutation-temp-owner-v1";
+const MUTANT_OWNER_MARKER: &str = "owner.json";
+const MUTANT_OWNER_LOCK: &str = "owner.lock";
+const MUTANT_SOURCE_DIRECTORY: &str = "source";
+const MUTANT_TEMP_DIRECTORY: &str = "temporary";
+const MUTANT_TEMP_VARIABLES: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
+#[cfg(test)]
+const MUTANT_WORKER_PREFIX: &str = "cargo-mutants-";
 #[cfg(unix)]
 const MUTANT_SOURCE_FILE_MODE: u32 = 0o600;
 #[cfg(unix)]
 const MUTANT_SOURCE_EXECUTE_BITS: u32 = 0o111;
 const HOST_CACHE_VARIABLE: &str = "DOTFILES_HOST_CACHE";
 
-fn with_mutant_source<T>(root: &Path, check: impl FnOnce(&Path) -> Result<T>) -> Result<T> {
+struct MutationSource {
+    directory: PathBuf,
+    temporary: PathBuf,
+    lease: fs::File,
+}
+
+impl MutationSource {
+    fn claim(campaign: &Path) -> Result<Self> {
+        let lease = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(campaign.join(MUTANT_OWNER_LOCK))?;
+        lease
+            .try_lock()
+            .context("claim mutation campaign ownership")?;
+        fs::write(
+            campaign.join(MUTANT_OWNER_MARKER),
+            serde_json::to_vec(&serde_json::json!({
+                "schema": MUTANT_OWNER_SCHEMA,
+                "kept": false,
+                "role": "scratch",
+            }))?,
+        )?;
+        let directory = campaign.join(MUTANT_SOURCE_DIRECTORY);
+        let temporary = campaign.join(MUTANT_TEMP_DIRECTORY);
+        fs::create_dir(&directory)?;
+        fs::create_dir(&temporary)?;
+        Ok(Self {
+            directory,
+            temporary,
+            lease,
+        })
+    }
+}
+
+impl Drop for MutationSource {
+    fn drop(&mut self) {
+        platform::cleanup::report(self.lease.unlock(), "release mutation campaign ownership");
+    }
+}
+
+fn with_mutant_source<T>(
+    root: &Path,
+    check: impl FnOnce(&MutationSource) -> Result<T>,
+) -> Result<T> {
     ensure!(
         fs::symlink_metadata(root)?.file_type().is_dir(),
         "mutation source must be a physical directory"
@@ -1861,10 +1914,11 @@ fn with_mutant_source<T>(root: &Path, check: impl FnOnce(&Path) -> Result<T>) ->
         .prefix(MUTANT_SOURCE_PREFIX)
         .tempdir()?;
     let result = (|| {
+        let source = MutationSource::claim(scope.path())?;
         for file in files {
             let metadata = fs::symlink_metadata(&file)?;
             ensure!(metadata.is_file(), "mutation source contains a non-file");
-            let target = scope.path().join(file.strip_prefix(root)?);
+            let target = source.directory.join(file.strip_prefix(root)?);
             fs::create_dir_all(target.parent().context("mutation source parent")?)?;
             let bytes = fs::read(&file)?;
             fs::write(&target, &bytes)?;
@@ -1881,27 +1935,34 @@ fn with_mutant_source<T>(root: &Path, check: impl FnOnce(&Path) -> Result<T>) ->
             }
             ensure!(fs::read(&target)? == bytes, "mutation source copy differs");
         }
-        check(scope.path())
+        check(&source)
     })();
     platform::cleanup::report(scope.close(), "remove writable mutation source");
     result
 }
 
-fn mutants(directory: &Path, output: &Path) -> std::process::Command {
+fn mutants(directory: &Path, output: &Path, temporary: &Path) -> std::process::Command {
     mutants_with_cores(
         directory,
         output,
+        temporary,
         std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get),
     )
 }
 
-fn mutants_with_cores(directory: &Path, output: &Path, available: usize) -> std::process::Command {
+fn mutants_with_cores(
+    directory: &Path,
+    output: &Path,
+    temporary: &Path,
+    available: usize,
+) -> std::process::Command {
     let mut command = Tool::Cargo.command();
     let jobs = proof_budget_rules::mutant_jobs(available).to_string();
     // Each mutant builds in its own copy of the tree, which a shared target directory would serialize.
     command
         .env_remove("CARGO_TARGET_DIR")
         .env("RUST_TEST_THREADS", MUTANT_TEST_THREADS)
+        .envs(MUTANT_TEMP_VARIABLES.map(|variable| (variable, temporary)))
         .args(["mutants", "--no-shuffle", "--jobserver=true", "--jobs"])
         .arg(&jobs)
         .arg("--jobserver-tasks")
@@ -2286,7 +2347,7 @@ pub(crate) fn collect_mutants(
 
 fn collect_staged_mutants(
     root: &Path,
-    source: &Path,
+    source: &MutationSource,
     manifest: &obligations::Manifest,
     version: std::process::Output,
 ) -> Result<MutationReports> {
@@ -2295,7 +2356,8 @@ fn collect_staged_mutants(
     checks.run("production mutants", || {
         mutation_campaign(root, |output| {
             let status = crate::phase_evidence::output(
-                mutants(source, output).args(["--package", MUTATED_PACKAGE]),
+                mutants(&source.directory, output, &source.temporary)
+                    .args(["--package", MUTATED_PACKAGE]),
                 "production mutation campaign",
             )?
             .status;
@@ -2313,7 +2375,7 @@ fn collect_staged_mutants(
     checks.run("mutation fixture", || {
         mutation_campaign(root, |output| {
             let result = crate::phase_evidence::output(
-                &mut mutants(&source.join(MUTANTS_FIXTURE), output), "mutation assertion-defect fixture",
+                &mut mutants(&source.directory.join(MUTANTS_FIXTURE), output, &source.temporary), "mutation assertion-defect fixture",
             )?;
             let raw = mutation_origin(output, result.status.code(), MUTANTS_FIXTURE_PACKAGE)?;
             let report = decode_mutation_origin(&raw, MUTANTS_FIXTURE_PACKAGE)?;
@@ -4502,8 +4564,9 @@ mod tests {
         fs::create_dir(original.path().join("target"))?;
         fs::write(original.path().join("target/ignored"), b"build output")?;
         let mut staged = None;
-        let result = with_mutant_source(original.path(), |source| {
-            staged = Some(source.to_path_buf());
+        let result = with_mutant_source(original.path(), |workspace| {
+            let source = &workspace.directory;
+            staged = Some(source.clone());
             let mut files = Vec::new();
             crate::profiles::source_files(source, &mut files)?;
             assert_eq!(files.len(), inputs.len());
@@ -4529,8 +4592,9 @@ mod tests {
                     MUTANT_SOURCE_EXECUTE_BITS
                 );
             }
-            for directory in [source.to_path_buf(), source.join(MUTANTS_FIXTURE)] {
-                let command = mutants_with_cores(&directory, Path::new("output"), 1);
+            for directory in [source.clone(), source.join(MUTANTS_FIXTURE)] {
+                let command =
+                    mutants_with_cores(&directory, Path::new("output"), &workspace.temporary, 1);
                 assert!(
                     command
                         .get_args()
@@ -4555,7 +4619,7 @@ mod tests {
         fs::write(original.path().join("Cargo.toml"), b"[workspace]\n")?;
         let mut staged = None;
         let result: Result<()> = with_mutant_source(original.path(), |source| {
-            staged = Some(source.to_path_buf());
+            staged = Some(source.directory.clone());
             anyhow::bail!("original mutation failure")
         });
         assert!(
@@ -4569,6 +4633,52 @@ mod tests {
             fs::read(original.path().join("Cargo.toml"))?,
             b"[workspace]\n"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn mutation_source_holds_its_ancestor_owner_lock_until_the_consumer_finishes() -> Result<()> {
+        let original = tempfile::tempdir()?;
+        fs::write(original.path().join("Cargo.toml"), b"[workspace]\n")?;
+        let mut campaign = None;
+        with_mutant_source(original.path(), |source| {
+            let source = &source.directory;
+            let temporary = std::env::temp_dir();
+            let owner = source
+                .ancestors()
+                .take_while(|directory| *directory != temporary)
+                .find(|directory| directory.join("owner.json").is_file())
+                .context("mutation source has no campaign owner")?;
+            assert_ne!(source, owner);
+            let marker: Value = serde_json::from_slice(&fs::read(owner.join("owner.json"))?)?;
+            assert!(
+                marker["schema"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with("-temp-owner-v1")
+            );
+            assert_eq!(marker["role"], "scratch");
+            assert_eq!(marker["kept"], false);
+            let contender = fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(owner.join("owner.lock"))?;
+            assert!(matches!(
+                contender.try_lock(),
+                Err(std::fs::TryLockError::WouldBlock)
+            ));
+            fs::write(
+                source.join("consumer-output"),
+                b"consumer still owns the campaign",
+            )?;
+            assert!(matches!(
+                contender.try_lock(),
+                Err(std::fs::TryLockError::WouldBlock)
+            ));
+            campaign = Some(owner.to_path_buf());
+            Ok(())
+        })?;
+        assert!(!campaign.context("campaign was observed")?.exists());
         Ok(())
     }
 
@@ -4606,7 +4716,18 @@ mod tests {
             (OBSERVED_MAC_CORES, proof_budget_rules::MUTANT_JOB_LIMIT),
             (usize::MAX, proof_budget_rules::MUTANT_JOB_LIMIT),
         ] {
-            let command = mutants_with_cores(Path::new("source"), Path::new("output"), cores);
+            let command = mutants_with_cores(
+                Path::new("source"),
+                Path::new("output"),
+                Path::new("temporary root with ' space"),
+                cores,
+            );
+            for variable in MUTANT_TEMP_VARIABLES {
+                assert!(command.get_envs().any(|(name, value)| {
+                    name == variable
+                        && value == Some(std::ffi::OsStr::new("temporary root with ' space"))
+                }));
+            }
             let arguments: Vec<_> = command
                 .get_args()
                 .map(|argument| argument.to_string_lossy())
@@ -4694,24 +4815,98 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the bounded container route with the pinned cargo-mutants"]
+    fn bounded_mutation_workers_stay_with_the_campaign_owner() -> Result<()> {
+        ensure!(
+            !dotfiles::bounded::requires_container(),
+            "use `dotfiles bounded run` for the mutation worker fixture"
+        );
+        let root = crate::canonical(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").as_path())?;
+        mutation_worker_fixture(&root)
+    }
+
+    fn mutation_worker_fixture(root: &Path) -> Result<()> {
+        let version = Tool::Cargo
+            .command()
+            .args(["mutants", "--version"])
+            .output()?;
+        ensure!(
+            version.status.success()
+                && String::from_utf8(version.stdout)?.trim()
+                    == format!("cargo-mutants {MUTANTS_VERSION}"),
+            "mutation worker fixture requires its pinned cargo-mutants"
+        );
+        with_mutant_source(root, |source| {
+            mutation_campaign(root, |output| {
+                let status = mutants(
+                    &source.directory.join(MUTANTS_FIXTURE),
+                    output,
+                    &source.temporary,
+                )
+                .arg("--leak-dirs")
+                .status()
+                .context("start the mutation worker fixture")?;
+                let report = completed_mutation_report(output, status, MUTANTS_FIXTURE_PACKAGE)?;
+                ensure!(
+                    report.missed != 0,
+                    "the mutation worker fixture failed its baseline or caught its assertionless rule"
+                );
+                let workers = fs::read_dir(&source.temporary)?
+                    .filter_map(|entry| match entry {
+                        Ok(entry)
+                            if entry
+                                .file_name()
+                                .to_string_lossy()
+                                .starts_with(MUTANT_WORKER_PREFIX) =>
+                        {
+                            Some(Ok(entry))
+                        }
+                        Ok(_) => None,
+                        Err(error) => Some(Err(error)),
+                    })
+                    .collect::<std::io::Result<Vec<_>>>()?;
+                ensure!(
+                    !workers.is_empty(),
+                    "mutation fixture created no owned worker copies"
+                );
+                for worker in workers {
+                    ensure!(
+                        worker.file_type()?.is_dir(),
+                        "mutation worker root contains a non-directory"
+                    );
+                    ensure!(
+                        worker.path().join("Cargo.toml").is_file(),
+                        "mutation worker has no source manifest"
+                    );
+                    ensure!(
+                        !worker.path().starts_with(&source.directory),
+                        "mutation worker lies inside copied source"
+                    );
+                    let contender = fs::OpenOptions::new().read(true).write(true).open(
+                        worker
+                            .path()
+                            .parent()
+                            .context("worker parent")?
+                            .parent()
+                            .context("campaign parent")?
+                            .join(MUTANT_OWNER_LOCK),
+                    )?;
+                    ensure!(
+                        matches!(contender.try_lock(), Err(std::fs::TryLockError::WouldBlock)),
+                        "mutation worker lost its ancestor owner lease"
+                    );
+                }
+                Ok(())
+            })
+        })
+    }
+
+    #[test]
     #[ignore = "requires the installed pinned cargo-mutants"]
     fn mutation_workers_do_not_multiply_the_test_pool() -> Result<()> {
         let root = crate::canonical(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").as_path())?;
         if std::env::var(NATIVE_FIXTURE).is_ok_and(|value| value == MUTATION_TEST) {
-            return with_mutant_source(&root, |source| {
-                mutation_campaign(&root, |output| {
-                    let status = mutants(&source.join(MUTANTS_FIXTURE), output)
-                        .status()
-                        .context("start the mutation worker fixture")?;
-                    let report =
-                        completed_mutation_report(output, status, MUTANTS_FIXTURE_PACKAGE)?;
-                    ensure!(
-                        report.missed != 0,
-                        "the mutation worker fixture failed its baseline or caught its assertionless rule"
-                    );
-                    Ok(())
-                })
-            });
+            return mutation_worker_fixture(&root);
         }
         let home = platform::home::home().context("native tool home")?;
         let environment = dotfiles::hosts::code_environment(&root, &home)?;
