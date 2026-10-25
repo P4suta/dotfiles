@@ -440,7 +440,6 @@ fn covered(records: &[Record], record: &Record, found: Option<&super::Found>) ->
     hosted
         || matrix
         || covered_backend(records, record, found)
-        || covered_ci_alias(records, record)
         || super::ci_pin::covers(records, record, found)
 }
 
@@ -533,25 +532,6 @@ fn covered_backend(records: &[Record], record: &Record, found: Option<&super::Fo
     matching_pin
         && verified.datasource.as_deref() == Some(provider.0)
         && verified.package_name.as_deref() == Some(provider.1)
-}
-
-fn covered_ci_alias(records: &[Record], record: &Record) -> bool {
-    let alias = &record.dependency;
-    if record.manager != "github-actions"
-        || record.file != ".github/workflows/ci.yml"
-        || alias.datasource.as_deref() != Some("github-release-attachments")
-        || alias.dep_type.as_deref() != Some("uses-with")
-        || alias.dep_name != "jdx/mise"
-        || alias.package_name.as_deref() != Some("jdx/mise")
-        || alias.current_value.as_deref() != Some("${{ steps.mise.outputs.version }}")
-        || alias.skip_reason.as_deref() != Some("invalid-value")
-    {
-        return false;
-    }
-    counterpart(records, "home/.chezmoidata/versions.toml", "jdx/mise").is_some_and(|verified| {
-        verified.datasource.as_deref() == Some("github-releases")
-            && verified.package_name.as_deref() == Some("jdx/mise")
-    })
 }
 
 /// Duplicate keys must not replace evidence that would refuse a push.
