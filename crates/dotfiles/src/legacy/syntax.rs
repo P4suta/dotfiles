@@ -306,6 +306,7 @@ pub(super) struct Argument<'a> {
 
 pub(super) struct Invocation<'a> {
     pub(super) offset: usize,
+    pub(super) variable_scope: Option<super::directory::VariableScope>,
     pub(super) directory: super::directory::Context,
     pub(super) unresolved_wrapper: bool,
     pub(super) opaque_effect: bool,
@@ -370,6 +371,7 @@ impl<'a> Invocation<'a> {
         }
         Ok(Self {
             offset: span.pos.offset,
+            variable_scope: None,
             directory: super::directory::Context::new(None).invalidate(),
             unresolved_wrapper: false,
             opaque_effect: false,
@@ -387,6 +389,7 @@ impl<'a> Invocation<'a> {
     pub(super) fn unparsed(values: Vec<String>) -> Self {
         Self {
             offset: 0,
+            variable_scope: None,
             directory: super::directory::Context::new(None).invalidate(),
             unresolved_wrapper: false,
             opaque_effect: false,
@@ -603,6 +606,7 @@ fn decode_powershell_in<'a>(
             call.file_inputs_safe && words.iter().all(|word| word.spelling.is_some());
         calls.push(Invocation {
             offset: call.span.pos.offset,
+            variable_scope: None,
             directory: super::directory::Context::new(None).invalidate(),
             unresolved_wrapper: false,
             opaque_effect: call.opaque_effect,
