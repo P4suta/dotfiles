@@ -1440,6 +1440,7 @@ mod tests {
 
     #[test]
     fn tailscale_guard_preserves_read_only_wrappers_and_openssh() {
+        let directory = tempfile::tempdir().unwrap();
         for command in [
             "ssh linux",
             "sudo ssh linux",
@@ -1450,8 +1451,13 @@ mod tests {
             "echo 'tailscale up'",
             "rg tailscale Cargo.toml",
         ] {
+            let event = json!({
+                "tool_name": "Bash",
+                "cwd": directory.path(),
+                "tool_input": {"command": command}
+            });
             assert_eq!(
-                refusal(&bash(command))
+                refusal(&event.to_string())
                     .unwrap()
                     .map(|blocked| blocked.message),
                 None,

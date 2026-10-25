@@ -604,6 +604,52 @@ fn reject_a_reversed_line_range() {
 fn reject_a_stream_reader_that_names_a_file() {
     assert!(production::reads_stream(&["-l", "a"]));
 }
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_treating_a_child_clippy_flag_as_a_wrapper_option() {
+    assert!(production::mise_prefix(&["x", "--", "cargo", "clippy", "--", "-D", "warnings"]) == production::CommandPrefix::Unknown);
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_admitting_a_nested_wrapper_directory_option() {
+    let arguments = ["x", "--", "env", "-C", "dir", "bash", "check.sh"];
+    let prefix = production::mise_prefix(&arguments);
+    assert!(prefix == production::CommandPrefix::Child { start: 2 });
+    if let production::CommandPrefix::Child { start } = prefix {
+        let child = arguments.get(start..).and_then(|words| words.split_first());
+        assert!(child.is_some());
+        if let Some((_, arguments)) = child {
+            assert!(matches!(production::wrapper_prefix(production::WrapperKind::Env, arguments), production::CommandPrefix::Child { .. }));
+        }
+    }
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_admitting_a_startup_assignment_after_a_wrapper_separator() {
+    let kind = if kani::any::<bool>() { production::WrapperKind::Env } else { production::WrapperKind::Sudo };
+    assert!(matches!(production::wrapper_prefix(kind, &["--", "BASH_ENV=reset.sh", "bash", "check.sh"]), production::CommandPrefix::Child { .. }));
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_treating_an_unset_option_value_as_a_startup_assignment() {
+    assert!(production::wrapper_prefix(production::WrapperKind::Env, &["-u", "BASH_ENV", "bash", "check.sh"]) == production::CommandPrefix::Unknown);
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_treating_a_non_exec_mise_query_as_a_child() {
+    let arguments = if kani::any::<bool>() { &["--quiet", "ls"][..] } else { &["--version"][..] };
+    assert!(matches!(production::mise_prefix(arguments), production::CommandPrefix::Child { .. }));
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_admitting_a_mise_owned_directory_option() {
+    assert!(production::mise_prefix(&["run", "--cd", "dir", "task"]) == production::CommandPrefix::Terminal);
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_admitting_an_unknown_wrapper_option() {
+    assert!(matches!(production::wrapper_prefix(production::WrapperKind::Env, &["--unknown", "bash", "check.sh"]), production::CommandPrefix::Child { .. }));
+}
 '''
 
 [[obligation]]

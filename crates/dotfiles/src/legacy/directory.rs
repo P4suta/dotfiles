@@ -1,5 +1,5 @@
 use super::{Shell, syntax::Invocation};
-use crate::legacy_rules::DirectoryContext;
+use crate::legacy_rules::{DirectoryContext, EnvironmentRole, EnvironmentWord, environment_word};
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
 
@@ -137,15 +137,22 @@ fn powershell_script_or_qualified_call(first: &str) -> bool {
 
 fn uncertain_startup(words: &[String], shell: Shell) -> bool {
     let (command, _) = super::command_words(words);
-    let prefix = if command.first().is_some_and(|word| word == "export") {
+    let exported = command.first().is_some_and(|word| word == "export");
+    let prefix = if exported {
         &command[1..]
     } else {
         &words[..words.len() - command.len()]
     };
     let changed_environment = matches!(shell, Shell::Bash)
         && prefix.iter().any(|word| {
-            let name = word.split_once('=').map_or(word.as_str(), |(name, _)| name);
-            matches!(name, "BASH_ENV" | "ENV" | "ZDOTDIR" | "PWD" | "OLDPWD")
+            environment_word(
+                word,
+                if exported {
+                    EnvironmentRole::ExportOperand
+                } else {
+                    EnvironmentRole::Assignment
+                },
+            ) == EnvironmentWord::Startup
         });
     let startup = command.split_first().is_some_and(|(first, arguments)| {
         super::SHELLS.contains(&crate::shell_write_rules::program(first).as_str())
@@ -169,6 +176,11 @@ fn call(invocation: &mut Invocation<'_>, context: Context, shell: Shell) -> Outc
         return Outcome::stable(context.invalidate());
     }
     let words = invocation.values();
+    if matches!(super::command_view(&words), super::CommandView::Unknown) {
+        invocation.directory = context.clone().changed(None);
+        invocation.unresolved_wrapper = true;
+        return Outcome::stable(context);
+    }
     if uncertain_startup(&words, shell) {
         invocation.directory = context.clone().invalidate();
         invocation.unresolved_wrapper = true;
@@ -199,24 +211,6 @@ fn call(invocation: &mut Invocation<'_>, context: Context, shell: Shell) -> Outc
             })
         {
             return Outcome::stable(context.invalidate());
-        }
-        if matches!(name.as_str(), "env" | "sudo" | "mise")
-            && words.iter().any(|word| {
-                matches!(
-                    word.as_str(),
-                    "-C" | "--chdir" | "-D" | "--directory" | "--cd"
-                ) || word.starts_with("--chdir=")
-                    || word.starts_with("--cd=")
-                    || (name == "env"
-                        && (word.starts_with("-C")
-                            || word == "-S"
-                            || word == "--split-string"
-                            || word.starts_with("--split-string=")))
-                    || (name == "sudo" && word.starts_with("-D"))
-            })
-        {
-            invocation.directory = context.clone().changed(None);
-            invocation.unresolved_wrapper = true;
         }
         return Outcome::stable(context);
     }

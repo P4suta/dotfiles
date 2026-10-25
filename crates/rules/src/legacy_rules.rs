@@ -9,6 +9,156 @@ pub enum Verdict {
     Refuse,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EnvironmentRole {
+    Assignment,
+    ExportOperand,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EnvironmentWord {
+    Startup,
+    Assignment,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WrapperKind {
+    Env,
+    Sudo,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandPrefix {
+    Terminal,
+    Child { start: usize },
+    Unknown,
+}
+
+#[must_use]
+pub fn environment_word(word: &str, role: EnvironmentRole) -> EnvironmentWord {
+    let assignment = word.split_once('=');
+    let name = match assignment {
+        Some((name, _))
+            if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') =>
+        {
+            name
+        }
+        None if role == EnvironmentRole::ExportOperand => word,
+        Some(_) | None => return EnvironmentWord::Other,
+    };
+    if matches!(name, "BASH_ENV" | "ENV" | "ZDOTDIR" | "PWD" | "OLDPWD") {
+        EnvironmentWord::Startup
+    } else if assignment.is_some() {
+        EnvironmentWord::Assignment
+    } else {
+        EnvironmentWord::Other
+    }
+}
+
+#[must_use]
+pub fn wrapper_prefix<T: AsRef<str>>(kind: WrapperKind, arguments: &[T]) -> CommandPrefix {
+    let original = arguments;
+    let mut arguments = arguments;
+    let child = loop {
+        arguments = match arguments {
+            [separator, child @ ..] if separator.as_ref() == "--" => break child,
+            [flag, child @ ..]
+                if (kind == WrapperKind::Env
+                    && matches!(flag.as_ref(), "-i" | "--ignore-environment"))
+                    || (kind == WrapperKind::Sudo
+                        && matches!(flag.as_ref(), "-n" | "--non-interactive")) =>
+            {
+                child
+            }
+            [flag, value, child @ ..]
+                if ((kind == WrapperKind::Env && matches!(flag.as_ref(), "-u" | "--unset"))
+                    || (kind == WrapperKind::Sudo
+                        && matches!(flag.as_ref(), "-u" | "--user" | "-g" | "--group")))
+                    && !value.as_ref().is_empty()
+                    && !value.as_ref().starts_with('-') =>
+            {
+                child
+            }
+            [first, ..] if first.as_ref().starts_with('-') => return CommandPrefix::Unknown,
+            _ => break arguments,
+        };
+    };
+    let startup = child
+        .iter()
+        .map(AsRef::as_ref)
+        .take_while(|word| {
+            environment_word(word, EnvironmentRole::Assignment) != EnvironmentWord::Other
+        })
+        .any(|word| {
+            environment_word(word, EnvironmentRole::Assignment) == EnvironmentWord::Startup
+        });
+    if startup {
+        CommandPrefix::Unknown
+    } else {
+        CommandPrefix::Child {
+            start: original.len() - child.len(),
+        }
+    }
+}
+
+#[must_use]
+pub fn mise_prefix<T: AsRef<str>>(arguments: &[T]) -> CommandPrefix {
+    let original = arguments;
+    let mut arguments = arguments;
+    while let [flag, child @ ..] = arguments
+        && matches!(
+            flag.as_ref(),
+            "-q" | "--quiet" | "-v" | "--verbose" | "-y" | "--yes" | "--locked" | "--silent"
+        )
+    {
+        arguments = child;
+    }
+    match arguments {
+        [verb, arguments @ ..] if matches!(verb.as_ref(), "x" | "exec") => {
+            let Some(separator) = arguments
+                .iter()
+                .position(|argument| argument.as_ref() == "--")
+            else {
+                return CommandPrefix::Unknown;
+            };
+            let (tools, child) = arguments.split_at(separator);
+            if tools
+                .iter()
+                .any(|tool| tool.as_ref().is_empty() || tool.as_ref().starts_with('-'))
+            {
+                return CommandPrefix::Unknown;
+            }
+            match child {
+                [_, command @ ..] if !command.is_empty() => CommandPrefix::Child {
+                    start: original.len() - command.len(),
+                },
+                _ => CommandPrefix::Unknown,
+            }
+        }
+        [query] if matches!(query.as_ref(), "-V" | "--version" | "-h" | "--help") => {
+            CommandPrefix::Terminal
+        }
+        [flag, ..] if flag.as_ref().starts_with('-') => CommandPrefix::Unknown,
+        _ => {
+            if arguments
+                .iter()
+                .map(AsRef::as_ref)
+                .take_while(|argument| *argument != "--")
+                .any(|argument| {
+                    matches!(argument, "-C" | "--cd")
+                        || argument.starts_with("--cd=")
+                        || argument.starts_with("-C")
+                })
+            {
+                CommandPrefix::Unknown
+            } else {
+                CommandPrefix::Terminal
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DirectoryContext<T> {
     directory: Option<T>,
@@ -214,6 +364,247 @@ fn line(text: &str) -> Option<u64> {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    fn spec_child_suffix(selector: bool, verbose: bool, directory_flag: bool) {
+        let flag = if directory_flag { "--cd" } else { "-D" };
+        let child = ["cargo", "clippy", "--", flag];
+        let (arguments, start): (&[&str], usize) = match (selector, verbose) {
+            (false, false) => (&["x", "--", "cargo", "clippy", "--", flag], 2),
+            (true, false) => (
+                &["exec", "rust@1.99.0", "--", "cargo", "clippy", "--", flag],
+                3,
+            ),
+            (false, true) => (&["--quiet", "x", "--", "cargo", "clippy", "--", flag], 3),
+            (true, true) => (
+                &[
+                    "--verbose",
+                    "exec",
+                    "rust@1.99.0",
+                    "--",
+                    "cargo",
+                    "clippy",
+                    "--",
+                    flag,
+                ],
+                4,
+            ),
+        };
+        let decision = mise_prefix(arguments);
+        assert_eq!(decision, CommandPrefix::Child { start });
+        if let CommandPrefix::Child { start } = decision {
+            assert!(start <= arguments.len());
+            assert_eq!(arguments.get(start..), Some(child.as_slice()));
+        }
+        for kind in [WrapperKind::Env, WrapperKind::Sudo] {
+            assert_eq!(
+                wrapper_prefix(kind, &child),
+                CommandPrefix::Child { start: 0 }
+            );
+        }
+    }
+
+    fn spec_mise_terminal(choice: u8) {
+        let arguments: &[&str] = match choice % 8 {
+            0 => &["ls"],
+            1 => &["--quiet", "ls"],
+            2 => &["-v", "install"],
+            3 => &["--version"],
+            4 => &["--help"],
+            5 => &["--quiet", "run", "task", "--", "--cd", "child"],
+            6 => &["--locked", "trust", "file"],
+            _ => &[],
+        };
+        assert_eq!(mise_prefix(arguments), CommandPrefix::Terminal);
+        for arguments in [
+            &["x"][..],
+            &["exec", "--"],
+            &["x", "--cd", "dir", "--", "cargo"],
+            &["run", "--cd", "dir", "task"],
+            &["trust", "-Cdir", "file"],
+            &["--unknown", "ls"],
+            &["x", "", "--", "cargo"],
+        ] {
+            assert_eq!(mise_prefix(arguments), CommandPrefix::Unknown);
+        }
+    }
+
+    fn spec_wrapper_ownership(choice: u8, sudo: bool) {
+        let kind = if sudo {
+            WrapperKind::Sudo
+        } else {
+            WrapperKind::Env
+        };
+        let arguments: &[&str] = match choice % 4 {
+            0 => &["-C", "dir", "bash", "check.sh"],
+            1 => &["--unknown", "bash", "check.sh"],
+            2 => &["-u"],
+            _ => &["-u", "-invalid", "bash", "check.sh"],
+        };
+        assert_eq!(wrapper_prefix(kind, arguments), CommandPrefix::Unknown);
+        let outer = [
+            "x",
+            "--",
+            if sudo { "sudo" } else { "env" },
+            "-C",
+            "dir",
+            "bash",
+            "check.sh",
+        ];
+        let decision = mise_prefix(&outer);
+        assert_eq!(decision, CommandPrefix::Child { start: 2 });
+        if let CommandPrefix::Child { start } = decision {
+            let child = outer.get(start..).and_then(|child| child.split_first());
+            assert!(child.is_some());
+            if let Some((_, arguments)) = child {
+                assert_eq!(wrapper_prefix(kind, arguments), CommandPrefix::Unknown);
+            }
+        }
+        assert_eq!(
+            wrapper_prefix::<&str>(kind, &[]),
+            CommandPrefix::Child { start: 0 }
+        );
+        assert_eq!(
+            wrapper_prefix(kind, &["--"]),
+            CommandPrefix::Child { start: 1 }
+        );
+    }
+
+    fn spec_startup_ownership(choice: u8, sudo: bool, separator: bool) {
+        let assignment = match choice % 6 {
+            0 => "BASH_ENV=reset.sh",
+            1 => "ENV=reset.sh",
+            2 => "ZDOTDIR=dir",
+            3 => "PWD=dir",
+            4 => "OLDPWD=dir",
+            _ => "MODE=check",
+        };
+        let kind = if sudo {
+            WrapperKind::Sudo
+        } else {
+            WrapperKind::Env
+        };
+        let arguments: &[&str] = if separator {
+            &["--", assignment, "bash", "check.sh"]
+        } else {
+            &[assignment, "bash", "check.sh"]
+        };
+        assert_eq!(
+            wrapper_prefix(kind, arguments),
+            if choice % 6 < 5 {
+                CommandPrefix::Unknown
+            } else {
+                CommandPrefix::Child {
+                    start: usize::from(separator),
+                }
+            }
+        );
+        assert_eq!(
+            wrapper_prefix(kind, &["-u", "BASH_ENV", "bash", "check.sh"]),
+            CommandPrefix::Child { start: 2 }
+        );
+        assert_eq!(
+            wrapper_prefix(kind, &["cargo", assignment]),
+            CommandPrefix::Child { start: 0 }
+        );
+    }
+
+    fn spec_environment_roles(choice: u8) {
+        let (name, assignment, expected) = match choice % 8 {
+            0 => ("BASH_ENV", "BASH_ENV=x", EnvironmentWord::Startup),
+            1 => ("ENV", "ENV=x", EnvironmentWord::Startup),
+            2 => ("ZDOTDIR", "ZDOTDIR=x", EnvironmentWord::Startup),
+            3 => ("PWD", "PWD=x", EnvironmentWord::Startup),
+            4 => ("OLDPWD", "OLDPWD=x", EnvironmentWord::Startup),
+            5 => ("MODE", "MODE=x", EnvironmentWord::Assignment),
+            6 => ("BAD-NAME", "BAD-NAME=x", EnvironmentWord::Other),
+            _ => ("", "=x", EnvironmentWord::Other),
+        };
+        assert_eq!(
+            environment_word(name, EnvironmentRole::Assignment),
+            EnvironmentWord::Other
+        );
+        assert_eq!(
+            environment_word(assignment, EnvironmentRole::Assignment),
+            expected
+        );
+        assert_eq!(
+            environment_word(name, EnvironmentRole::ExportOperand),
+            if expected == EnvironmentWord::Startup {
+                EnvironmentWord::Startup
+            } else {
+                EnvironmentWord::Other
+            }
+        );
+        assert_eq!(
+            environment_word("1=x", EnvironmentRole::Assignment),
+            EnvironmentWord::Assignment
+        );
+    }
+
+    #[test]
+    fn wrapper_option_ownership_matches_the_finite_specifications() {
+        for choice in 0..8 {
+            spec_mise_terminal(choice);
+            spec_environment_roles(choice);
+            for [first, second, third] in crate::domain::flags() {
+                spec_child_suffix(first, second, third);
+                spec_wrapper_ownership(choice, first);
+                spec_startup_ownership(choice, second, third);
+            }
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(64)]
+    fn child_arguments_remain_an_exact_bounded_suffix() {
+        let [selector, verbose, directory_flag]: [bool; 3] = kani::any();
+        spec_child_suffix(selector, verbose, directory_flag);
+        kani::cover!(selector && verbose);
+        kani::cover!(!selector && !verbose && !directory_flag);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(64)]
+    fn mise_queries_and_non_exec_commands_remain_terminal() {
+        let choice: u8 = kani::any();
+        spec_mise_terminal(choice);
+        kani::cover!(choice % 8 == 1);
+        kani::cover!(choice % 8 == 3);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(64)]
+    fn wrapper_owned_options_and_nested_effects_fail_closed() {
+        let choice: u8 = kani::any();
+        let sudo: bool = kani::any();
+        spec_wrapper_ownership(choice, sudo);
+        kani::cover!(sudo);
+        kani::cover!(!sudo && choice % 4 == 2);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(64)]
+    fn startup_assignments_keep_their_wrapper_ownership_after_separators() {
+        let choice: u8 = kani::any();
+        let [sudo, separator]: [bool; 2] = kani::any();
+        spec_startup_ownership(choice, sudo, separator);
+        kani::cover!(sudo && separator && choice % 6 == 0);
+        kani::cover!(!sudo && !separator && choice % 6 == 5);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(64)]
+    fn environment_roles_distinguish_assignments_from_export_operands() {
+        let choice: u8 = kani::any();
+        spec_environment_roles(choice);
+        kani::cover!(choice % 8 == 0);
+        kani::cover!(choice % 8 == 6);
+    }
 
     fn spec_directory_context(left: Option<u8>, right: Option<u8>) {
         let joined = DirectoryContext::new(left).joined(&DirectoryContext::new(right));
