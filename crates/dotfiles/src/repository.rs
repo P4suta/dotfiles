@@ -74,6 +74,7 @@ fn generate(metadata: &Repository) -> Generated {
         .replace("{install}", metadata.install.trim_end())
         .replace("{usage_language}", &metadata.usage_language)
         .replace("{usage}", metadata.usage.trim_end());
+    let readme = format!("{}\n", readme.trim_end_matches('\n'));
     let mut generated = vec![(README_PATH, readme)];
     if metadata.license == License::MitOrApache {
         generated.push((
@@ -652,7 +653,7 @@ pub fn check(root: &Path, remote: Option<&str>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::repository::LICENSE;
+    use model::repository::{LICENSE, PreservedLicenseAsset, PreservedLicenses};
     use std::fmt::Write as _;
 
     const INDEX: &str = "docs/README.md";
@@ -1424,6 +1425,64 @@ mod tests {
             let readme = fs::read_to_string(root.join(README_PATH)).unwrap();
             assert!(readme.contains("A fixture {documentation} repository.\n"));
             assert!(readme.contains("```sh\nfixture {documentation}\n```"));
+        }
+    }
+
+    #[test]
+    fn generated_readme_has_one_final_line_feed_for_every_license_and_index_state() {
+        let dual_preserved = PreservedLicenses {
+            mit_sha256: Some("a".repeat(64)),
+            apache_sha256: Some("b".repeat(64)),
+            assets: Vec::new(),
+        };
+        let single_preserved = |path: &'static str| PreservedLicenses {
+            mit_sha256: None,
+            apache_sha256: None,
+            assets: vec![PreservedLicenseAsset {
+                path: path.to_owned(),
+                sha256: "c".repeat(64),
+            }],
+        };
+        let cases = [
+            (License::MitOrApache, None),
+            (License::MitOrApache, Some(dual_preserved)),
+            (
+                License::ApacheOnly,
+                Some(single_preserved("LICENSE-APACHE")),
+            ),
+            (License::AgplOnly, Some(single_preserved("LICENSE"))),
+            (License::Unlicensed, None),
+        ];
+
+        for (license, preserved_licenses) in cases {
+            for documentation_index in [false, true] {
+                let metadata = Repository {
+                    name: "fixture".to_owned(),
+                    summary: "A fixture repository".to_owned(),
+                    install: "cargo install fixture".to_owned(),
+                    usage: "fixture --help".to_owned(),
+                    usage_language: "sh".to_owned(),
+                    documentation_index,
+                    preserved_licenses: preserved_licenses.clone(),
+                    copyright: Some("Owner".to_owned()),
+                    license,
+                    consent: Vec::new(),
+                };
+                let generated = generate(&metadata);
+                let readme = &generated[0].1;
+                let trailing_line_feeds = readme
+                    .as_bytes()
+                    .iter()
+                    .rev()
+                    .take_while(|byte| **byte == b'\n')
+                    .count();
+
+                assert_eq!(
+                    trailing_line_feeds, 1,
+                    "license={license:?}, documentation_index={documentation_index}"
+                );
+                assert_eq!(generate(&metadata), generated);
+            }
         }
     }
 }
