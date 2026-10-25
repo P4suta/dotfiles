@@ -64,13 +64,27 @@ pub fn table() -> Result<&'static Modern> {
 }
 
 fn is_assignment(word: &str) -> bool {
-    word.split_once('=').is_some_and(|(name, _)| {
-        !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-    })
+    legacy_rules::environment_word(word, legacy_rules::EnvironmentRole::Assignment)
+        != legacy_rules::EnvironmentWord::Other
 }
 
 /// The command words after the assignments and wrappers that only start it, and the bypass value an assignment names.
 pub(crate) fn command_words(words: &[String]) -> (&[String], Option<&str>) {
+    match command_view(words) {
+        CommandView::Known { command, bypass } => (command, bypass),
+        CommandView::Unknown => (&[], None),
+    }
+}
+
+enum CommandView<'a> {
+    Known {
+        command: &'a [String],
+        bypass: Option<&'a str>,
+    },
+    Unknown,
+}
+
+fn command_view(words: &[String]) -> CommandView<'_> {
     let mut bypass = None;
     let mut rest = words;
     loop {
@@ -84,13 +98,41 @@ pub(crate) fn command_words(words: &[String]) -> (&[String], Option<&str>) {
                 }
                 tail
             }
+            [word, tail @ ..] if matches!(program(word).as_str(), "env" | "sudo") => {
+                let kind = if program(word) == "env" {
+                    legacy_rules::WrapperKind::Env
+                } else {
+                    legacy_rules::WrapperKind::Sudo
+                };
+                let legacy_rules::CommandPrefix::Child { start } =
+                    legacy_rules::wrapper_prefix(kind, tail)
+                else {
+                    return CommandView::Unknown;
+                };
+                let Some(child) = tail.get(start..) else {
+                    return CommandView::Unknown;
+                };
+                child
+            }
             [word, tail @ ..]
                 if matches!(
                     program(word).as_str(),
-                    "env" | "command" | "exec" | "nohup" | "sudo" | "nice"
+                    "command" | "exec" | "nohup" | "nice"
                 ) =>
             {
-                tail
+                match tail {
+                    [flag, ..]
+                        if program(word) == "command" && matches!(flag.as_str(), "-v" | "-V") =>
+                    {
+                        return CommandView::Known {
+                            command: rest,
+                            bypass,
+                        };
+                    }
+                    [separator, child @ ..] if separator == "--" => child,
+                    [flag, ..] if flag.starts_with('-') => return CommandView::Unknown,
+                    _ => tail,
+                }
             }
             [word, tail @ ..] if program(word) == "xargs" => {
                 let mut arguments = tail;
@@ -118,15 +160,29 @@ pub(crate) fn command_words(words: &[String]) -> (&[String], Option<&str>) {
                 }
                 arguments
             }
-            [word, verb, tail @ ..]
-                if program(word) == "mise" && matches!(verb.as_str(), "x" | "exec") =>
-            {
-                match tail {
-                    [separator, after @ ..] if separator == "--" => after,
-                    _ => tail,
+            [word, arguments @ ..] if program(word) == "mise" => {
+                match legacy_rules::mise_prefix(arguments) {
+                    legacy_rules::CommandPrefix::Terminal => {
+                        return CommandView::Known {
+                            command: rest,
+                            bypass,
+                        };
+                    }
+                    legacy_rules::CommandPrefix::Child { start } => {
+                        let Some(child) = arguments.get(start..) else {
+                            return CommandView::Unknown;
+                        };
+                        child
+                    }
+                    legacy_rules::CommandPrefix::Unknown => return CommandView::Unknown,
                 }
             }
-            _ => return (rest, bypass),
+            _ => {
+                return CommandView::Known {
+                    command: rest,
+                    bypass,
+                };
+            }
         };
     }
 }
@@ -834,6 +890,172 @@ fn dynamic_xargs_script(words: &[String], command: &[String], path: Option<&str>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrapper_directory_flags_in_child_arguments_are_not_wrapper_options() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        for shell in [Shell::Bash, Shell::PowerShell] {
+            for command in [
+                "mise x -- cargo clippy --locked --all-targets --all-features --manifest-path .ci/ci-policy/Cargo.toml -- -D warnings",
+                "mise x rust@1.99.0 -- cargo clippy -- -D warnings",
+                "mise exec rust@1.99.0 just@1.58.0 -- cargo clippy -- -D warnings",
+                "env -- cargo check -C child --chdir other --directory next --cd final",
+                "sudo -- cargo clippy -- -D warnings",
+                "mise x -- env -- sudo -- cargo clippy -- -D warnings",
+                "env -- cargo -- mise x -C /child",
+                "mise ls",
+                "mise --quiet ls",
+                "mise -v ls",
+                "mise --quiet run bash check.sh",
+            ] {
+                let report = findings_in_shell(command, Some(directory.path()), shell)?;
+                assert!(report.unavailable.is_empty(), "{command}: {report:?}");
+                assert!(report.refusals.is_empty(), "{command}: {report:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wrapper_directory_nested_changes_and_unknown_options_refuse_stale_reads() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let wrong = directory.path().join("check.sh");
+        std::fs::write(&wrong, "cat wrong\n")?;
+        for shell in [Shell::Bash, Shell::PowerShell] {
+            for command in [
+                "env -C/unresolved bash check.sh",
+                "env -S 'bash check.sh'",
+                "sudo -D /unresolved bash check.sh",
+                "mise x -C /unresolved -- bash check.sh",
+                "mise -C /unresolved x -- bash check.sh",
+                "mise x -- mise x -- env -C/unresolved bash check.sh",
+                "mise x -- env --chdir=/unresolved bash check.sh",
+                "MODE=check mise x -- env -C/unresolved bash check.sh",
+                "mise x -- command -- env -C/unresolved bash check.sh",
+                "mise x rust@1.99.0 -- env BASH_ENV=reset.sh bash check.sh",
+                "env -- mise x -- sudo -D /unresolved bash check.sh",
+                "sudo -- mise x -- env --chdir=/unresolved bash check.sh",
+                "mise x -- env --unknown bash check.sh",
+                "sudo --unknown bash check.sh",
+                "mise x --unknown -- bash check.sh",
+                "mise x -c 'bash check.sh'",
+                "mise x rust@1.99.0 --",
+            ] {
+                let report = findings_in_shell(command, Some(directory.path()), shell)?;
+                assert!(
+                    report
+                        .unavailable
+                        .iter()
+                        .any(|message| message.contains("wrapper")),
+                    "{command}: {report:?}"
+                );
+                assert!(!report.scripts.iter().any(|script| matches!(script, InspectedScript::File { path, .. } if path == &wrong)), "{command}: {report:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wrapper_directory_stable_nested_commands_keep_script_inspection() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let script = directory.path().join("check.sh");
+        std::fs::write(&script, "grep selected input\n")?;
+        for shell in [Shell::Bash, Shell::PowerShell] {
+            for command in [
+                "mise x -- env MODE=check sudo -- bash check.sh",
+                "env -- mise x rust@1.99.0 -- bash check.sh",
+                "sudo -n -- mise exec rust@1.99.0 -- bash check.sh",
+                "env -u BASH_ENV bash check.sh",
+            ] {
+                let report = findings_in_shell(command, Some(directory.path()), shell)?;
+                assert!(report.unavailable.is_empty(), "{command}: {report:?}");
+                assert!(
+                    report
+                        .refusals
+                        .iter()
+                        .any(|message| message.contains("`grep`")),
+                    "{command}: {report:?}"
+                );
+                assert!(report.scripts.iter().any(|entry| matches!(entry, InspectedScript::File { path, .. } if path == &script)), "{command}: {report:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wrapper_directory_command_queries_remain_terminal() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        for shell in [Shell::Bash, Shell::PowerShell] {
+            for command in [
+                "command -v nu",
+                "command -V bash",
+                "mise x -- command -v env",
+                "mise --version",
+                "mise -V",
+                "mise --help",
+                "mise -h",
+                "mise --quiet --version",
+                "env -- mise --help",
+            ] {
+                let report = findings_in_shell(command, Some(directory.path()), shell)?;
+                assert!(report.unavailable.is_empty(), "{command}: {report:?}");
+                assert!(report.refusals.is_empty(), "{command}: {report:?}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wrapper_directory_startup_assignments_remain_owned_after_separators() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let wrong = directory.path().join("check.sh");
+        std::fs::write(&wrong, "cat wrong\n")?;
+        for shell in [Shell::Bash, Shell::PowerShell] {
+            for command in [
+                "mise x -- env -- BASH_ENV=reset.sh bash check.sh",
+                "mise x -- sudo -- BASH_ENV=reset.sh bash check.sh",
+                "sudo BASH_ENV=reset.sh bash check.sh",
+            ] {
+                let report = findings_in_shell(command, Some(directory.path()), shell)?;
+                assert!(
+                    report
+                        .unavailable
+                        .iter()
+                        .any(|message| message.contains("wrapper")),
+                    "{report:?}"
+                );
+                assert!(
+                    !report.scripts.iter().any(|script| matches!(script, InspectedScript::File { path, .. } if path == &wrong)),
+                    "{report:?}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wrapper_directory_mise_global_options_are_not_task_arguments() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        for shell in [Shell::Bash, Shell::PowerShell] {
+            for command in [
+                "mise run --cd /unresolved task",
+                "mise trust --cd=/unresolved file",
+            ] {
+                let report = findings_in_shell(command, Some(directory.path()), shell)?;
+                assert!(
+                    report
+                        .unavailable
+                        .iter()
+                        .any(|message| message.contains("wrapper")),
+                    "{command}: {report:?}"
+                );
+            }
+            let report =
+                findings_in_shell("mise run task -- --cd child", Some(directory.path()), shell)?;
+            assert!(report.unavailable.is_empty(), "{report:?}");
+        }
+        Ok(())
+    }
 
     #[test]
     fn directory_flow_child_and_prefix_assignments_never_select_the_parent_script() -> Result<()> {
