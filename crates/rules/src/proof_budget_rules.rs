@@ -6,8 +6,24 @@ pub fn campaign_seconds(harnesses: u32, parallelism: u16, overhead: u32) -> Opti
     if harnesses == 0 || parallelism == 0 {
         return None;
     }
-    let waves = u64::from(harnesses).div_ceil(u64::from(parallelism));
+    let divisor = u32::from(parallelism);
+    let quotient = harnesses / divisor;
+    let remainder = harnesses % divisor;
+    campaign_parts(quotient, remainder != 0, overhead)
+}
+
+fn campaign_parts(quotient: u32, partial: bool, overhead: u32) -> Option<u32> {
+    let waves = u64::from(quotient) + u64::from(partial);
     u32::try_from(waves * TIMEOUT_SECONDS + u64::from(overhead)).ok()
+}
+
+#[must_use]
+pub fn campaign_window(safety: u32, requested: Option<u32>) -> Option<u32> {
+    match (safety, requested) {
+        (0, _) | (_, Some(0)) => None,
+        (_, Some(seconds)) => Some(safety.min(seconds)),
+        (_, None) => Some(safety),
+    }
 }
 
 pub const NANOS_PER_MILLI: u32 = 1_000_000;
@@ -147,35 +163,75 @@ pub const fn verdict(completed_result: Option<bool>) -> Verdict {
 mod proofs {
     use super::*;
 
-    pub fn spec_campaign_seconds(harnesses: u32, parallelism: u16, overhead: u32) {
+    #[cfg(kani)]
+    #[kani::proof]
+    fn owner_window_never_extends_or_replaces_the_campaign_safety_cap() {
+        let safety: u32 = kani::any();
+        let requested: Option<u32> = kani::any();
+        let window = campaign_window(safety, requested);
+        assert_eq!(window.is_some(), safety != 0 && requested != Some(0));
+        if let Some(actual) = window {
+            assert!(actual > 0 && actual <= safety);
+            match requested {
+                Some(seconds) => {
+                    assert!(actual <= seconds);
+                    assert!(actual == safety || actual == seconds);
+                }
+                None => assert_eq!(actual, safety),
+            }
+        }
+        kani::cover!(window == Some(safety));
+        kani::cover!(window.is_some_and(|seconds| seconds < safety));
+        kani::cover!(window.is_none());
+    }
+
+    pub fn spec_campaign_seconds(harnesses: u32, parallelism: u16, overhead: u32) -> Option<u32> {
         let budget = campaign_seconds(harnesses, parallelism, overhead);
         if harnesses == 0 || parallelism == 0 {
             assert!(budget.is_none());
         } else {
-            let waves = u64::from(harnesses).div_ceil(u64::from(parallelism));
-            let expected = waves * TIMEOUT_SECONDS + u64::from(overhead);
-            assert_eq!(budget.is_some(), u32::try_from(expected).is_ok());
-            if let Some(actual) = budget {
-                assert_eq!(u64::from(actual), expected);
-                let available = u64::from(actual) - u64::from(overhead);
-                assert_eq!(available % TIMEOUT_SECONDS, 0);
-                let slots = available / TIMEOUT_SECONDS;
-                assert!(slots > 0);
-                assert!(slots * u64::from(parallelism) >= u64::from(harnesses));
-                assert!((slots - 1) * u64::from(parallelism) < u64::from(harnesses));
-            }
+            let divisor = u32::from(parallelism);
+            let quotient = harnesses / divisor;
+            let remainder = harnesses % divisor;
+            let expected = spec_campaign_parts(quotient, remainder != 0, overhead);
+            assert_eq!(budget, expected);
         }
+        budget
     }
 
     #[cfg(kani)]
     #[kani::proof]
-    fn campaign_budget_covers_every_wave_without_overflow() {
+    fn campaign_zero_inputs_have_no_budget() {
         let harnesses: u32 = kani::any();
         let parallelism: u16 = kani::any();
         let overhead: u32 = kani::any();
-        spec_campaign_seconds(harnesses, parallelism, overhead);
-        kani::cover!(campaign_seconds(harnesses, parallelism, overhead).is_some());
-        kani::cover!(campaign_seconds(harnesses, parallelism, overhead).is_none());
+        assert_eq!(campaign_seconds(0, parallelism, overhead), None);
+        assert_eq!(campaign_seconds(harnesses, 0, overhead), None);
+        kani::cover!(harnesses == 0 && parallelism == 0);
+        kani::cover!(harnesses != 0 && parallelism != 0);
+    }
+
+    pub fn spec_campaign_parts(quotient: u32, partial: bool, overhead: u32) -> Option<u32> {
+        let budget = campaign_parts(quotient, partial, overhead);
+        let expected =
+            (u64::from(quotient) + u64::from(partial)) * TIMEOUT_SECONDS + u64::from(overhead);
+        assert_eq!(budget.is_some(), u32::try_from(expected).is_ok());
+        if let Some(actual) = budget {
+            assert_eq!(u64::from(actual), expected);
+        }
+        budget
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn campaign_parts_match_checked_ceiling_arithmetic() {
+        let quotient: u32 = kani::any();
+        let partial: bool = kani::any();
+        let overhead: u32 = kani::any();
+        let budget = spec_campaign_parts(quotient, partial, overhead);
+        kani::cover!(budget.is_some());
+        kani::cover!(budget == Some(0));
+        kani::cover!(budget.is_none());
     }
 
     pub fn spec_elapsed_millis(whole_millis: u128, remainder_nanos: u32) -> Option<u64> {
@@ -379,8 +435,23 @@ mod tests {
             (u32::MAX, 1, 0, None),
             (u32::MAX, u16::MAX, 0, Some(3_932_220)),
         ] {
-            proofs::spec_campaign_seconds(harnesses, parallelism, overhead);
+            let _ = proofs::spec_campaign_seconds(harnesses, parallelism, overhead);
             assert_eq!(campaign_seconds(harnesses, parallelism, overhead), expected);
+        }
+    }
+
+    #[test]
+    fn owner_window_preserves_the_full_safety_cap_and_never_extends_it() {
+        for (safety, requested, expected) in [
+            (19_860, None, Some(19_860)),
+            (19_860, Some(900), Some(900)),
+            (60, Some(900), Some(60)),
+            (900, Some(900), Some(900)),
+            (u32::MAX, Some(1), Some(1)),
+            (0, None, None),
+            (60, Some(0), None),
+        ] {
+            assert_eq!(campaign_window(safety, requested), expected);
         }
     }
 

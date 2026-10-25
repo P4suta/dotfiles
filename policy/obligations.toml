@@ -2011,6 +2011,18 @@ fn reject_an_overflowing_campaign_budget() {
     assert!(production::campaign_seconds(u32::MAX, 1, 0).is_some());
 }
 #[kani::proof]
+fn reject_replacing_the_full_safety_cap_with_an_owner_window() {
+    assert!(production::campaign_window(19_860, Some(900)) == Some(19_860));
+}
+#[kani::proof]
+fn reject_extending_the_campaign_safety_cap() {
+    assert!(production::campaign_window(60, Some(900)) == Some(900));
+}
+#[kani::proof]
+fn reject_an_empty_owner_window() {
+    assert!(production::campaign_window(60, Some(0)).is_some());
+}
+#[kani::proof]
 fn reject_rounding_a_positive_host_elapsed_down_to_zero() {
     assert!(production::elapsed_millis(0, 1) == Some(0));
 }
@@ -3567,6 +3579,17 @@ bridge = "xtask/tests/elapsed_refinement.rs::the_generated_postcondition_is_boun
 refinement = { kind = "source-translation" }
 [[obligation.theorems]]
 name = "Dotfiles.Elapsed.ceiling_minimal"
+module = "Dotfiles.Elapsed"
+bridge = "xtask/tests/elapsed_refinement.rs::the_generated_postcondition_is_bound_to_the_native_proof"
+refinement = { kind = "source-translation" }
+
+[[obligation.theorems]]
+name = "Dotfiles.Elapsed.campaign_budget_covers"
+module = "Dotfiles.Elapsed"
+bridge = "xtask/tests/elapsed_refinement.rs::the_generated_postcondition_is_bound_to_the_native_proof"
+refinement = { kind = "source-translation" }
+[[obligation.theorems]]
+name = "Dotfiles.Elapsed.campaign_budget_minimal"
 module = "Dotfiles.Elapsed"
 bridge = "xtask/tests/elapsed_refinement.rs::the_generated_postcondition_is_bound_to_the_native_proof"
 refinement = { kind = "source-translation" }

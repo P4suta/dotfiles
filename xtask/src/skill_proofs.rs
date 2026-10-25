@@ -523,6 +523,16 @@ pub fn kani_environment_version_matches(version: &str) -> bool {
         == format!("Kani Rust Verifier {KANI_VERSION} (standalone)\nCBMC {KANI_CBMC_VERSION}")
 }
 
+pub(crate) fn container_kani_version_arguments() -> [String; 3] {
+    [
+        "sh".to_owned(),
+        "-ec".to_owned(),
+        format!(
+            r#"directory="${{KANI_HOME:-$HOME/{KANI_DIRECTORY}}}/kani-{KANI_VERSION}"; export PATH="$directory/bin:$directory/pyroot/bin:$PATH"; exec "$directory/{KANI_DRIVER}" --version"#
+        ),
+    ]
+}
+
 fn installed_kani_command() -> Result<std::process::Command> {
     ensure!(
         !dotfiles::bounded::requires_container(),
@@ -983,6 +993,15 @@ fn verify_container_measured(
     campaign: ProofCampaign,
     sources: &[String],
 ) -> Result<()> {
+    verify_container_window(root, campaign, sources, None)
+}
+
+fn verify_container_window(
+    root: &Path,
+    campaign: ProofCampaign,
+    sources: &[String],
+    window: Option<std::num::NonZeroU32>,
+) -> Result<()> {
     ensure_linux_engine().context("Kani proofs on this host run in a Linux container")?;
     let definition = root.join(PROOF_IMAGE);
     let image = proof_image(root)?;
@@ -991,15 +1010,8 @@ fn verify_container_measured(
     crate::container::prepare_cargo(root, &image_id)?;
     let manifest = selected_manifest(root, sources)?;
     let (harnesses, overhead) = campaign_workload(root, &manifest)?;
-    let subjects: Vec<_> = manifest
-        .obligations
-        .iter()
-        .filter_map(|obligation| match obligation {
-            Obligation::Kani { source, .. } => Some(source.as_str()),
-            _ => None,
-        })
-        .collect();
-    let output = dotfiles::bounded::run_campaign(
+    let expected = campaign_harnesses(root, &manifest)?;
+    let execution = dotfiles::bounded::run_campaign(
         &container_campaign_arguments(
             root,
             &image_id,
@@ -1011,23 +1023,59 @@ fn verify_container_measured(
         harnesses,
         KANI_PARALLELISM,
         overhead,
-    )
-    .with_context(|| {
-        format!(
-            "proof campaign report is incomplete for Kani subjects [{}] (missing evidence, inconclusive)",
-            subjects.join(", ")
-        )
-    })?;
+        window,
+    );
+    let output = match execution {
+        Ok(output) => output,
+        Err(error) => {
+            report_campaign_incomplete(&expected);
+            return Err(error.context("proof campaign has no complete validated report"));
+        }
+    };
     crate::phase_evidence::retain("Linux proof container campaign", "stdout", &output.stdout)?;
     crate::phase_evidence::retain("Linux proof container campaign", "stderr", &output.stderr)?;
     print!("{}", String::from_utf8_lossy(&output.stdout));
     eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    if !output.status.success() {
+        report_campaign_incomplete(&expected);
+    }
     ensure!(
         output.status.success(),
         "the containerized proof gate failed: {}",
         output.status
     );
     Ok(())
+}
+
+fn report_campaign_incomplete(expected: &[String]) {
+    for name in expected {
+        println!("Kani {name}: incomplete (campaign report not validated)");
+    }
+}
+
+fn campaign_harnesses(root: &Path, manifest: &obligations::Manifest) -> Result<Vec<String>> {
+    let mut expected = Vec::new();
+    for obligation in &manifest.obligations {
+        if let Obligation::Kani { source, probes, .. } = obligation {
+            let production = obligations::module(&fs::read_to_string(root.join(source))?)?;
+            expected.extend(
+                production
+                    .harnesses
+                    .into_iter()
+                    .map(|name| format!("{source}::{name}")),
+            );
+            expected.extend(
+                obligations::probe_harnesses(probes)?
+                    .into_iter()
+                    .map(|name| format!("{source}::counterexample::{name}")),
+            );
+        }
+    }
+    ensure!(
+        !expected.is_empty(),
+        "Kani campaign has no required harnesses"
+    );
+    Ok(expected)
 }
 
 fn campaign_workload(root: &Path, manifest: &obligations::Manifest) -> Result<(u32, u32)> {
@@ -1086,6 +1134,31 @@ pub fn verify(root: &Path) -> Result<()> {
     verify_campaign(root, ProofCampaign::Full)
 }
 
+/// Run selected subjects or the full campaign within an explicit owner time window.
+///
+/// # Errors
+///
+/// Refuses native execution, invalid subjects, an excessive window, or incomplete evidence.
+pub fn verify_window(root: &Path, sources: &[String], window: std::num::NonZeroU32) -> Result<()> {
+    ensure!(
+        dotfiles::bounded::requires_container() || cfg!(windows),
+        "an owner proof window requires the bounded container route"
+    );
+    selected_manifest(root, sources)?;
+    let campaign = if sources.is_empty() {
+        ProofCampaign::Full
+    } else {
+        ProofCampaign::Ci
+    };
+    crate::native_refinement::with_source(root, || {
+        crate::quality::with_locked_workspaces(root, || {
+            crate::phase_evidence::run(root, "owner-window bounded proof campaign", 1, || {
+                verify_container_window(root, campaign, sources, Some(window))
+            })
+        })
+    })
+}
+
 fn selected_manifest(root: &Path, sources: &[String]) -> Result<obligations::Manifest> {
     let mut manifest = obligations::manifest(root)?;
     if !sources.is_empty() {
@@ -1113,7 +1186,7 @@ fn selected_manifest(root: &Path, sources: &[String]) -> Result<obligations::Man
 pub fn verify_sources(root: &Path, sources: &[String]) -> Result<()> {
     ensure!(!sources.is_empty(), "selected proof inventory is empty");
     let manifest = selected_manifest(root, sources)?;
-    crate::elapsed_refinement::with_source(root, || {
+    crate::native_refinement::with_source(root, || {
         crate::quality::with_locked_workspaces(root, || {
             if dotfiles::bounded::requires_container() || cfg!(windows) {
                 crate::phase_evidence::run(
@@ -1139,7 +1212,7 @@ pub fn verify_ci(root: &Path) -> Result<()> {
 }
 
 fn verify_campaign(root: &Path, campaign: ProofCampaign) -> Result<()> {
-    crate::elapsed_refinement::with_source(root, || {
+    crate::native_refinement::with_source(root, || {
         crate::quality::with_locked_workspaces(root, || verify_campaign_prepared(root, campaign))
     })
 }
@@ -3245,6 +3318,36 @@ mod tests {
         let (selected, _) = campaign_workload(root, &manifest)?;
         let (full, _) = campaign_workload(root, &selected_manifest(root, &[])?)?;
         assert!(selected > 0 && selected < full);
+        let expected = campaign_harnesses(root, &manifest)?;
+        assert_eq!(expected.len(), selected as usize);
+        assert_eq!(
+            expected.iter().collect::<BTreeSet<_>>().len(),
+            expected.len()
+        );
+        assert!(
+            expected
+                .iter()
+                .any(|name| name.contains("::counterexample::"))
+        );
+        assert!(expected.iter().any(|name| name.contains("::proofs::")));
+        assert!(
+            expected
+                .iter()
+                .all(|name| name.starts_with("crates/rules/src/proof_budget_rules.rs::"))
+        );
+        let complete = campaign_harnesses(root, &selected_manifest(root, &[])?)?;
+        assert_eq!(complete.len(), full as usize);
+        assert!(
+            campaign_harnesses(
+                root,
+                &obligations::Manifest {
+                    obligations: Vec::new(),
+                    pilots: Vec::new(),
+                    non_terminating: Vec::new(),
+                }
+            )
+            .is_err()
+        );
         Ok(())
     }
 

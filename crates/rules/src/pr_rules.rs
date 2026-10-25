@@ -484,13 +484,27 @@ pub fn dependency_skip(
     is_bot: bool,
     mergeable: Option<&str>,
 ) -> Option<DependencySkip> {
+    dependency_skip_bytes(
+        login.as_bytes(),
+        author_type == Some(BOT_AUTHOR_TYPE),
+        is_bot,
+        mergeable == Some(CONFLICTING_MERGEABILITY),
+    )
+}
+
+fn dependency_skip_bytes(
+    login: &[u8],
+    author_bot: bool,
+    is_bot: bool,
+    conflicting: bool,
+) -> Option<DependencySkip> {
     if is_bot
-        || author_type == Some(BOT_AUTHOR_TYPE)
-        || login.starts_with(APP_AUTHOR_PREFIX)
-        || login.ends_with(BOT_AUTHOR_SUFFIX)
+        || author_bot
+        || login.starts_with(APP_AUTHOR_PREFIX.as_bytes())
+        || login.ends_with(BOT_AUTHOR_SUFFIX.as_bytes())
     {
         Some(DependencySkip::Bot)
-    } else if mergeable == Some(CONFLICTING_MERGEABILITY) {
+    } else if conflicting {
         Some(DependencySkip::BaseConflict)
     } else {
         None
@@ -589,8 +603,9 @@ mod proofs {
         let [empty, newline, blank_line] = flags;
         let gap = issue_reference_gap(empty, newline, blank_line);
         assert_eq!(gap.is_empty(), empty || blank_line);
-        assert_eq!(gap == "\n", !empty && !blank_line && newline);
-        assert_eq!(gap == "\n\n", !empty && !blank_line && !newline);
+        assert_eq!(gap.len() == 1, !empty && !blank_line && newline);
+        assert_eq!(gap.len() == 2, !empty && !blank_line && !newline);
+        assert!(matches!(gap.as_bytes(), [] | [b'\n'] | [b'\n', b'\n']));
     }
 
     #[cfg(kani)]
@@ -600,8 +615,8 @@ mod proofs {
         spec_issue_reference_gap(flags);
         let gap = issue_reference_gap(flags[0], flags[1], flags[2]);
         kani::cover!(gap.is_empty());
-        kani::cover!(gap == "\n");
-        kani::cover!(gap == "\n\n");
+        kani::cover!(gap.len() == 1);
+        kani::cover!(gap.len() == 2);
     }
 
     pub fn spec_source_relation(identities: RepositoryIdentities) {
@@ -874,19 +889,36 @@ mod proofs {
         is_bot: bool,
         mergeable: Option<&str>,
     ) {
-        let bytes = login.as_bytes();
+        spec_dependency_skip_bytes(
+            login.as_bytes(),
+            author_type == Some(BOT_AUTHOR_TYPE),
+            is_bot,
+            mergeable == Some(CONFLICTING_MERGEABILITY),
+        );
+        assert_eq!(
+            dependency_skip(login, author_type, is_bot, mergeable),
+            dependency_skip_bytes(
+                login.as_bytes(),
+                author_type == Some(BOT_AUTHOR_TYPE),
+                is_bot,
+                mergeable == Some(CONFLICTING_MERGEABILITY),
+            )
+        );
+    }
+
+    fn spec_dependency_skip_bytes(bytes: &[u8], author_bot: bool, is_bot: bool, conflicting: bool) {
         let bot = is_bot
-            || author_type == Some("Bot")
+            || author_bot
             || bytes.get(..APP_AUTHOR_PREFIX.len()) == Some(APP_AUTHOR_PREFIX.as_bytes())
             || bytes.get(bytes.len().saturating_sub(BOT_AUTHOR_SUFFIX.len())..)
                 == Some(BOT_AUTHOR_SUFFIX.as_bytes());
-        let skip = dependency_skip(login, author_type, is_bot, mergeable);
+        let skip = dependency_skip_bytes(bytes, author_bot, is_bot, conflicting);
         assert_eq!(skip == Some(DependencySkip::Bot), bot);
         assert_eq!(
             skip == Some(DependencySkip::BaseConflict),
-            !bot && mergeable == Some("CONFLICTING")
+            !bot && conflicting
         );
-        assert_eq!(skip.is_none(), !bot && mergeable != Some("CONFLICTING"));
+        assert_eq!(skip.is_none(), !bot && !conflicting);
     }
 
     #[cfg(kani)]
@@ -897,16 +929,49 @@ mod proofs {
         let bytes: [u8; LOGIN_BYTES] = kani::any();
         let length: usize = kani::any();
         kani::assume(length <= bytes.len());
-        let Ok(login) = core::str::from_utf8(&bytes[..length]) else {
-            return;
-        };
-        let author_type = if kani::any() { Some("Bot") } else { None };
+        let login = &bytes[..length];
+        let author_bot = kani::any();
         let is_bot = kani::any();
-        let mergeable = if kani::any() {
-            Some("CONFLICTING")
+        let conflicting = kani::any();
+        spec_dependency_skip_bytes(login, author_bot, is_bot, conflicting);
+        let skip = dependency_skip_bytes(login, author_bot, is_bot, conflicting);
+        kani::cover!(skip == Some(DependencySkip::Bot));
+        kani::cover!(skip == Some(DependencySkip::BaseConflict));
+        kani::cover!(skip.is_none());
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn text_dependency_adapter_preserves_the_declared_identity_classes() {
+        let logins = [
+            "",
+            "app/a",
+            "actor[bot]",
+            "app/a[bot]",
+            "actor",
+            "APP/a",
+            "a[BOT]",
+            "a\u{3042}",
+        ];
+        let index: usize = kani::any();
+        kani::assume(index < logins.len());
+        let author_type = if kani::any() {
+            Some("Bot")
+        } else if kani::any() {
+            Some("User")
         } else {
             None
         };
+        let mergeable = if kani::any() {
+            Some("CONFLICTING")
+        } else if kani::any() {
+            Some("UNKNOWN")
+        } else {
+            None
+        };
+        let login = logins[index];
+        let is_bot = kani::any();
         spec_dependency_skip(login, author_type, is_bot, mergeable);
         let skip = dependency_skip(login, author_type, is_bot, mergeable);
         kani::cover!(skip == Some(DependencySkip::Bot));

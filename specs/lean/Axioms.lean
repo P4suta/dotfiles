@@ -19,3 +19,5 @@ import Dotfiles
 #print axioms Dotfiles.Contrast.reported_ratio
 #print axioms Dotfiles.Elapsed.ceiling_upper
 #print axioms Dotfiles.Elapsed.ceiling_minimal
+#print axioms Dotfiles.Elapsed.campaign_budget_covers
+#print axioms Dotfiles.Elapsed.campaign_budget_minimal

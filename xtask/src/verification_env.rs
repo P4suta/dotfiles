@@ -198,9 +198,18 @@ fn bounded(arguments: &mut Vec<OsString>) {
     );
 }
 
-fn image_command(identity: &ImageIdentity, platform: &str, command: &[&str]) -> Result<Output> {
+fn image_command(
+    identity: &ImageIdentity,
+    platform: &str,
+    backend: Backend,
+    command: &[&str],
+) -> Result<Output> {
     let mut arguments = crate::container::run_arguments();
     bounded(&mut arguments);
+    if backend == Backend::Kani {
+        // The production campaign uses the prepared image's root home without a host-home mount.
+        arguments.extend(["--user", "0:0"].map(OsString::from));
+    }
     arguments.extend(["--platform", platform, &identity.id].map(OsString::from));
     arguments.extend(command.iter().map(OsString::from));
     let mut command = Tool::Docker.command();
@@ -246,7 +255,8 @@ fn component_with(
         .to_owned();
         ensure!(
             output.status.success() && matches(&text, expected),
-            "{tool} did not report its required version {expected}"
+            "{tool} did not report its required version {expected}: {}; observed {text:?}",
+            output.status
         );
         Ok(text)
     });
@@ -416,10 +426,20 @@ fn doctor_backend(root: &Path, backend: Backend) -> Environment {
         };
         let identity = inspect(&environment.route, &environment.required_platform)?;
         let command = |arguments: &[&str]| {
-            image_command(&identity, &environment.required_platform, arguments)
+            image_command(
+                &identity,
+                &environment.required_platform,
+                backend,
+                arguments,
+            )
         };
         environment.components = match backend {
-            Backend::Kani => vec![kani_component(command(&["kani", "--version"]))],
+            Backend::Kani => {
+                let arguments = crate::skill_proofs::container_kani_version_arguments();
+                vec![kani_component(command(
+                    &arguments.each_ref().map(String::as_str),
+                ))]
+            }
             Backend::Lean => vec![component(
                 "Lean",
                 crate::lean::LEAN_VERSION,

@@ -62,6 +62,54 @@ fn altered_native_claims_domains_calls_and_names_are_refused() {
         ))
         .is_err()
     );
+    for declaration in [
+        "const None: Option<u32> = Some(0);",
+        "const r#None: Option<u32> = Some(0);",
+        "enum bool { Off, On }",
+    ] {
+        assert!(
+            translate(&format!("{declaration}\n{source}")).is_err(),
+            "accepted shadowing: {declaration}"
+        );
+    }
+}
+
+#[test]
+fn changed_campaign_arithmetic_cannot_supply_the_generated_ceiling_claims() {
+    let source = fs::read_to_string(root().join(SOURCE)).unwrap();
+    for (before, after) in [
+        (
+            "let harnesses: u32 = kani::any();",
+            "let harnesses: u32 = 0;",
+        ),
+        (
+            "let parallelism: u16 = kani::any();",
+            "let parallelism: u16 = 1;",
+        ),
+        ("let quotient: u32 = kani::any();", "let quotient: u32 = 0;"),
+        (
+            "let partial: bool = kani::any();",
+            "let partial: bool = false;",
+        ),
+        (
+            "campaign_parts(quotient, remainder != 0, overhead)",
+            "campaign_parts(quotient, false, overhead)",
+        ),
+        (
+            "let budget = campaign_seconds(harnesses, parallelism, overhead);",
+            "let budget = Some(0);",
+        ),
+        ("u32::try_from(expected).is_ok()", "true"),
+        ("harnesses / divisor", "harnesses / (divisor + 1)"),
+        (
+            "pub const TIMEOUT_SECONDS: u64 = 60;",
+            "pub const TIMEOUT_SECONDS: u64 = 61;",
+        ),
+    ] {
+        let changed = source.replace(before, after);
+        assert_ne!(changed, source, "missing mutation: {before}");
+        assert!(translate(&changed).is_err(), "accepted {after}");
+    }
 }
 
 #[test]
