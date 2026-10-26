@@ -144,6 +144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GH_FIXTURE_REPOSITORY" => Some("GH_FIXTURE_REPOSITORIES"),
             "GH_FIXTURE_BRANCH" => Some("GH_FIXTURE_BRANCHES"),
             "GH_FIXTURE_ISSUE" => Some("GH_FIXTURE_ISSUES"),
+            "GH_FIXTURE_COMPARE" => Some("GH_FIXTURE_COMPARISONS"),
             _ => None,
         };
         if let Some(responses) = responses
@@ -287,9 +288,9 @@ fn endpoint_response(
     responses
         .lines()
         .find_map(|line| {
-            line.split_once('=')
-                .filter(|(key, _)| *key == endpoint)
-                .map(|(_, response)| response.to_owned())
+            line.strip_prefix(endpoint)
+                .and_then(|suffix| suffix.strip_prefix('='))
+                .map(str::to_owned)
         })
         .map(Some)
         .ok_or_else(|| format!("no owned response for {endpoint}").into())
