@@ -29,6 +29,7 @@ const GRAPHQL_BOT: &str = "coderabbitai";
 const REVIEW_CONTEXT: &str = "CodeRabbit";
 const RUN_ID_LENGTH: usize = 36;
 const RUN_ID_SEPARATORS: [usize; 4] = [8, 13, 18, 23];
+const REVIEW_RANGE: &str = "Reviewing files that changed from the base of the PR and between ";
 pub(super) const CRITICAL_LABEL: &str = "review:critical";
 
 #[derive(Deserialize)]
@@ -909,6 +910,108 @@ struct CommitStatus {
     context: String,
     state: String,
     description: String,
+    created_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ComparedFile {
+    filename: String,
+    previous_filename: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ReviewComparison {
+    base_commit: CommitObject,
+    behind_by: u64,
+    files: Vec<ComparedFile>,
+}
+
+struct ComparedReview {
+    base: String,
+    files: BTreeSet<String>,
+    comparison_files: usize,
+    same_pr_diff: bool,
+}
+
+struct FullReview<'a> {
+    review: &'a SubmittedReview,
+    base: &'a str,
+    files: BTreeSet<String>,
+}
+
+fn latest_full_review(reviews: &[SubmittedReview]) -> Option<FullReview<'_>> {
+    reviews
+        .iter()
+        .filter(|review| review.user.login == REVIEW_BOT)
+        .filter_map(|review| {
+            let (base, _) = review_range(&review.body).ok()?;
+            let files = full_review_body(&review.body, base, &review.commit_id).ok()?;
+            Some(FullReview {
+                review,
+                base,
+                files,
+            })
+        })
+        .max_by_key(|full| full.review.id)
+}
+
+fn compare_reviewed_head(
+    github: &Github,
+    target: &Target,
+    binding: &Binding,
+    review: &SubmittedReview,
+) -> Result<ComparedReview> {
+    let root = std::env::current_dir()?;
+    fetch_pr(&root, target, &binding.base, &review.commit_id)?;
+    let prior = capture_verified(
+        github,
+        &root,
+        &target.repo,
+        &binding.base,
+        &review.commit_id,
+    )?;
+    let compare = |base: &str, head: &str| -> Result<ReviewComparison> {
+        let comparison: ReviewComparison = github
+            .read(&format!(
+                "repos/{}/compare/{base}...{head}?per_page=1&page=1",
+                target.repo
+            ))
+            .context("CodeRabbit head comparison file inventory is unavailable or malformed")?;
+        ensure!(
+            comparison.base_commit.sha == base,
+            "CodeRabbit head comparison belongs to another base commit"
+        );
+        Ok(comparison)
+    };
+    let forward = compare(&review.commit_id, &binding.head)?;
+    let reverse_needed = forward.behind_by > 0;
+    let mut comparisons = vec![forward];
+    if reverse_needed {
+        comparisons.push(compare(&binding.head, &review.commit_id)?);
+    }
+    let comparison_files = comparisons
+        .iter()
+        .map(|comparison| comparison.files.len())
+        .max()
+        .context("CodeRabbit head comparison is missing")?;
+    let mut files = BTreeSet::new();
+    for comparison in comparisons {
+        for file in comparison.files {
+            for path in Some(file.filename)
+                .into_iter()
+                .chain(file.previous_filename)
+            {
+                platform::issue_context::relative(Path::new(&path))?;
+                files.insert(path);
+            }
+        }
+    }
+    Ok(ComparedReview {
+        base: prior.binding.base,
+        files,
+        comparison_files,
+        same_pr_diff: prior.binding.diff_sha256 == binding.diff_sha256,
+    })
 }
 
 fn pages<T: serde::de::DeserializeOwned>(github: &Github, endpoint: &str) -> Result<Vec<T>> {
@@ -942,7 +1045,9 @@ fn require_pr_review(
         github,
         &format!("repos/{}/commits/{head}/statuses", target.repo),
     )?;
-    validate_pr_evidence(&reviews, &statuses, binding, assessment, pr)?;
+    validate_pr_evidence(&reviews, &statuses, binding, assessment, pr, |review| {
+        compare_reviewed_head(github, target, binding, review)
+    })?;
     let live = super::live_document(github, target, pr)?;
     ensure!(
         live.head_ref_oid.as_deref() == Some(head.as_str()),
@@ -957,6 +1062,7 @@ fn validate_pr_evidence(
     binding: &Binding,
     assessment: &Assessment,
     pr: u64,
+    compare: impl FnMut(&SubmittedReview) -> Result<ComparedReview>,
 ) -> Result<()> {
     let review = reviews
         .iter()
@@ -969,7 +1075,6 @@ fn validate_pr_evidence(
                 "PR has no submitted CodeRabbit review of its current head",
             )
         })?;
-    validate_submitted_review(review, binding, assessment)?;
     let status = statuses
         .iter()
         .filter(|status| status.creator.login == REVIEW_BOT && status.context == REVIEW_CONTEXT)
@@ -985,6 +1090,95 @@ fn validate_pr_evidence(
         status.state == "success" && status.description == "Review completed",
         "current-head CodeRabbit terminal is skipped, partial, pending, failed, or unknown"
     );
+    if review.commit_id == binding.head && !review.body.trim().is_empty() {
+        return validate_submitted_review(review, binding, assessment);
+    }
+    if review.commit_id == binding.head {
+        ensure!(
+            review.id != 0
+                && review.state == "APPROVED"
+                && review
+                    .submitted_at
+                    .as_ref()
+                    .is_some_and(|time| !time.is_empty()),
+            "empty current-head CodeRabbit review is not a submitted approval"
+        );
+    }
+    validate_carried_review(reviews, status, binding, assessment, pr, compare)
+}
+
+fn validate_carried_review(
+    reviews: &[SubmittedReview],
+    status: &CommitStatus,
+    binding: &Binding,
+    assessment: &Assessment,
+    pr: u64,
+    mut compare: impl FnMut(&SubmittedReview) -> Result<ComparedReview>,
+) -> Result<()> {
+    let FullReview {
+        review,
+        base,
+        files,
+    } = latest_full_review(reviews).ok_or_else(|| {
+        missing_pr_review(
+            binding,
+            pr,
+            "PR has no complete CodeRabbit full-review body",
+        )
+    })?;
+    ensure!(
+        review.id != 0
+            && matches!(
+                review.state.as_str(),
+                "COMMENTED" | "APPROVED" | "CHANGES_REQUESTED"
+            ),
+        "prior full CodeRabbit review is pending, dismissed, or unknown"
+    );
+    ensure!(
+        assessment
+            .evidence
+            .iter()
+            .all(|evidence| files.contains(&evidence.path)),
+        "assessment evidence paths were not selected by the prior full CodeRabbit review"
+    );
+    let submitted_at: jiff::Timestamp = review
+        .submitted_at
+        .as_deref()
+        .context("prior full CodeRabbit review submission time is missing")?
+        .parse()
+        .context("prior full CodeRabbit review submission time is malformed")?;
+    let created_at: jiff::Timestamp = status
+        .created_at
+        .as_deref()
+        .context("current-head CodeRabbit terminal status creation time is missing")?
+        .parse()
+        .context("current-head CodeRabbit terminal status creation time is malformed")?;
+    let comparison = compare(review)?;
+    ensure!(
+        base == comparison.base,
+        "prior CodeRabbit full review does not cover its canonical PR base-to-head range"
+    );
+    let unselected: Vec<_> = comparison.files.difference(&files).cloned().collect();
+    match policy::review_carry(policy::ReviewCarry {
+        comparison_files: comparison.comparison_files,
+        changed_paths_selected: unselected.is_empty(),
+        same_pr_diff: comparison.same_pr_diff,
+        submitted_at: submitted_at.as_nanosecond(),
+        status_created_at: created_at.as_nanosecond(),
+    }) {
+        policy::ReviewCarryDecision::Accepted => {}
+        policy::ReviewCarryDecision::IncompleteComparison => anyhow::bail!(
+            "CodeRabbit head comparison reaches GitHub's {}-file limit; no partial review credit",
+            policy::COMPARE_FILE_LIMIT
+        ),
+        policy::ReviewCarryDecision::UnreviewedChanges => anyhow::bail!(
+            "files changed outside the prior full CodeRabbit review's selected set: {}",
+            unselected.join(", ")
+        ),
+        policy::ReviewCarryDecision::StaleStatus => anyhow::bail!(
+            "current-head CodeRabbit terminal status was not created after the prior full review submission"
+        ),
+    }
     Ok(())
 }
 
@@ -1040,7 +1234,6 @@ fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTree
         "<!-- This is an auto-generated comment by CodeRabbit for review status -->";
     const COMMENTS: &str = "**Actionable comments posted: ";
     const RUN: &str = "- **Run ID**: `";
-    const RANGE: &str = "Reviewing files that changed from the base of the PR and between ";
     const FILES: &str = "<summary>📒 Files selected for processing (";
     ensure!(
         body.lines().last() == Some(FOOTER) && body.matches(FOOTER).count() == 1,
@@ -1081,12 +1274,7 @@ fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTree
                 }),
         "CodeRabbit run identity malformed"
     );
-    let range = unique(RANGE)?
-        .strip_suffix('.')
-        .context("CodeRabbit reviewed range malformed")?;
-    let (base, reviewed) = range
-        .split_once(" and ")
-        .context("CodeRabbit reviewed range missing")?;
+    let (base, reviewed) = review_range(body)?;
     ensure!(
         base == expected_base && reviewed == head,
         "PR review must cover the full canonical PR base-to-head range"
@@ -1119,6 +1307,29 @@ fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTree
         "CodeRabbit selected file inventory is incomplete"
     );
     Ok(files)
+}
+
+fn review_range(body: &str) -> Result<(&str, &str)> {
+    let mut ranges = body
+        .lines()
+        .filter_map(|line| line.strip_prefix(REVIEW_RANGE));
+    let range = ranges.next().context("CodeRabbit reviewed range missing")?;
+    ensure!(
+        ranges.next().is_none(),
+        "CodeRabbit reviewed range is ambiguous"
+    );
+    let (base, head) = range
+        .strip_suffix('.')
+        .and_then(|range| range.split_once(" and "))
+        .context("CodeRabbit reviewed range malformed")?;
+    ensure!(
+        [base, head]
+            .into_iter()
+            .all(|object| GIT_OBJECT_LENGTHS.contains(&object.len())
+                && object.bytes().all(|byte| byte.is_ascii_hexdigit())),
+        "CodeRabbit reviewed range requires full Git object names"
+    );
+    Ok((base, head))
 }
 
 const THREADS_QUERY: &str = "query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated comments(first:100){pageInfo{hasNextPage endCursor} nodes{author{login} body}}}}}}}";
@@ -1896,7 +2107,288 @@ mod tests {
             context: REVIEW_CONTEXT.into(),
             state: state.into(),
             description: description.into(),
+            created_at: Some("2026-10-14T00:01:00Z".into()),
         }
+    }
+
+    fn no_comparison(_: &SubmittedReview) -> Result<ComparedReview> {
+        anyhow::bail!("a current-head full review must not need a comparison")
+    }
+
+    fn compared_review(binding: &Binding, paths: &[&str], same_pr_diff: bool) -> ComparedReview {
+        ComparedReview {
+            base: binding.base.clone(),
+            files: paths.iter().map(|path| (*path).to_owned()).collect(),
+            comparison_files: paths.len(),
+            same_pr_diff,
+        }
+    }
+
+    fn earlier_review_fixture() -> Result<(Binding, Assessment, SubmittedReview)> {
+        let (mut binding, assessment, mut review) = review_fixture()?;
+        binding.head = "d".repeat(40);
+        review.state = "CHANGES_REQUESTED".into();
+        Ok((binding, assessment, review))
+    }
+
+    #[test]
+    fn completed_clean_draft_head_reuses_the_prior_full_review() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        validate_pr_evidence(
+            &[review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &["README.md"], false)),
+        )
+    }
+
+    #[test]
+    fn unchanged_rebased_head_reuses_the_prior_full_review() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        validate_pr_evidence(
+            &[review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &[], false)),
+        )
+    }
+
+    #[test]
+    fn empty_current_head_approval_reuses_the_prior_full_review() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        let approval = SubmittedReview {
+            id: 2,
+            user: Bot {
+                login: REVIEW_BOT.into(),
+            },
+            commit_id: binding.head.clone(),
+            state: "APPROVED".into(),
+            submitted_at: Some("2026-10-14T00:02:00Z".into()),
+            body: String::new(),
+        };
+        validate_pr_evidence(
+            &[review, approval],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &["README.md"], false)),
+        )
+    }
+
+    #[test]
+    fn unchanged_pr_diff_reuses_review_after_upstream_files_change() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        validate_pr_evidence(
+            &[review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &["upstream.md"], true)),
+        )
+    }
+
+    #[test]
+    fn carried_review_refuses_changes_outside_the_selected_set() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        let error = validate_pr_evidence(
+            &[review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| {
+                Ok(compared_review(
+                    &binding,
+                    &["README.md", "unreviewed.rs"],
+                    false,
+                ))
+            },
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("outside the prior full"),
+            "{error:#}"
+        );
+        assert!(error.to_string().contains("unreviewed.rs"), "{error:#}");
+        Ok(())
+    }
+
+    #[test]
+    fn carried_review_requires_a_status_created_strictly_after_submission() -> Result<()> {
+        for (created_at, message) in [
+            (Some("2026-10-13T23:59:59Z"), "not created after"),
+            (Some("2026-10-14T00:00:00Z"), "not created after"),
+            (Some("2026-10-14T09:00:00+09:00"), "not created after"),
+            (None, "creation time is missing"),
+            (Some("unknown"), "creation time is malformed"),
+        ] {
+            let (binding, assessment, review) = earlier_review_fixture()?;
+            let mut terminal = status(1, "success", "Review completed");
+            terminal.created_at = created_at.map(str::to_owned);
+            let error =
+                validate_pr_evidence(&[review], &[terminal], &binding, &assessment, 17, |_| {
+                    Ok(compared_review(&binding, &[], false))
+                })
+                .unwrap_err();
+            assert!(
+                error.to_string().contains(message),
+                "{created_at:?}: {error:#}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn carried_review_refuses_missing_or_nonterminal_current_head_status() -> Result<()> {
+        for (statuses, message) in [
+            (vec![], "terminal status is unavailable"),
+            (
+                vec![status(1, "success", "Review skipped")],
+                "skipped, partial",
+            ),
+            (
+                vec![status(1, "pending", "Review in progress")],
+                "skipped, partial",
+            ),
+            (
+                vec![
+                    status(1, "success", "Review completed"),
+                    status(2, "failure", "Review failed"),
+                ],
+                "skipped, partial",
+            ),
+        ] {
+            let (binding, assessment, review) = earlier_review_fixture()?;
+            let error =
+                validate_pr_evidence(&[review], &statuses, &binding, &assessment, 17, |_| {
+                    Ok(compared_review(&binding, &[], false))
+                })
+                .unwrap_err();
+            assert!(error.to_string().contains(message), "{error:#}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn carried_review_refuses_incomplete_comparison_and_incorrect_prior_base() -> Result<()> {
+        for (comparison_files, base, message) in [
+            (policy::COMPARE_FILE_LIMIT, "a", "no partial review credit"),
+            (0, "e", "canonical PR base-to-head range"),
+        ] {
+            let (binding, assessment, review) = earlier_review_fixture()?;
+            let error = validate_pr_evidence(
+                &[review],
+                &[status(1, "success", "Review completed")],
+                &binding,
+                &assessment,
+                17,
+                |_| {
+                    Ok(ComparedReview {
+                        base: base.repeat(40),
+                        comparison_files,
+                        ..compared_review(&binding, &[], true)
+                    })
+                },
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains(message), "{error:#}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn carried_review_selects_the_full_body_with_the_highest_bot_review_id() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        let (_, _, mut newer) = earlier_review_fixture()?;
+        newer.id = review.id + 1;
+        newer.body = newer.body.replace("README.md", "other.md");
+        let error = validate_pr_evidence(
+            &[newer, review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &[], false)),
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("assessment evidence paths"),
+            "{error:#}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn carried_review_refuses_partial_metadata_and_dismissed_full_reviews() -> Result<()> {
+        for (body_change, state, submitted_at, message) in [
+            (
+                true,
+                "COMMENTED",
+                Some("2026-10-14T00:00:00Z"),
+                "no complete CodeRabbit full-review body",
+            ),
+            (
+                false,
+                "DISMISSED",
+                Some("2026-10-14T00:00:00Z"),
+                "pending, dismissed",
+            ),
+            (
+                false,
+                "CHANGES_REQUESTED",
+                None,
+                "submission time is missing",
+            ),
+            (
+                false,
+                "CHANGES_REQUESTED",
+                Some("unknown"),
+                "submission time is malformed",
+            ),
+        ] {
+            let (binding, assessment, mut review) = earlier_review_fixture()?;
+            review.state = state.into();
+            review.submitted_at = submitted_at.map(str::to_owned);
+            if body_change {
+                review.body = review
+                    .body
+                    .replace(REVIEW_RANGE, "Incrementally reviewing ");
+            }
+            let error = validate_pr_evidence(
+                &[review],
+                &[status(1, "success", "Review completed")],
+                &binding,
+                &assessment,
+                17,
+                |_| Ok(compared_review(&binding, &[], false)),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains(message), "{error:#}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn empty_approval_can_follow_a_full_review_of_the_same_head() -> Result<()> {
+        let (binding, assessment, review) = review_fixture()?;
+        let (_, _, mut approval) = review_fixture()?;
+        approval.id = review.id + 1;
+        approval.state = "APPROVED".into();
+        approval.body.clear();
+        validate_pr_evidence(
+            &[review, approval],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &[], true)),
+        )
     }
 
     #[test]
@@ -1931,6 +2423,7 @@ mod tests {
             &binding,
             &assessment,
             1,
+            no_comparison,
         )?;
         Ok(())
     }
@@ -1945,6 +2438,7 @@ mod tests {
             &binding,
             &assessment,
             1,
+            no_comparison,
         )?;
         for latest in [
             status(2, "pending", "Review in progress"),
@@ -1958,6 +2452,7 @@ mod tests {
                     &binding,
                     &assessment,
                     1,
+                    no_comparison,
                 )
                 .is_err()
             );
@@ -1973,6 +2468,7 @@ mod tests {
                 &binding,
                 &assessment,
                 1,
+                no_comparison,
             )
             .is_err()
         );
@@ -1986,7 +2482,8 @@ mod tests {
         let statuses = [status(1, "success", "Review completed")];
         for (reviews, statuses) in [(&[][..], &statuses[..]), (&reviews[..], &[][..])] {
             let error =
-                validate_pr_evidence(reviews, statuses, &binding, &assessment, 17).unwrap_err();
+                validate_pr_evidence(reviews, statuses, &binding, &assessment, 17, no_comparison)
+                    .unwrap_err();
             let refusal = error
                 .downcast_ref::<platform::refusal::Refusal>()
                 .context("missing review needs its domain refusal")?;
@@ -2002,6 +2499,7 @@ mod tests {
             &binding,
             &assessment,
             17,
+            no_comparison,
         )
         .unwrap_err();
         assert!(error.downcast_ref::<platform::refusal::Refusal>().is_none());

@@ -2426,6 +2426,22 @@ fn reject_completion_from_the_wrong_review_pool() {
     use production::{Completion, ReviewEvidence, ReviewRoute, completion};
     assert_eq!(completion(ReviewRoute::Cli, false, false, ReviewEvidence::Pr, true), Completion::Accepted);
 }
+#[kani::proof]
+fn reject_carried_review_credit_for_an_unselected_changed_path() {
+    use production::{ReviewCarry, ReviewCarryDecision, review_carry};
+    assert_eq!(review_carry(ReviewCarry {
+        comparison_files: 1, changed_paths_selected: false, same_pr_diff: false,
+        submitted_at: 1, status_created_at: 2,
+    }), ReviewCarryDecision::Accepted);
+}
+#[kani::proof]
+fn reject_carried_review_credit_from_a_status_before_the_review() {
+    use production::{ReviewCarry, ReviewCarryDecision, review_carry};
+    assert_eq!(review_carry(ReviewCarry {
+        comparison_files: 0, changed_paths_selected: true, same_pr_diff: true,
+        submitted_at: 2, status_created_at: 1,
+    }), ReviewCarryDecision::Accepted);
+}
 '''
 
 [[obligation]]
