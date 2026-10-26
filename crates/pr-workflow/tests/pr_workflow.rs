@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -5171,6 +5172,247 @@ fn standing_suppression_never_hides_an_unresolved_outdated_bot_thread() -> Resul
         if !accepted {
             assert!(!fixture.log()?.contains("\nready\n"));
             assert!(String::from_utf8_lossy(&output.stderr).contains("unresolved"));
+        }
+    }
+    Ok(())
+}
+
+struct ReviewComparisonCase {
+    rebase: bool,
+    forward: serde_json::Value,
+    reverse: Option<serde_json::Value>,
+    unresolved: bool,
+    refusal: Option<&'static str>,
+}
+
+fn review_comparison_cases() -> Vec<ReviewComparisonCase> {
+    vec![
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::Value::Array(vec![
+                serde_json::json!({"filename":"body.md"});
+                rules::review_routing_rules::COMPARE_FILE_LIMIT
+            ]),
+            reverse: None,
+            unresolved: false,
+            refusal: Some("no partial review credit"),
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::Value::Null,
+            reverse: None,
+            unresolved: false,
+            refusal: Some("comparison file inventory is unavailable or malformed"),
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::json!([{"filename":"body.md"}]),
+            reverse: None,
+            unresolved: false,
+            refusal: None,
+        },
+        ReviewComparisonCase {
+            rebase: true,
+            forward: serde_json::json!([{"filename":"upstream.md"},{"filename":"body.md"}]),
+            reverse: Some(serde_json::json!([{"filename":"body.md"}])),
+            unresolved: false,
+            refusal: None,
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::json!([{"filename":"unreviewed.rs"}]),
+            reverse: None,
+            unresolved: false,
+            refusal: Some("outside the prior full"),
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::json!([{"filename":"body.md","previous_filename":"unreviewed.rs"}]),
+            reverse: None,
+            unresolved: false,
+            refusal: Some("unreviewed.rs"),
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::json!([]),
+            reverse: Some(serde_json::json!([{"filename":"unreviewed.rs"}])),
+            unresolved: false,
+            refusal: Some("unreviewed.rs"),
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::json!([{"filename":"body.md"}]),
+            reverse: None,
+            unresolved: true,
+            refusal: Some("unresolved"),
+        },
+    ]
+}
+
+fn reviewed_head_fixture(rebase: bool) -> Result<(Fixture, String, serde_json::Value)> {
+    let mut fixture = Fixture::new(BODY)?;
+    fixture.level = "critical";
+    let root = fixture.directory.path();
+    let reviewed_head = fixture.head.clone();
+    let reviewed_base = fixture.base.clone();
+    if rebase {
+        git(root, &["checkout", "--quiet", "--detach", &reviewed_base])?;
+        fs::write(root.join("upstream.md"), "An upstream change.\n")?;
+        git(root, &["add", "upstream.md"])?;
+        git(root, &["commit", "--quiet", "-m", "upstream"])?;
+        fixture.base = git(root, &["rev-parse", "HEAD"])?;
+        fs::write(root.join("body.md"), BODY)?;
+    } else {
+        fs::write(
+            root.join("body.md"),
+            format!("{BODY}\nA reviewed correction.\n"),
+        )?;
+    }
+    git(root, &["add", "body.md"])?;
+    git(root, &["commit", "--quiet", "-m", "updated"])?;
+    fixture.head = git(root, &["rev-parse", "HEAD"])?;
+    let review_body = format!(
+        "**Actionable comments posted: 1**\n- **Run ID**: `00000000-0000-0000-0000-000000000001`\nReviewing files that changed from the base of the PR and between {reviewed_base} and {reviewed_head}.\n<summary>📒 Files selected for processing (1)</summary>\n* `body.md`\n</details>\n<!-- This is an auto-generated comment by CodeRabbit for review status -->"
+    );
+    let reviews = serde_json::json!([{
+        "id":1,"user":{"login":"coderabbitai[bot]"},"commit_id":reviewed_head,
+        "state":"CHANGES_REQUESTED","submitted_at":"2026-10-26T00:00:00Z","body":review_body
+    }]);
+    Ok((fixture, reviewed_head, reviews))
+}
+
+#[test]
+fn repository_pr_policy_accepts_carried_current_head_completion_before_ready() -> Result<()> {
+    for level in ["low", "medium", "high", "critical"] {
+        for approval in [false, true] {
+            let (mut fixture, reviewed_head, mut reviews) = reviewed_head_fixture(false)?;
+            fixture.level = level;
+            fixture.require_pr_review("owner/project")?;
+            if approval {
+                reviews
+                    .as_array_mut()
+                    .context("submitted review array")?
+                    .push(serde_json::json!({
+                        "id":2,"user":{"login":"coderabbitai[bot]"},"commit_id":fixture.head,
+                        "state":"APPROVED","submitted_at":"2026-10-26T00:02:00Z","body":""
+                    }));
+            }
+            let endpoint = format!(
+                "repos/owner/project/compare/{reviewed_head}...{}?per_page=1&page=1",
+                fixture.head
+            );
+            let mut command = fixture.command("ready")?;
+            command
+                .args(["--pr", "17"])
+                .env("GH_FIXTURE_REVIEWS", reviews.to_string())
+                .env("GH_FIXTURE_STATUSES", serde_json::json!([{
+                    "id":1,"creator":{"login":"coderabbitai[bot]"},"context":"CodeRabbit",
+                    "state":"success","description":"Review completed","created_at":"2026-10-26T00:03:00Z"
+                }]).to_string())
+                .env(
+                    "GH_FIXTURE_COMPARISONS",
+                    format!("{endpoint}={}", serde_json::json!({
+                        "base_commit":{"sha":reviewed_head},"behind_by":0,
+                        "files":[{"filename":"body.md"}]
+                    })),
+                );
+            let output = command.output()?;
+            assert!(
+                output.status.success(),
+                "{level}, approval={approval}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let log = fixture.log()?;
+            assert_eq!(mutations(&log), ["ready"], "{log}");
+            assert!(log.contains(&endpoint), "{log}");
+            assert!(!log.contains("@coderabbitai ignore"), "{log}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn final_review_evidence_compares_reviewed_heads_and_preserves_thread_obligations() -> Result<()> {
+    for ReviewComparisonCase {
+        rebase,
+        forward,
+        reverse,
+        unresolved,
+        refusal,
+    } in review_comparison_cases()
+    {
+        let (fixture, reviewed_head, reviews) = reviewed_head_fixture(rebase)?;
+        let statuses = serde_json::json!([{
+            "id":1,"creator":{"login":"coderabbitai[bot]"},"context":"CodeRabbit",
+            "state":"success","description":"Review completed","created_at":"2026-10-26T00:01:00Z"
+        }]);
+        let forward_endpoint = format!(
+            "repos/owner/project/compare/{reviewed_head}...{}?per_page=1&page=1",
+            fixture.head
+        );
+        let reverse_endpoint = format!(
+            "repos/owner/project/compare/{}...{reviewed_head}?per_page=1&page=1",
+            fixture.head
+        );
+        let mut comparisons = format!(
+            "{forward_endpoint}={}",
+            serde_json::json!({
+                "base_commit":{"sha":reviewed_head},"behind_by":u8::from(reverse.is_some()),"files":forward
+            })
+        );
+        if let Some(files) = &reverse {
+            write!(
+                comparisons,
+                "\n{reverse_endpoint}={}",
+                serde_json::json!({
+                    "base_commit":{"sha":fixture.head},"behind_by":1,"files":files
+                })
+            )?;
+        }
+        let mut command = fixture.command("check")?;
+        command
+            .args(["--pr", "17", "--final"])
+            .env(
+                "GH_FIXTURE_VIEW",
+                serde_json::json!({
+                    "title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":false,
+                    "labels":[{"name":"review:critical"}]
+                })
+                .to_string(),
+            )
+            .env("GH_FIXTURE_REVIEWS", reviews.to_string())
+            .env("GH_FIXTURE_STATUSES", statuses.to_string())
+            .env("GH_FIXTURE_COMPARISONS", comparisons);
+        if unresolved {
+            command.env("GH_FIXTURE_GRAPHQL", serde_json::json!({"data":{"repository":{"pullRequest":{
+                "headRefOid":fixture.head,"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{
+                    "id":"unresolved-bot-thread","isResolved":false,"isOutdated":true,
+                    "comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"author":{"login":"coderabbitai"},"body":"A finding remains open."}]}
+                }]}
+            }}}}).to_string());
+        }
+        let output = command.output()?;
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.success(),
+            refusal.is_none(),
+            "rebase={rebase}, reverse={reverse:?}: {error}"
+        );
+        if let Some(refusal) = refusal {
+            assert!(error.contains(refusal), "{error}");
+        }
+        let log = fixture.log()?;
+        assert!(mutations(&log).is_empty(), "{log}");
+        if !unresolved {
+            assert!(log.contains(&forward_endpoint), "{log}");
+            assert_eq!(log.contains(&reverse_endpoint), reverse.is_some(), "{log}");
+            assert!(
+                log.contains(&format!(
+                    "git fetch --quiet https://github.com/owner/project.git {} {reviewed_head}",
+                    fixture.base
+                )),
+                "{log}"
+            );
         }
     }
     Ok(())
