@@ -1,8 +1,4 @@
----
-status: proposed
-date: 2026-10-26
----
-# Accept completed heads with prior full-review evidence
+# CodeRabbit PR review evidence
 
 ## Context
 
@@ -10,7 +6,7 @@ CodeRabbit can complete a clean draft review without submitting a review object 
 It can also report no files after a rebase or submit an empty approval for an already-reviewed head.
 The owner observed these responses on [Hellooo PR 6](https://github.com/P4suta/Hellooo/pull/6).
 Requiring a complete review body on every head rejects those responses.
-The [review routing decision](route-coderabbit-by-current-pr-importance.md) still requires current-head completion and complete unresolved-thread inspection.
+The [review routing decision](../adr/route-coderabbit-by-current-pr-importance.md) still requires current-head completion and complete unresolved-thread inspection.
 
 ## Decision
 

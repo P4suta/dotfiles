@@ -2442,6 +2442,14 @@ fn reject_carried_review_credit_from_a_status_before_the_review() {
         submitted_at: 2, status_created_at: 1,
     }), ReviewCarryDecision::Accepted);
 }
+#[kani::proof]
+fn reject_carried_review_credit_from_an_incomplete_comparison() {
+    use production::{COMPARE_FILE_LIMIT, ReviewCarry, ReviewCarryDecision, review_carry};
+    assert_eq!(review_carry(ReviewCarry {
+        comparison_files: COMPARE_FILE_LIMIT, changed_paths_selected: true, same_pr_diff: true,
+        submitted_at: 1, status_created_at: 2,
+    }), ReviewCarryDecision::Accepted);
+}
 '''
 
 [[obligation]]
