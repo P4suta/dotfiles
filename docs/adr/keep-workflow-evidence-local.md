@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [require-pr-review-by-repository-policy.md]
 date: 2026-10-20
 ---
 # Keep workflow evidence on the owner's machines

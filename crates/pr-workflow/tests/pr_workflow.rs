@@ -59,6 +59,7 @@ struct Fixture {
     base: String,
     head: String,
     level: &'static str,
+    always_pr: bool,
 }
 
 /// Run Git in a fixture checkout without the host's global hooks or identity.
@@ -141,6 +142,7 @@ impl Fixture {
             base: base_commit,
             head,
             level: "medium",
+            always_pr: false,
         })
     }
 
@@ -228,6 +230,7 @@ impl Fixture {
                 "state":"OPEN","isDraft":true
             }).to_string())
             .env("GH_FIXTURE_LEVEL", self.level)
+            .env("GH_FIXTURE_ALWAYS_PR", self.always_pr.to_string())
             .env("GH_FIXTURE_SIGNING_KEYS", serde_json::json!([{"id":17,"key":public.trim()}]).to_string())
             .env(
                 "GH_STACK_FIXTURE_LOG",
@@ -253,7 +256,8 @@ impl Fixture {
 
     /// The body with the standing review exclusion of a noncritical route, which carries no assessment.
     fn assessed_body(&self, body: &str) -> String {
-        let standing = if self.level != "critical"
+        let standing = if !self.always_pr
+            && self.level != "critical"
             && !body
                 .lines()
                 .any(|line| line.trim() == "@coderabbitai ignore")
@@ -315,9 +319,9 @@ impl Fixture {
             ])
             .output()?;
         anyhow::ensure!(diff.status.success(), "fixture diff capture failed");
-        let severe = (self.level == "critical").then(|| serde_json::json!({
+        let severe = matches!(self.level, "high" | "critical").then(|| serde_json::json!({
             "ground":"authorization_boundary",
-            "consequence":"A privileged operation could expose the complete fixture repository.", "consequence_kind":"catastrophic",
+            "consequence":"A privileged operation could expose the complete fixture repository.", "consequence_kind":if self.level == "critical" { "catastrophic" } else { "severe" },
             "likelihood":"The changed interface is directly reachable by an untrusted caller.", "likelihood_kind":"exposed",
             "blast_radius":"Every fixture account would be affected by the privileged operation.", "blast_radius_kind":"systemic",
             "rollback":"An exposed credential cannot be recalled after publication.", "rollback_kind":"irreversible"
@@ -3452,6 +3456,276 @@ const PAUSES: [(Option<&str>, bool); 4] = [
 
 fn excluded() -> String {
     format!("{BODY}\n@coderabbitai ignore\n")
+}
+
+impl Fixture {
+    fn require_pr_review(&mut self, repository: &str) -> Result<()> {
+        self.always_pr = true;
+        let directory = self
+            .directory
+            .path()
+            .join(".local/state/pr-workflow/review-policies")
+            .join(repository.to_ascii_lowercase().replace('/', "__"));
+        fs::create_dir_all(&directory)?;
+        fs::write(
+            directory.join("policy.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "repository": repository,
+                "review": "always_pr",
+                "reason": "Every PR in this repository requires CodeRabbit PR review."
+            }))?,
+        )?;
+        Ok(())
+    }
+
+    fn pr_review(&self, command: &mut Command, head: &str) {
+        let body = format!(
+            "**Actionable comments posted: 0**\n- **Run ID**: `00000000-0000-0000-0000-000000000001`\nReviewing files that changed from the base of the PR and between {} and {head}.\n<summary>📒 Files selected for processing (1)</summary>\n* `body.md`\n</details>\n<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+            self.base
+        );
+        command.env(
+            "GH_FIXTURE_REVIEWS",
+            serde_json::json!([{
+                "id":1,"user":{"login":"coderabbitai[bot]"},"commit_id":head,
+                "state":"COMMENTED","submitted_at":"2026-10-26T00:00:00Z","body":body
+            }])
+            .to_string(),
+        );
+        command.env(
+            "GH_FIXTURE_STATUSES",
+            serde_json::json!([{
+                "id":1,"creator":{"login":"coderabbitai[bot]"},"context":"CodeRabbit",
+                "state":"success","description":"Review completed"
+            }])
+            .to_string(),
+        );
+    }
+}
+
+#[test]
+fn repository_pr_policy_publishes_every_level_without_suppression() -> Result<()> {
+    for level in ["low", "medium", "high", "critical"] {
+        let mut fixture = Fixture::new(BODY)?;
+        fixture.level = level;
+        fixture.require_pr_review("owner/project")?;
+        for operation in ["create", "edit"] {
+            let mut command = fixture.command(operation)?;
+            command
+                .args(["--title", "fix: preserve edits", "--body-file"])
+                .arg(&fixture.body);
+            command.args(if operation == "create" {
+                ["--head", "feature"]
+            } else {
+                ["--pr", "17"]
+            });
+            let output = command.output()?;
+            assert!(
+                output.status.success(),
+                "{level} {operation}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let log = fixture.log()?;
+        assert!(!log.contains("@coderabbitai ignore"), "{level}: {log}");
+        assert!(!log.contains("review:critical"), "{level}: {log}");
+    }
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_requires_current_head_review_before_ready() -> Result<()> {
+    for level in ["low", "medium", "high", "critical"] {
+        let mut fixture = Fixture::new(BODY)?;
+        fixture.level = level;
+        fixture.require_pr_review("owner/project")?;
+        for reviewed in [None, Some("stale"), Some(fixture.head.as_str())] {
+            let mut command = fixture.command("ready")?;
+            command.args(["--pr", "17"]);
+            if let Some(head) = reviewed {
+                fixture.pr_review(&mut command, head);
+            }
+            let output = command.output()?;
+            assert_eq!(
+                output.status.success(),
+                reviewed == Some(fixture.head.as_str()),
+                "{level} {reviewed:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_keeps_each_pause_scope_and_pool() -> Result<()> {
+    for (marker, paused) in PAUSES {
+        let mut fixture = Fixture::new(BODY)?;
+        fixture.require_pr_review("owner/project")?;
+        if let Some(marker) = marker {
+            fixture.pause(marker)?;
+        }
+        let mut command = fixture.command("ready")?;
+        command.args(["--pr", "17"]);
+        fixture.pr_review(&mut command, &fixture.head);
+        let output = command.output()?;
+        assert_eq!(
+            output.status.success(),
+            !paused,
+            "{marker:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if let Some(marker) = marker {
+            assert!(
+                fixture
+                    .directory
+                    .path()
+                    .join(".local/state/coderabbit-guard")
+                    .join(marker)
+                    .exists()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_does_not_change_another_repository() -> Result<()> {
+    let mut fixture = Fixture::new(BODY)?;
+    fixture.require_pr_review("owner/another")?;
+    let output = fixture
+        .command("create")?
+        .args([
+            "--title",
+            "fix: preserve edits",
+            "--head",
+            "feature",
+            "--body-file",
+        ])
+        .arg(&fixture.body)
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("standing CodeRabbit PR suppression"));
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_blocks_publication_during_a_pr_pause() -> Result<()> {
+    for marker in ["paused", "paused-pr"] {
+        let mut fixture = Fixture::new(BODY)?;
+        fixture.require_pr_review("owner/project")?;
+        fixture.pause(marker)?;
+        for operation in ["create", "edit"] {
+            let mut command = fixture.command(operation)?;
+            command
+                .args(["--title", "fix: preserve edits", "--body-file"])
+                .arg(&fixture.body);
+            command.args(if operation == "create" {
+                ["--head", "feature"]
+            } else {
+                ["--pr", "17"]
+            });
+            let output = command.output()?;
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("paused by the owner"));
+        }
+        assert_eq!(mutations(&fixture.log()?), [] as [String; 0]);
+    }
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_merges_only_with_current_review_and_never_inserts_suppression() -> Result<()>
+{
+    for marker in [None, Some("paused-pr"), Some("paused-cli")] {
+        for reviewed in [false, true] {
+            let mut fixture = Fixture::new(BODY)?;
+            fixture.require_pr_review("P4suta/project")?;
+            if let Some(marker) = marker {
+                fixture.pause(marker)?;
+            }
+            let body = format!("{BODY}\nCloses #23.\n");
+            let draft = marker == Some("paused-pr");
+            let mut command = fixture.personal_command("merge")?;
+            command.args(["--pr", "17", "--interval", "0"]).env(
+                "GH_FIXTURE_VIEWS",
+                [
+                    read(17, &fixture.head, draft, &body, PASSING, "CLEAN"),
+                    read(17, &fixture.head, draft, &body, PASSING, "CLEAN"),
+                    read(17, &fixture.head, draft, &body, PASSING, "MERGED"),
+                ]
+                .join("\n"),
+            );
+            if reviewed {
+                fixture.pr_review(&mut command, &fixture.head);
+            }
+            let output = command.output()?;
+            let accepted = reviewed && marker != Some("paused-pr");
+            assert_eq!(
+                output.status.success(),
+                accepted,
+                "{marker:?} {reviewed}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let log = fixture.log()?;
+            assert_eq!(
+                mutations(&log),
+                if accepted {
+                    vec!["merge"]
+                } else {
+                    Vec::<&str>::new()
+                }
+            );
+            assert!(!log.contains("@coderabbitai ignore"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_preserves_an_earlier_cli_route_until_history_is_carried() -> Result<()> {
+    let mut fixture = Fixture::new(BODY)?;
+    fixture.level = "high";
+    let output = fixture
+        .command("edit")?
+        .args([
+            "--pr",
+            "17",
+            "--title",
+            "fix: preserve edits",
+            "--body-file",
+        ])
+        .arg(&fixture.body)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fixture.require_pr_review("owner/project")?;
+    fs::write(&fixture.body, BODY)?;
+    for operation in ["edit", "check"] {
+        let mut command = fixture.command(operation)?;
+        command.args(["--pr", "17"]);
+        if operation == "edit" {
+            command
+                .args(["--title", "fix: preserve edits", "--body-file"])
+                .arg(&fixture.body);
+        }
+        let output = command.output()?;
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("prior high review history must be carried")
+        );
+    }
+    let record: serde_json::Value = serde_json::from_slice(&fs::read(
+        fixture
+            .directory
+            .path()
+            .join(".local/state/pr-workflow/assessments/owner__project/pr-17.json"),
+    )?)?;
+    assert_eq!(record["always_pr"], false);
+    Ok(())
 }
 
 fn pause_excluded() -> String {

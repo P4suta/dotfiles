@@ -72,7 +72,7 @@
 | [2026-10-13 Run Renovate through a process from the same source build](renovate-behind-a-source-matched-process.md) | proposed |  |
 | [2026-10-13 Require every fixed proof partition in hosted CI](require-every-fixed-proof-partition-in-hosted-ci.md) | superseded | [2026-10-19](native-verification-with-lightweight-ci.md) |
 | [2026-10-13 Retain Miri sysroots with fresh interpretation](retain-miri-sysroots-with-fresh-interpretation.md) | amended | [2026-10-20](proof-verdicts-never-depend-on-time.md) |
-| [2026-10-13 Route CodeRabbit by current PR importance](route-coderabbit-by-current-pr-importance.md) | amended | [2026-10-20](keep-workflow-evidence-local.md) |
+| [2026-10-13 Route CodeRabbit by current PR importance](route-coderabbit-by-current-pr-importance.md) | amended | [2026-10-20](keep-workflow-evidence-local.md), [2026-10-26](require-pr-review-by-repository-policy.md) |
 | [2026-10-13 Speak fixed development events through an optional desktop queue](speak-fixed-development-events-through-an-optional-desktop-queue.md) | amended | [2026-10-14](report-optional-notification-failures-with-fixed-warnings.md) |
 | [2026-10-13 Validate Renovate reports before classifying freshness](validated-renovate-reports.md) | proposed |  |
 | [2026-10-14 Partition Cargo artifacts by physical source root](partition-cargo-artifacts-by-physical-source-root.md) | proposed |  |
@@ -88,7 +88,7 @@
 | [2026-10-20 Gate pull requests that skip the local hooks](gate-pull-requests-that-skip-local-hooks.md) | accepted |  |
 | [2026-10-20 Keep parallel worktrees independent](keep-parallel-worktrees-independent.md) | amended | [2026-10-20](leave-the-cargo-target-to-each-workspace.md) |
 | [2026-10-20 Keep the assure owner map out of projects](keep-the-assure-owner-map-out-of-projects.md) | accepted |  |
-| [2026-10-20 Keep workflow evidence on the owner's machines](keep-workflow-evidence-local.md) | accepted |  |
+| [2026-10-20 Keep workflow evidence on the owner's machines](keep-workflow-evidence-local.md) | amended | [2026-10-26](require-pr-review-by-repository-policy.md) |
 | [2026-10-20 Leave the Cargo target to each workspace](leave-the-cargo-target-to-each-workspace.md) | accepted |  |
 | [2026-10-20 Proof verdicts never depend on time](proof-verdicts-never-depend-on-time.md) | accepted |  |
 | [2026-10-20 Keep every managed behavior the same on every host](same-behavior-on-every-host.md) | accepted |  |
@@ -121,3 +121,4 @@
 | [2026-10-25 Resolve script inspection from invocation directories](resolve-script-inspection-from-invocation-directories.md) | proposed |  |
 | [2026-10-25 Verify CI pin readers from the offered source](verify-ci-pin-readers-from-offered-source.md) | proposed |  |
 | [2026-10-26 Import unborn artifacts after same-issue selections](import-unborn-artifacts-after-same-issue-selections.md) | proposed |  |
+| [2026-10-26 Require PR review by repository policy](require-pr-review-by-repository-policy.md) | proposed |  |

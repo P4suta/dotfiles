@@ -17,6 +17,13 @@ pub enum ReviewRoute {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum ReviewPolicy {
+    Importance,
+    AlwaysPr,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Consequence {
     Severe,
     Catastrophic,
@@ -61,6 +68,14 @@ pub const fn route(level: ReviewLevel) -> ReviewRoute {
         ReviewLevel::Low | ReviewLevel::Medium => ReviewRoute::None,
         ReviewLevel::High => ReviewRoute::Cli,
         ReviewLevel::Critical => ReviewRoute::Pr,
+    }
+}
+
+#[must_use]
+pub const fn repository_route(level: ReviewLevel, policy: ReviewPolicy) -> ReviewRoute {
+    match policy {
+        ReviewPolicy::Importance => route(level),
+        ReviewPolicy::AlwaysPr => ReviewRoute::Pr,
     }
 }
 
@@ -186,6 +201,26 @@ mod proofs {
         assert_eq!(actual == ReviewRoute::Pr, level == ReviewLevel::Critical);
     }
 
+    pub fn spec_repository_route(level: ReviewLevel, policy: ReviewPolicy) {
+        let selected = repository_route(level, policy);
+        match policy {
+            ReviewPolicy::Importance => assert_eq!(selected, route(level)),
+            ReviewPolicy::AlwaysPr => assert_eq!(selected, ReviewRoute::Pr),
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn repository_policy_selects_pr_review_without_changing_pause_or_completion() {
+        let level = kani::any();
+        let policy = kani::any();
+        let selected = repository_route(level, policy);
+        kani::cover!(policy == ReviewPolicy::AlwaysPr && selected == ReviewRoute::Pr);
+        kani::cover!(policy == ReviewPolicy::Importance && selected != ReviewRoute::Pr);
+        spec_repository_route(level, policy);
+        spec_completion(selected, kani::any(), kani::any(), kani::any(), kani::any());
+    }
+
     pub fn spec_assessment(level: ReviewLevel, risk: Option<SevereRisk>) {
         let credible = risk.is_some_and(|risk| risk.likelihood != Likelihood::Hypothetical);
         let catastrophic = risk.is_some_and(|risk| {
@@ -305,6 +340,9 @@ mod tests {
             ReviewLevel::Critical,
         ] {
             proofs::spec_route(level);
+            for policy in [ReviewPolicy::Importance, ReviewPolicy::AlwaysPr] {
+                proofs::spec_repository_route(level, policy);
+            }
         }
     }
 
