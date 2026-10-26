@@ -134,14 +134,15 @@ pub(crate) fn shell_syntax_tree(input: &str) -> Result<String> {
 
 pub(crate) fn powershell_syntax_tree(input: &str, projection: &str) -> Result<String> {
     check_shell_syntax_source(input)?;
+    let cache = platform::process::PowerShellCache::new()?;
     let completed = bounded(
-        Tool::Pwsh.command().args([
+        cache.apply(Tool::Pwsh.command().args([
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
             "-Command",
             projection,
-        ]),
+        ])),
         Some(input),
     )?;
     ensure!(
@@ -840,6 +841,20 @@ mod tests {
     const MANY_FINDINGS: usize = 221;
     #[cfg(unix)]
     const TEST_TIMEOUT: Duration = Duration::from_millis(30);
+
+    #[cfg(unix)]
+    #[test]
+    fn powershell_syntax_parsers_own_distinct_caches_until_the_child_exits() -> Result<()> {
+        const PROJECTION: &str = "$cache = $env:XDG_CACHE_HOME; if (-not [IO.Directory]::Exists($cache)) { exit 1 }; [Console]::Write($cache)";
+        let first = PathBuf::from(powershell_syntax_tree("", PROJECTION)?);
+        assert!(first.is_absolute());
+        assert!(!first.exists());
+        let second = PathBuf::from(powershell_syntax_tree("", PROJECTION)?);
+        assert!(second.is_absolute());
+        assert_ne!(first, second);
+        assert!(!second.exists());
+        Ok(())
+    }
 
     #[test]
     fn shell_syntax_limits_reject_oversized_sources_and_truncated_output() {
