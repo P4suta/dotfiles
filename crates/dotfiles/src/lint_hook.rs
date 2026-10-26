@@ -134,14 +134,15 @@ pub(crate) fn shell_syntax_tree(input: &str) -> Result<String> {
 
 pub(crate) fn powershell_syntax_tree(input: &str, projection: &str) -> Result<String> {
     check_shell_syntax_source(input)?;
+    let cache = platform::process::PowerShellCache::new()?;
     let completed = bounded(
-        Tool::Pwsh.command().args([
+        cache.apply(Tool::Pwsh.command().args([
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
             "-Command",
             projection,
-        ]),
+        ])),
         Some(input),
     )?;
     ensure!(
@@ -836,6 +837,27 @@ pub fn run() -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn powershell_syntax_parsers_own_distinct_caches_until_their_child_exits() -> Result<()> {
+        let projection = "[pscustomobject]@{path=$env:XDG_CACHE_HOME; exists=[IO.Directory]::Exists($env:XDG_CACHE_HOME)} | ConvertTo-Json -Compress";
+        let mut paths = Vec::new();
+        for _ in 0..2 {
+            let report: serde_json::Value =
+                serde_json::from_str(&powershell_syntax_tree("", projection)?)?;
+            assert_eq!(report["exists"], true, "{report}");
+            let path = PathBuf::from(report["path"].as_str().context("parser cache path")?);
+            assert!(
+                !path.exists(),
+                "parser cache survived its child: {}",
+                path.display()
+            );
+            paths.push(path);
+        }
+        assert_ne!(paths[0], paths[1]);
+        Ok(())
+    }
 
     const MANY_FINDINGS: usize = 221;
     #[cfg(unix)]

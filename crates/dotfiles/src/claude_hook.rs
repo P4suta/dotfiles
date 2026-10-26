@@ -467,6 +467,9 @@ fn policy_refusals_with(
     for message in legacy.refusals {
         findings.push(blocked(LEGACY, GateRefusal, message));
     }
+    for message in legacy.wrapper_refusals {
+        findings.push(blocked("hook.wrapper", GateRefusal, message));
+    }
     for message in crate::lint_hook::scripts(&legacy.scripts) {
         findings.push(blocked("hook.lint", GateRefusal, message));
     }
@@ -918,6 +921,42 @@ mod tests {
                 .iter()
                 .any(|finding| finding.message.contains("`cat` is a legacy command"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn unsupported_wrappers_name_the_command_as_a_policy_refusal() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(directory.path().join("check.sh"), "cat wrong\n")?;
+        for command in [
+            "env BASH_ENV=reset.sh bash check.sh",
+            "bash --login check.sh",
+            "mise x -C /unresolved -- bash check.sh",
+        ] {
+            let event = json!({
+                "tool_name":"Bash", "cwd":directory.path(),
+                "tool_input":{"command":command}
+            });
+            let findings = policy_refusals_with(&event.to_string(), test_bundle)?;
+            let messages: Vec<_> = findings.iter().map(|finding| &finding.message).collect();
+            assert!(
+                findings.iter().any(|finding| finding.rule == "hook.wrapper"
+                    && finding.source == skill_ops::incident_rules::Source::GateRefusal
+                    && finding.message.contains(command)),
+                "{command}: {messages:?}"
+            );
+            assert!(
+                !findings
+                    .iter()
+                    .any(|finding| finding.rule == INSPECTION || finding.message.contains("`cat`")),
+                "{command}: {messages:?}"
+            );
+        }
+        let event = json!({
+            "tool_name":"Bash", "cwd":directory.path(),
+            "tool_input":{"command":"mise x -- cargo check"}
+        });
+        assert!(policy_refusals_with(&event.to_string(), test_bundle)?.is_empty());
         Ok(())
     }
 
