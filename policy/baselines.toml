@@ -8,7 +8,7 @@ exact = 353
 
 [[metric]]
 metric = "probes"
-exact = 565
+exact = 566
 
 # The three unsafe blocks and the console handler of the Win32 sites in policy/unsafe-sites.toml, and the read past a slice in the Miri fixture.
 [[metric]]

@@ -1,5 +1,6 @@
 ---
-status: proposed
+status: amended
+changed_by: [import-unborn-artifacts-after-same-issue-selections.md]
 date: 2026-10-13
 ---
 # Keep local issue authority separate from remote publication

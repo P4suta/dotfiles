@@ -1292,12 +1292,18 @@ struct InitialImportFixture {
 
 impl InitialImportFixture {
     fn new() -> Result<Self> {
+        let fixture = Self::prepared()?;
+        let root = fixture.project.path();
+        fs::write(root.join("main.rs"), "fn main() {}\n")?;
+        git(root, &["add", "main.rs"])?;
+        Ok(fixture)
+    }
+
+    fn prepared() -> Result<Self> {
         let fixture = Self {
             project: tempfile::tempdir()?,
             home: tempfile::tempdir()?,
         };
-        let root = fixture.project.path();
-        fs::write(root.join("main.rs"), "fn main() {}\n")?;
         assert!(fixture.command(&["init"])?.output()?.status.success());
         let body = fixture.home.path().join("issue.md");
         fs::write(
@@ -1318,7 +1324,6 @@ impl InitialImportFixture {
             "{}",
             String::from_utf8_lossy(&created.stderr)
         );
-        git(root, &["add", "main.rs"])?;
         Ok(fixture)
     }
 
@@ -1410,6 +1415,214 @@ impl InitialImportFixture {
         })
         .context("initial import state missing")
     }
+}
+
+#[test]
+fn an_initial_local_import_replaces_same_issue_unborn_selections() -> Result<()> {
+    let fixture = InitialImportFixture::prepared()?;
+    let root = fixture.project.path();
+    let home = fixture.home.path();
+    assert!(
+        fixture
+            .command(&[
+                "select",
+                "--issue",
+                "1",
+                "--path",
+                "main.rs",
+                "--path",
+                "future.rs"
+            ])?
+            .output()?
+            .status
+            .success()
+    );
+    fs::write(root.join("main.rs"), "fn main() {}\n")?;
+    fs::write(root.join(".editorconfig"), "root = true\n")?;
+    git(root, &["add", "--all"])?;
+    let scope = [
+        "--issue",
+        "1",
+        "--path",
+        "main.rs",
+        "--path",
+        ".editorconfig",
+    ];
+    let before = fs::read(fixture.state()?)?;
+    let preview = fixture.command(&["import-preview"])?.args(scope).output()?;
+    assert!(
+        preview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&preview.stderr)
+    );
+    let preview: serde_json::Value = serde_json::from_slice(&preview.stdout)?;
+    assert_eq!(
+        preview["paths"],
+        serde_json::json!([".editorconfig", "main.rs"])
+    );
+    assert_eq!(fs::read(fixture.state()?)?, before);
+    assert!(
+        platform::issue_context::guard_for(root, &[PathBuf::from(".editorconfig")], home).is_err()
+    );
+    fixture.signer()?;
+    let snapshot = preview["snapshot"].as_str().context("snapshot")?;
+    let imported = fixture
+        .command(&["import"])?
+        .args(scope)
+        .args(["--snapshot", snapshot])
+        .output()?;
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    let state: serde_json::Value = serde_json::from_slice(&fs::read(fixture.state()?)?)?;
+    assert_eq!(
+        state["selections"].as_array().context("selections")?.len(),
+        1
+    );
+    assert_eq!(
+        state["selections"][0]["scopes"],
+        serde_json::json!([".editorconfig", "main.rs"])
+    );
+    assert_eq!(state["imports"][0]["baseline"]["tree"], preview["tree"]);
+    assert!(fixture.command(&["check"])?.output()?.status.success());
+    platform::issue_context::guard_for(root, &[PathBuf::from(".editorconfig")], home)?;
+    assert!(platform::issue_context::guard_for(root, &[PathBuf::from("future.rs")], home).is_err());
+    assert_eq!(
+        platform::local_issues::source(root)?,
+        platform::local_issues::Source::Unborn
+    );
+    assert_eq!(git(root, &["for-each-ref", "--format=%(refname)"])?, "");
+    assert!(
+        !fixture
+            .command(&["import"])?
+            .args(scope)
+            .args(["--snapshot", snapshot])
+            .output()?
+            .status
+            .success()
+    );
+    assert!(!home.join("offline-gh.log").exists());
+    Ok(())
+}
+
+#[test]
+fn an_initial_local_import_refuses_selections_for_other_issues_or_branches() -> Result<()> {
+    let fixture = InitialImportFixture::prepared()?;
+    let root = fixture.project.path();
+    let body = fixture.home.path().join("issue.md");
+    assert!(
+        fixture
+            .command(&["create", "--title", "Preserve another scope", "--body-file"])?
+            .arg(body)
+            .output()?
+            .status
+            .success()
+    );
+    assert!(
+        fixture
+            .command(&["select", "--issue", "2", "--path", "main.rs"])?
+            .output()?
+            .status
+            .success()
+    );
+    fs::write(root.join("main.rs"), "fn main() {}\n")?;
+    git(root, &["add", "main.rs"])?;
+    let before = fs::read(fixture.state()?)?;
+    assert!(fixture.preview().is_err());
+    assert!(!fixture.import("unreviewed")?.status.success());
+    assert_eq!(fs::read(fixture.state()?)?, before);
+
+    let fixture = InitialImportFixture::prepared()?;
+    let root = fixture.project.path();
+    assert!(
+        fixture
+            .command(&["select", "--issue", "1", "--path", "main.rs"])?
+            .output()?
+            .status
+            .success()
+    );
+    fs::write(root.join("main.rs"), "fn main() {}\n")?;
+    git(root, &["add", "main.rs"])?;
+    let preview = fixture.preview()?;
+    let snapshot = preview["snapshot"].as_str().context("snapshot")?;
+    let before = fs::read(fixture.state()?)?;
+    git(root, &["symbolic-ref", "HEAD", "refs/heads/other"])?;
+    assert!(fixture.preview().is_err());
+    assert!(!fixture.import(snapshot)?.status.success());
+    assert_eq!(fs::read(fixture.state()?)?, before);
+    Ok(())
+}
+
+#[test]
+fn a_born_local_project_still_refuses_initial_import_and_late_selection() -> Result<()> {
+    let fixture = InitialImportFixture::prepared()?;
+    let root = fixture.project.path();
+    assert!(
+        fixture
+            .command(&["select", "--issue", "1", "--path", "main.rs"])?
+            .output()?
+            .status
+            .success()
+    );
+    fs::write(root.join("main.rs"), "fn main() {}\n")?;
+    git(root, &["add", "main.rs"])?;
+    fixture.signer()?;
+    git(root, &["commit", "--quiet", "-m", "feat: preserve source"])?;
+    fs::write(root.join(".editorconfig"), "root = true\n")?;
+    git(root, &["add", ".editorconfig"])?;
+    let scope = [
+        "--issue",
+        "1",
+        "--path",
+        "main.rs",
+        "--path",
+        ".editorconfig",
+    ];
+    let before = fs::read(fixture.state()?)?;
+    let selected = fixture.command(&["select"])?.args(scope).output()?;
+    assert!(!selected.status.success());
+    assert!(String::from_utf8_lossy(&selected.stderr).contains("late local selection"));
+    for action in ["import-preview", "import"] {
+        let mut command = fixture.command(&[action])?;
+        command.args(scope);
+        if action == "import" {
+            command.args(["--snapshot", "unreviewed"]);
+        }
+        let output = command.output()?;
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("unborn: false"));
+    }
+    assert_eq!(fs::read(fixture.state()?)?, before);
+    Ok(())
+}
+
+#[test]
+fn an_initial_local_import_refuses_a_previously_committed_selection_without_refs() -> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    fixture.signer()?;
+    git(root, &["commit", "--quiet", "-m", "feat: preserve source"])?;
+    assert!(
+        fixture
+            .command(&["select", "--issue", "1", "--path", "main.rs"])?
+            .output()?
+            .status
+            .success()
+    );
+    git(root, &["checkout", "--quiet", "--detach"])?;
+    git(root, &["branch", "--delete", "main"])?;
+    git(root, &["symbolic-ref", "HEAD", "refs/heads/main"])?;
+    assert_eq!(
+        platform::local_issues::source(root)?,
+        platform::local_issues::Source::Unborn
+    );
+    let before = fs::read(fixture.state()?)?;
+    assert!(fixture.preview().is_err());
+    assert!(!fixture.import("unreviewed")?.status.success());
+    assert_eq!(fs::read(fixture.state()?)?, before);
+    Ok(())
 }
 
 #[test]
