@@ -197,10 +197,12 @@ enum Commands {
 #[derive(Subcommand)]
 enum RepositoryRequest {
     Generate {
+        /// A Git remote name or explicit GitHub owner/name whose description to update.
         #[arg(long)]
         remote: Option<String>,
     },
     Check {
+        /// A Git remote name or explicit GitHub owner/name whose description to check.
         #[arg(long)]
         remote: Option<String>,
     },

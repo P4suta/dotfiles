@@ -18,6 +18,7 @@ const DOCUMENTATION_INDEX: &str = "docs/README.md";
 const README_PATH: &str = "README.md";
 const MIT_PATH: &str = "LICENSE-MIT";
 const APACHE_PATH: &str = "LICENSE-APACHE";
+const GITHUB_REPOSITORY_PREFIX: &str = "https://github.com/";
 
 /// The license texts, which the Rust API Guidelines recommend shipping side by side.
 const MIT: &str = include_str!("../assets/repository/LICENSE-MIT");
@@ -287,12 +288,13 @@ pub fn write(root: &Path) -> Result<()> {
 /// Returns an error when the metadata or the GitHub update fails.
 pub fn write_description(root: &Path, remote: &str) -> Result<()> {
     let metadata = metadata(root)?;
+    let repository = github_repository(root, remote)?;
     let status = Tool::Gh
         .command()
         .args([
             "repo",
             "edit",
-            remote,
+            &repository,
             "--description",
             metadata.summary.trim_end_matches('.'),
         ])
@@ -564,6 +566,23 @@ fn contributors(root: &Path, metadata: &Repository) -> Result<Vec<String>> {
         .collect())
 }
 
+fn github_repository(root: &Path, remote: &str) -> Result<String> {
+    let url = platform::signed_git::git(root, &["remote", "get-url", "--", remote], None);
+    let candidate = match &url {
+        Ok(url) => url.trim().to_owned(),
+        Err(_) => format!("{GITHUB_REPOSITORY_PREFIX}{remote}"),
+    };
+    platform::source_identity::github_slug(&candidate).ok_or_else(|| {
+        Refusal::new(
+            "repository.remote",
+            "--remote requires a Git remote naming a GitHub repository or an explicit owner/name",
+            "choose a configured GitHub remote or an explicit owner/name",
+        )
+        .evidence(format!("remote: {remote}"))
+        .into()
+    })
+}
+
 /// The GitHub description of `repository`, through `gh`.
 fn description(repository: &str) -> Result<String> {
     let output = Tool::Gh
@@ -610,7 +629,10 @@ pub fn check(root: &Path, remote: Option<&str>) -> Result<()> {
         Vec::new()
     };
     let described = match remote {
-        Some(repository) => description(repository)? == metadata.summary.trim_end_matches('.'),
+        Some(remote) => {
+            description(&github_repository(root, remote)?)?
+                == metadata.summary.trim_end_matches('.')
+        }
         None => true,
     };
     let (rule, cause, next, evidence) = match drift(off.is_empty(), missing.is_empty(), stale.is_empty(), described) {
