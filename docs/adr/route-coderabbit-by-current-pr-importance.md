@@ -1,6 +1,6 @@
 ---
 status: amended
-changed_by: [keep-workflow-evidence-local.md]
+changed_by: [keep-workflow-evidence-local.md, require-pr-review-by-repository-policy.md]
 date: 2026-10-13
 ---
 # Route CodeRabbit by current PR importance

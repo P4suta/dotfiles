@@ -24,6 +24,8 @@ pub(crate) struct Packet {
 #[serde(deny_unknown_fields)]
 struct Verified {
     object: String,
+    #[serde(default)]
+    always_pr: bool,
 }
 
 pub(super) fn home() -> Result<PathBuf> {
@@ -158,24 +160,28 @@ fn verified_path(repository: &str, pr: u64) -> Result<PathBuf> {
 }
 
 /// Records `object` as the assessment that `pr` last verified.
-pub(crate) fn remember(repository: &str, pr: u64, object: &str) -> Result<()> {
+pub(crate) fn remember(repository: &str, pr: u64, object: &str, always_pr: bool) -> Result<()> {
     write(
         &verified_path(repository, pr)?,
         &serde_json::to_vec(&Verified {
             object: hexadecimal(object)?.into(),
+            always_pr,
         })?,
     )
 }
 
 /// The assessment that `pr` last verified on this machine.
-pub(crate) fn remembered(repository: &str, pr: u64) -> Result<Option<String>> {
+pub(crate) fn remembered(repository: &str, pr: u64) -> Result<Option<(String, bool)>> {
     let path = verified_path(repository, pr)?;
     if !path.try_exists()? {
         return Ok(None);
     }
     let verified: Verified = serde_json::from_slice(&fs::read(&path)?)
         .map_err(|_| anyhow::anyhow!("the local record of a verified assessment is malformed"))?;
-    Ok(Some(hexadecimal(&verified.object)?.to_owned()))
+    Ok(Some((
+        hexadecimal(&verified.object)?.to_owned(),
+        verified.always_pr,
+    )))
 }
 
 fn pause_path(home: &Path, repository: &str, pr: u64) -> Result<PathBuf> {
@@ -201,6 +207,23 @@ pub(crate) fn clear_pause(repository: &str, pr: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remembered_routes_preserve_earlier_records_and_repository_overrides() -> Result<()> {
+        let earlier: Verified = serde_json::from_str(r#"{"object":"ab12"}"#)?;
+        assert!(!earlier.always_pr);
+        for always_pr in [false, true] {
+            let bytes = serde_json::to_vec(&Verified {
+                object: "ab12".into(),
+                always_pr,
+            })?;
+            assert_eq!(
+                serde_json::from_slice::<Verified>(&bytes)?.always_pr,
+                always_pr
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn repository_directories_refuse_traversal_and_fold_case() -> Result<()> {

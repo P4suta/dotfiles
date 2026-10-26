@@ -1,7 +1,7 @@
 use super::evidence::{self, Packet};
 use super::{Github, Target, context};
 use anyhow::{Context, Result, ensure};
-use rules::review_routing_rules::{self as policy, ReviewLevel, ReviewRoute};
+use rules::review_routing_rules::{self as policy, ReviewLevel, ReviewPolicy, ReviewRoute};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -18,6 +18,9 @@ const GIT_OBJECT_LENGTHS: [usize; 2] = [40, 64];
 /// Starts the line that once carried a signed assessment in a PR body, which a published document now refuses.
 pub(super) const PACKET_PREFIX: &str = "<!-- pr-review-assessment:";
 const MAX_ASSESSMENT_BYTES: usize = 16 * 1024;
+const MAX_REVIEW_POLICY_BYTES: u64 = 16 * 1024;
+const REVIEW_POLICIES: &str = "review-policies";
+const REVIEW_POLICY_FILE: &str = "policy.json";
 const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
 const PAGE_SIZE: usize = 100;
 const MAX_PAGES: usize = 20;
@@ -27,6 +30,56 @@ const REVIEW_CONTEXT: &str = "CodeRabbit";
 const RUN_ID_LENGTH: usize = 36;
 const RUN_ID_SEPARATORS: [usize; 4] = [8, 13, 18, 23];
 pub(super) const CRITICAL_LABEL: &str = "review:critical";
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RepositoryReviewPolicy {
+    repository: String,
+    review: RepositoryReview,
+    reason: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RepositoryReview {
+    AlwaysPr,
+}
+
+fn repository_policy(home: &Path, repository: &str) -> Result<ReviewPolicy> {
+    let path = evidence::directory(home, REVIEW_POLICIES, repository)?.join(REVIEW_POLICY_FILE);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ReviewPolicy::Importance);
+        }
+        Err(error) => return Err(error).context("can't inspect repository review policy"),
+    };
+    ensure!(
+        metadata.is_file(),
+        "repository review policy must be a regular file"
+    );
+    let mut bytes = Vec::new();
+    fs::File::open(&path)?
+        .take(MAX_REVIEW_POLICY_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        u64::try_from(bytes.len())? <= MAX_REVIEW_POLICY_BYTES,
+        "repository review policy exceeds its byte bound"
+    );
+    let policy: RepositoryReviewPolicy = serde_json::from_slice(&bytes)
+        .context("repository review policy needs repository, review: always_pr, and reason")?;
+    ensure!(
+        policy.repository.eq_ignore_ascii_case(repository),
+        "repository review policy belongs to another repository"
+    );
+    ensure!(
+        super::single_line(&policy.reason),
+        "repository review policy needs a one-line reason"
+    );
+    Ok(match policy.review {
+        RepositoryReview::AlwaysPr => ReviewPolicy::AlwaysPr,
+    })
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -375,6 +428,7 @@ struct HistoricalReview {
 
 pub(super) struct Checked {
     pub route: ReviewRoute,
+    repository_policy: ReviewPolicy,
     /// The signed assessment object this check authenticated.
     pub object: String,
     binding: Binding,
@@ -544,7 +598,8 @@ fn check_at(
         &current.binding.diff_sha256,
     )?;
     let statement = authenticate(&current, &packet, signers.path(), signer)?;
-    let route = policy::route(statement.assessment.level.into());
+    let repository_policy = repository_policy(&evidence::home()?, &target.repo)?;
+    let route = policy::repository_route(statement.assessment.level.into(), repository_policy);
     let ignore_count = body
         .lines()
         .filter(|line| line.trim() == REVIEW_EXCLUSION)
@@ -558,6 +613,7 @@ fn check_at(
     }
     Ok(Checked {
         route,
+        repository_policy,
         object: packet.object,
         binding: current.binding,
         root: current.root,
@@ -655,6 +711,20 @@ pub(super) fn paused(checked: &Checked) -> Result<bool> {
     })
 }
 
+pub(super) fn admit_publication(checked: &Checked, body: &str) -> Result<()> {
+    if checked.repository_policy == ReviewPolicy::AlwaysPr {
+        ensure!(
+            !paused(checked)?,
+            "repository PR review route is paused by the owner; keep this operation pending until the owner resumes PR reviews"
+        );
+        ensure!(
+            !body.lines().any(|line| line.trim() == REVIEW_EXCLUSION),
+            "repository PR review policy requires removing the standing CodeRabbit suppression"
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn completion(
     checked: &Checked,
     target: &Target,
@@ -692,7 +762,7 @@ pub(super) fn completion(
         ReviewRoute::Pr => {
             ensure!(
                 target.cli_receipt.is_none(),
-                "critical importance requires PR review, not a CLI substitute"
+                "the selected PR review route does not accept a CLI substitute"
             );
             require_pr_review(github, target, pr, &checked.binding, &checked.assessment)?;
         }
@@ -803,7 +873,7 @@ pub(super) fn labels(checked: &Checked, labels: &[super::ReviewLabel]) -> Result
     }
     ensure!(
         checked.route == ReviewRoute::Pr || !seen.contains(&CRITICAL_LABEL.to_owned()),
-        "noncritical PR cannot opt into automatic CodeRabbit PR review"
+        "the selected review route cannot opt into automatic CodeRabbit PR review"
     );
     Ok(())
 }
@@ -896,7 +966,7 @@ fn validate_pr_evidence(
             missing_pr_review(
                 binding,
                 pr,
-                "critical PR has no submitted CodeRabbit review of its current head",
+                "PR has no submitted CodeRabbit review of its current head",
             )
         })?;
     validate_submitted_review(review, binding, assessment)?;
@@ -960,7 +1030,7 @@ fn validate_submitted_review(
             .evidence
             .iter()
             .all(|evidence| files.contains(&evidence.path)),
-        "critical severity-bearing source paths were not selected by the completed full PR review"
+        "assessment evidence paths were not selected by the completed full PR review"
     );
     Ok(())
 }
@@ -1019,16 +1089,13 @@ fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTree
         .context("CodeRabbit reviewed range missing")?;
     ensure!(
         base == expected_base && reviewed == head,
-        "critical review must cover the full canonical PR base-to-head range"
+        "PR review must cover the full canonical PR base-to-head range"
     );
     let count = unique(FILES)?
         .strip_suffix(")</summary>")
         .context("CodeRabbit selected file inventory malformed")?
         .parse::<usize>()?;
-    ensure!(
-        count > 0,
-        "CodeRabbit selected no files for the critical review"
-    );
+    ensure!(count > 0, "CodeRabbit selected no files for the PR review");
     let selected = body
         .split_once(FILES)
         .context("CodeRabbit selected files missing")?
@@ -1411,7 +1478,7 @@ pub(super) fn admit_ready(
     pr: u64,
     body: &str,
 ) -> Result<()> {
-    if checked.route == ReviewRoute::Pr {
+    if checked.route == ReviewRoute::Pr && checked.repository_policy == ReviewPolicy::Importance {
         ensure!(
             !paused(checked)?,
             "critical PR review is paused; keep this PR draft until its required route resumes"
@@ -1423,6 +1490,7 @@ pub(super) fn admit_ready(
         require_history(checked, target, github)?;
         require_resolved_threads(github, target, pr, &checked.binding.head)
     } else {
+        admit_publication(checked, body)?;
         completion(checked, target, github, pr)
     }
 }
@@ -1434,8 +1502,8 @@ fn previous(
     pr: u64,
     signer: &str,
     root: &Path,
-) -> Result<Option<Statement>> {
-    let Some(object) = evidence::remembered(&target.repo, pr)? else {
+) -> Result<Option<(Statement, ReviewPolicy)>> {
+    let Some((object, always_pr)) = evidence::remembered(&target.repo, pr)? else {
         return Ok(None);
     };
     let packet = evidence::object(&target.repo, &object)?;
@@ -1453,12 +1521,14 @@ fn previous(
         &prior.binding.head,
     )?;
     let signers = context::signers_for_login(github, signer)?;
-    Ok(Some(authenticate(
-        &current,
-        &packet,
-        signers.path(),
-        signer,
-    )?))
+    Ok(Some((
+        authenticate(&current, &packet, signers.path(), signer)?,
+        if always_pr {
+            ReviewPolicy::AlwaysPr
+        } else {
+            ReviewPolicy::Importance
+        },
+    )))
 }
 
 fn cli_binding(
@@ -1519,11 +1589,14 @@ fn prepare_history(
     };
     let live = super::live_document(github, target, pr)?;
     let signer = assessment_signer(github, target, &live.author, &live.source)?;
-    let Some(prior) = previous(github, target, pr, signer, &current.root)? else {
+    let Some((prior, prior_policy)) = previous(github, target, pr, signer, &current.root)? else {
         return Ok(None);
     };
-    if policy::route(prior.assessment.level.into()) == ReviewRoute::Cli
-        && policy::route(assessment.level.into()) != ReviewRoute::Cli
+    if policy::repository_route(prior.assessment.level.into(), prior_policy) == ReviewRoute::Cli
+        && policy::repository_route(
+            assessment.level.into(),
+            repository_policy(&evidence::home()?, &target.repo)?,
+        ) != ReviewRoute::Cli
     {
         let (object, findings) = historical_review(
             github,
@@ -1607,8 +1680,10 @@ pub(super) fn preserve_edit(
     pr: u64,
     checked: &Checked,
 ) -> Result<()> {
-    if let Some(prior) = previous(github, target, pr, &checked.signer, &checked.root)? {
-        if policy::route(prior.assessment.level.into()) == ReviewRoute::Cli
+    if let Some((prior, prior_policy)) =
+        previous(github, target, pr, &checked.signer, &checked.root)?
+    {
+        if policy::repository_route(prior.assessment.level.into(), prior_policy) == ReviewRoute::Cli
             && checked.route != ReviewRoute::Cli
         {
             let history = checked.history.as_ref().context("prior high review history must be carried into the signed reassessment; run assess --pr with --prior-cli-receipt")?;
@@ -1632,9 +1707,78 @@ pub(super) fn preserve_edit(
     require_history(checked, target, github)
 }
 
+pub(super) fn remember(checked: &Checked, target: &Target, github: &Github, pr: u64) -> Result<()> {
+    if checked.repository_policy == ReviewPolicy::AlwaysPr {
+        preserve_edit(github, target, pr, checked)?;
+    }
+    evidence::remember(
+        &target.repo,
+        pr,
+        &checked.object,
+        checked.repository_policy == ReviewPolicy::AlwaysPr,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repository_policy_defaults_and_selects_only_the_named_repository() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        assert_eq!(
+            repository_policy(home.path(), "P4suta/Hellooo")?,
+            ReviewPolicy::Importance
+        );
+        let directory = evidence::directory(home.path(), REVIEW_POLICIES, "P4suta/Hellooo")?;
+        fs::create_dir_all(&directory)?;
+        fs::write(directory.join(REVIEW_POLICY_FILE), br#"{"repository":"P4suta/Hellooo","review":"always_pr","reason":"Every PR requires review."}"#)?;
+        assert_eq!(
+            repository_policy(home.path(), "p4suta/hellooo")?,
+            ReviewPolicy::AlwaysPr
+        );
+        assert_eq!(
+            repository_policy(home.path(), "P4suta/dotfiles")?,
+            ReviewPolicy::Importance
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn repository_policy_refuses_invalid_or_unbounded_owner_input() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let directory = evidence::directory(home.path(), REVIEW_POLICIES, "P4suta/Hellooo")?;
+        fs::create_dir_all(&directory)?;
+        let path = directory.join(REVIEW_POLICY_FILE);
+        for input in [
+            "{truncated".to_owned(),
+            r#"{"repository":"P4suta/dotfiles","review":"always_pr","reason":"Review."}"#.into(),
+            r#"{"repository":"P4suta/Hellooo","review":"cli","reason":"Review."}"#.into(),
+            r#"{"repository":"P4suta/Hellooo","review":"always_pr","reason":""}"#.into(),
+            r#"{"repository":"P4suta/Hellooo","review":"always_pr","reason":"First\nSecond"}"#.into(),
+            r#"{"repository":"P4suta/Hellooo","review":"always_pr","reason":"Review.","paused":false}"#.into(),
+            r#"{"repository":"P4suta/Hellooo","review":"always_pr","review":"always_pr","reason":"Review."}"#.into(),
+            " ".repeat(usize::try_from(MAX_REVIEW_POLICY_BYTES)? + 1),
+        ] {
+            fs::write(&path, input)?;
+            assert!(repository_policy(home.path(), "P4suta/Hellooo").is_err());
+        }
+        platform::cleanup::remove_file(&path);
+        fs::create_dir(&path)?;
+        assert!(repository_policy(home.path(), "P4suta/Hellooo").is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_policy_refuses_a_dangling_symlink_instead_of_defaulting() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let directory = evidence::directory(home.path(), REVIEW_POLICIES, "P4suta/Hellooo")?;
+        fs::create_dir_all(&directory)?;
+        std::os::unix::fs::symlink("missing-policy", directory.join(REVIEW_POLICY_FILE))?;
+        assert!(repository_policy(home.path(), "P4suta/Hellooo").is_err());
+        Ok(())
+    }
 
     #[test]
     fn unrelated_source_failures_preserve_their_original_error_types() {
