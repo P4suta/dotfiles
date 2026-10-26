@@ -66,7 +66,7 @@
 | [2026-10-13 Authenticate issue context at edit and integration boundaries](authenticate-issue-context-at-edit-and-integration-boundaries.md) | amended | [2026-10-20](keep-workflow-evidence-local.md) |
 | [2026-10-13 Bind private verifier phase evidence](bind-private-verifier-phase-evidence.md) | proposed |  |
 | [2026-10-13 Enable experimental skill maintenance only through explicit local opt-in](experimental-skill-maintenance-by-explicit-opt-in.md) | accepted |  |
-| [2026-10-13 Keep local issue authority separate from remote publication](keep-local-issue-authority-separate-from-remote-publication.md) | proposed |  |
+| [2026-10-13 Keep local issue authority separate from remote publication](keep-local-issue-authority-separate-from-remote-publication.md) | amended | [2026-10-26](import-unborn-artifacts-after-same-issue-selections.md) |
 | [2026-10-13 Keep mutation testing local while CI verifies its declared proof campaign](local-mutation-and-scoped-ci-proofs.md) | amended | [2026-10-19](native-verification-with-lightweight-ci.md) |
 | [2026-10-13 Protect local host candidate execution](protect-local-host-candidate-execution.md) | proposed |  |
 | [2026-10-13 Run Renovate through a process from the same source build](renovate-behind-a-source-matched-process.md) | proposed |  |
@@ -120,3 +120,4 @@
 | [2026-10-25 Hold mutation campaign temporary ownership](hold-mutation-campaign-temporary-ownership.md) | proposed |  |
 | [2026-10-25 Resolve script inspection from invocation directories](resolve-script-inspection-from-invocation-directories.md) | proposed |  |
 | [2026-10-25 Verify CI pin readers from the offered source](verify-ci-pin-readers-from-offered-source.md) | proposed |  |
+| [2026-10-26 Import unborn artifacts after same-issue selections](import-unborn-artifacts-after-same-issue-selections.md) | proposed |  |

@@ -552,8 +552,11 @@ fn initial_baseline(
             && git(root, &["for-each-ref", "--format=%(refname)"], None)?
                 .trim()
                 .is_empty(),
-        unused: project.selections.is_empty()
-            && project.remote_links.is_empty()
+        compatible_history: project.selections.iter().all(|selection| {
+            selection.issue == issue
+                && selection.branch == baseline.branch
+                && selection.source == Source::Unborn
+        }) && project.remote_links.is_empty()
             && project.imports.is_empty(),
         open: project
             .issues
@@ -579,7 +582,7 @@ fn initial_baseline(
     };
     ensure!(
         rules::pr_rules::initial_import(facts) == rules::pr_rules::InitialImport::Ready,
-        "initial import requires a local unborn unused project, an open issue, a nonempty staged scoped baseline without unstaged or untracked extras, and an unchanged preview: {facts:?}"
+        "initial import requires a local unborn project with compatible selection history, an open issue, a nonempty staged scoped baseline without unstaged or untracked extras, and an unchanged preview: {facts:?}"
     );
     Ok(baseline)
 }
@@ -646,7 +649,7 @@ pub fn import_initial(root: &Path, issue: u64, scopes: &[PathBuf], expected: &st
         initial_baseline(&root, &project, issue, scopes, Some(expected))? == import.baseline,
         "initial import baseline changed before persistence"
     );
-    project.selections.push(selection);
+    project.selections = vec![selection];
     project.imports.push(import);
     save(&root, &home, &mut project, Persistence::Local)
 }
