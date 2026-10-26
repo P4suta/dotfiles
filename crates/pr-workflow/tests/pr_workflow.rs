@@ -1807,6 +1807,110 @@ fn local_issues_keep_separate_scopes_and_refuse_closed_stale_or_late_work() -> R
 }
 
 #[test]
+fn local_selection_names_missing_ignore_files_before_generated_paths() -> Result<()> {
+    let fixture = Fixture::new("Preserve effective project ignore rules.\n")?;
+    let root = fixture.directory.path();
+    let home = fixture.context_home.path();
+    git(root, &["remote", "remove", "origin"])?;
+    let ignore = "node_modules/\n.cloudflare/\n";
+    fs::write(root.join(".gitignore"), ignore)?;
+    git(root, &["add", ".gitignore"])?;
+    git(
+        root,
+        &["commit", "--quiet", "-m", "Ignore generated artifacts"],
+    )?;
+    assert!(
+        local_command(root, home, &["init"])?
+            .output()?
+            .status
+            .success()
+    );
+    let created = local_command(
+        root,
+        home,
+        &["create", "--title", "Preserve ignore rules", "--body-file"],
+    )?
+    .arg(&fixture.body)
+    .output()?;
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(
+        local_command(
+            root,
+            home,
+            &["select", "--issue", "1", "--path", ".gitignore"]
+        )?
+        .output()?
+        .status
+        .success()
+    );
+    for directory in ["node_modules/package", ".cloudflare/state"] {
+        fs::create_dir_all(root.join(directory))?;
+        fs::write(root.join(directory).join("generated.json"), "{}\n")?;
+    }
+    let selected = local_command(
+        root,
+        home,
+        &[
+            "select",
+            "--issue",
+            "1",
+            "--path",
+            ".gitignore",
+            "--path",
+            "main.rs",
+        ],
+    )?
+    .output()?;
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    fs::remove_file(root.join(".gitignore"))?;
+    for staged in [false, true] {
+        if staged {
+            git(root, &["add", "-u"])?;
+        }
+        let refused = local_command(root, home, &["select", "--issue", "1", "--path", "main.rs"])?
+            .output()?;
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(!refused.status.success());
+        assert!(
+            stderr.contains("missing ignore file .gitignore"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("generated.json"), "{stderr}");
+    }
+    Ok(())
+}
+
+#[test]
+fn local_selection_detects_a_missing_indexed_ignore_file_without_a_head() -> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    fs::write(root.join(".gitignore"), "node_modules/\n")?;
+    git(root, &["add", ".gitignore"])?;
+    fs::remove_file(root.join(".gitignore"))?;
+    fs::create_dir_all(root.join("node_modules/package"))?;
+    fs::write(root.join("node_modules/package/generated.json"), "{}\n")?;
+    let refused = fixture
+        .command(&["select", "--issue", "1", "--path", "main.rs"])?
+        .output()?;
+    assert!(!refused.status.success());
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("missing ignore file .gitignore"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("generated.json"), "{stderr}");
+    Ok(())
+}
+
+#[test]
 fn remote_promotion_requires_checked_start_and_preserves_actual_local_history() -> Result<()> {
     let fixture = Fixture::new("Preserve local inputs.\n")?;
     let root = fixture.directory.path();

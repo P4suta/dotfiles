@@ -16,6 +16,8 @@ Initialization creates local Git metadata when needed and supports a branch with
 It creates no remote repository or placeholder commit.
 Issue creation applies the normal issue document checks.
 Selection refuses existing dirty implementation outside open issue scopes registered before those edits.
+Selection uses Git's tracked changes and nonignored untracked paths without reading generated artifact contents.
+If a committed or indexed `.gitignore` is missing, selection names that file and requires its restoration before listing untracked artifacts.
 Local issues can register separate or overlapping scopes.
 
 An existing directory without a first commit uses an explicit initial import instead of normal selection.

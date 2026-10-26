@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 const STATE: &str = ".local/state/pr-workflow/local-issues";
 const SCHEMA: u8 = 1;
 const MISSING_HEAD: i32 = 1;
+const IGNORE_FILE: &str = ".gitignore";
+const NESTED_IGNORE_FILES: &str = ":(glob)**/.gitignore";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -422,7 +424,7 @@ pub fn select(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<()> {
         !scopes.is_empty(),
         "local implementation needs an explicit --path scope"
     );
-    for path in context::paths(&root, None, false)? {
+    for path in selection_paths(&root)? {
         check_path(&root, &project, &path).with_context(|| {
             format!("late local selection cannot adopt unregistered dirty path {path}")
         })?;
@@ -438,6 +440,31 @@ pub fn select(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<()> {
         .retain(|previous| previous.issue != issue || previous.branch != selection.branch);
     project.selections.push(selection);
     save(&root, &home, &mut project, Persistence::Local)
+}
+
+fn selection_paths(root: &Path) -> Result<Vec<String>> {
+    let inherited = match source(root)? {
+        Source::Commit { head, .. } => Some(format!("--with-tree={head}")),
+        Source::Unborn => None,
+    };
+    let mut arguments = vec!["ls-files", "--cached", "-z"];
+    if let Some(inherited) = &inherited {
+        arguments.push(inherited);
+    }
+    arguments.extend(["--", IGNORE_FILE, NESTED_IGNORE_FILES]);
+    let ignores = crate::signed_git::index_git(root, &arguments)?;
+    for path in ignores.split('\0').filter(|path| !path.is_empty()) {
+        if !fs::symlink_metadata(root.join(path))
+            .is_ok_and(|metadata| metadata.file_type().is_file())
+        {
+            return Err(crate::refusal::Refusal::new(
+                "pr.local-ignore",
+                format!("missing ignore file {path}; local selection needs the versioned ignore rules before listing untracked artifacts"),
+                format!("restore {path} from the index or its source commit, then retry local selection"),
+            ).into());
+        }
+    }
+    context::paths(root, None, false)
 }
 
 fn import_signers(root: &Path, home: &Path) -> Result<PathBuf> {
