@@ -1910,6 +1910,71 @@ fn an_initial_local_import_refuses_an_alternate_or_hidden_index() -> Result<()> 
     Ok(())
 }
 
+#[test]
+fn initial_import_ignores_only_selections_whose_source_commits_no_longer_exist() -> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    commit_first_local_source(root)?;
+    let head = git(root, &["rev-parse", "HEAD"])?;
+    let branch = git(root, &["symbolic-ref", "HEAD"])?;
+    let selected = fixture
+        .command(&["select", "--issue", "1", "--path", "main.rs"])?
+        .output()?;
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    let native = PathBuf::from(git(root, &["--exec-path"])?)
+        .join(format!("git{}", std::env::consts::EXE_SUFFIX));
+    let remove = |arguments: &[&str]| -> Result<()> {
+        let output = fixture_git::command(&native, &root.join("gitconfig"))
+            .current_dir(root)
+            .args(arguments)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "fixture removal: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    };
+    remove(&["update-ref", "-d", &branch])?;
+    assert!(
+        fixture.preview().is_err(),
+        "an existing dangling commit still binds its selection"
+    );
+    remove(&["reflog", "expire", "--expire=now", "--all"])?;
+    remove(&["prune", "--expire=now"])?;
+    assert!(git(root, &["cat-file", "-e", &head]).is_err());
+    let state = fixture.state()?;
+    let before = fs::read(&state)?;
+    let preview = fixture.preview()?;
+    assert_eq!(
+        fs::read(&state)?,
+        before,
+        "preview must leave history unchanged"
+    );
+    fixture.signer()?;
+    let imported = fixture.import(preview["snapshot"].as_str().context("snapshot")?)?;
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert!(
+        fixture.preview().is_err(),
+        "an earlier signed import still prevents another import"
+    );
+    let stored: serde_json::Value = serde_json::from_slice(&fs::read(state)?)?;
+    assert_eq!(stored["selections"][0]["source"]["kind"], "unborn");
+    assert_eq!(
+        stored["selections"].as_array().context("selections")?.len(),
+        1
+    );
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn an_initial_local_import_refuses_paths_whose_normalization_changes_identity() -> Result<()> {
@@ -2021,6 +2086,110 @@ fn local_issues_keep_separate_scopes_and_refuse_closed_stale_or_late_work() -> R
     git(root, &["symbolic-ref", "HEAD", "refs/heads/other"])?;
     assert!(platform::issue_context::guard_for(root, &[PathBuf::from("second.rs")], home).is_err());
     assert!(!home.join("offline-gh.log").exists());
+    Ok(())
+}
+
+#[test]
+fn local_selection_names_missing_ignore_files_before_generated_paths() -> Result<()> {
+    let fixture = Fixture::new("Preserve effective project ignore rules.\n")?;
+    let root = fixture.directory.path();
+    let home = fixture.context_home.path();
+    git(root, &["remote", "remove", "origin"])?;
+    let ignore = "node_modules/\n.cloudflare/\n";
+    fs::write(root.join(".gitignore"), ignore)?;
+    git(root, &["add", ".gitignore"])?;
+    git(
+        root,
+        &["commit", "--quiet", "-m", "Ignore generated artifacts"],
+    )?;
+    assert!(
+        local_command(root, home, &["init"])?
+            .output()?
+            .status
+            .success()
+    );
+    let created = local_command(
+        root,
+        home,
+        &["create", "--title", "Preserve ignore rules", "--body-file"],
+    )?
+    .arg(&fixture.body)
+    .output()?;
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(
+        local_command(
+            root,
+            home,
+            &["select", "--issue", "1", "--path", ".gitignore"]
+        )?
+        .output()?
+        .status
+        .success()
+    );
+    for directory in ["node_modules/package", ".cloudflare/state"] {
+        fs::create_dir_all(root.join(directory))?;
+        fs::write(root.join(directory).join("generated.json"), "{}\n")?;
+    }
+    let selected = local_command(
+        root,
+        home,
+        &[
+            "select",
+            "--issue",
+            "1",
+            "--path",
+            ".gitignore",
+            "--path",
+            "main.rs",
+        ],
+    )?
+    .output()?;
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    fs::remove_file(root.join(".gitignore"))?;
+    for staged in [false, true] {
+        if staged {
+            git(root, &["add", "-u"])?;
+        }
+        let refused = local_command(root, home, &["select", "--issue", "1", "--path", "main.rs"])?
+            .output()?;
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(!refused.status.success());
+        assert!(
+            stderr.contains("missing ignore file .gitignore"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("generated.json"), "{stderr}");
+    }
+    Ok(())
+}
+
+#[test]
+fn local_selection_detects_a_missing_indexed_ignore_file_without_a_head() -> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    fs::write(root.join(".gitignore"), "node_modules/\n")?;
+    git(root, &["add", ".gitignore"])?;
+    fs::remove_file(root.join(".gitignore"))?;
+    fs::create_dir_all(root.join("node_modules/package"))?;
+    fs::write(root.join("node_modules/package/generated.json"), "{}\n")?;
+    let refused = fixture
+        .command(&["select", "--issue", "1", "--path", "main.rs"])?
+        .output()?;
+    assert!(!refused.status.success());
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("missing ignore file .gitignore"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("generated.json"), "{stderr}");
     Ok(())
 }
 

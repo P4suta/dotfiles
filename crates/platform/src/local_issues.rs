@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 const STATE: &str = ".local/state/pr-workflow/local-issues";
 const SCHEMA: u8 = 1;
 const MISSING_HEAD: i32 = 1;
+const IGNORE_FILE: &str = ".gitignore";
+const NESTED_IGNORE_FILES: &str = ":(glob)**/.gitignore";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -422,7 +424,7 @@ pub fn select(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<()> {
         !scopes.is_empty(),
         "local implementation needs an explicit --path scope"
     );
-    for path in context::paths(&root, None, false)? {
+    for path in selection_paths(&root)? {
         check_path(&root, &project, &path).with_context(|| {
             format!("late local selection cannot adopt unregistered dirty path {path}")
         })?;
@@ -438,6 +440,31 @@ pub fn select(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<()> {
         .retain(|previous| previous.issue != issue || previous.branch != selection.branch);
     project.selections.push(selection);
     save(&root, &home, &mut project, Persistence::Local)
+}
+
+fn selection_paths(root: &Path) -> Result<Vec<String>> {
+    let inherited = match source(root)? {
+        Source::Commit { head, .. } => Some(format!("--with-tree={head}")),
+        Source::Unborn => None,
+    };
+    let mut arguments = vec!["ls-files", "--cached", "-z"];
+    if let Some(inherited) = &inherited {
+        arguments.push(inherited);
+    }
+    arguments.extend(["--", IGNORE_FILE, NESTED_IGNORE_FILES]);
+    let ignores = crate::signed_git::index_git(root, &arguments)?;
+    for path in ignores.split('\0').filter(|path| !path.is_empty()) {
+        if !fs::symlink_metadata(root.join(path))
+            .is_ok_and(|metadata| metadata.file_type().is_file())
+        {
+            return Err(crate::refusal::Refusal::new(
+                "pr.local-ignore",
+                format!("missing ignore file {path}; local selection needs the versioned ignore rules before listing untracked artifacts"),
+                format!("restore {path} from the index or its source commit, then retry local selection"),
+            ).into());
+        }
+    }
+    context::paths(root, None, false)
 }
 
 fn import_signers(root: &Path, home: &Path) -> Result<PathBuf> {
@@ -593,6 +620,35 @@ fn baseline_digest(baseline: &InitialBaseline) -> Result<String> {
     )))
 }
 
+fn import_project(root: &Path, home: &Path) -> Result<Project> {
+    let mut project = read(root, home)?;
+    let mut selections = Vec::new();
+    for selection in project.selections {
+        if let Source::Commit { head, .. } = &selection.source {
+            ensure!(
+                rules::shape_rules::commit_id(head.as_bytes()),
+                "invalid local selection source commit"
+            );
+            let head = head.to_ascii_lowercase();
+            let object = git(
+                root,
+                &["cat-file", "--batch-check=%(objectname) %(objecttype)"],
+                Some(format!("{head}\n").as_bytes()),
+            )?;
+            if object.trim() == format!("{head} missing") {
+                continue;
+            }
+            ensure!(
+                object.trim() == format!("{head} commit"),
+                "local selection source is not a commit"
+            );
+        }
+        selections.push(selection);
+    }
+    project.selections = selections;
+    Ok(project)
+}
+
 /// # Errors
 /// Returns an error unless the existing staged artifacts qualify for an explicit initial import.
 pub fn import_preview(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<ImportPreview> {
@@ -600,7 +656,7 @@ pub fn import_preview(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<Imp
     no_remote(&root)?;
     let home = home()?;
     let _lock = lock(&root, &home)?;
-    let project = read(&root, &home)?;
+    let project = import_project(&root, &home)?;
     let baseline = initial_baseline(&root, &project, issue, scopes, None)?;
     Ok(ImportPreview {
         snapshot: baseline_digest(&baseline)?,
@@ -616,12 +672,18 @@ pub fn import_initial(root: &Path, issue: u64, scopes: &[PathBuf], expected: &st
     no_remote(&root)?;
     let home = home()?;
     let _lock = lock(&root, &home)?;
-    let mut project = read(&root, &home)?;
+    let mut project = import_project(&root, &home)?;
     let baseline = initial_baseline(&root, &project, issue, scopes, Some(expected))?;
     let signed =
         crate::signed_git::create_initial(&root, &baseline.tree, &serde_json::to_vec(&baseline)?)?;
     ensure!(
-        initial_baseline(&root, &project, issue, scopes, Some(expected))? == baseline,
+        initial_baseline(
+            &root,
+            &import_project(&root, &home)?,
+            issue,
+            scopes,
+            Some(expected)
+        )? == baseline,
         "initial import baseline changed during signing"
     );
     let selection = Selection {
@@ -646,7 +708,13 @@ pub fn import_initial(root: &Path, issue: u64, scopes: &[PathBuf], expected: &st
         "initial import signature closure differs"
     );
     ensure!(
-        initial_baseline(&root, &project, issue, scopes, Some(expected))? == import.baseline,
+        initial_baseline(
+            &root,
+            &import_project(&root, &home)?,
+            issue,
+            scopes,
+            Some(expected)
+        )? == import.baseline,
         "initial import baseline changed before persistence"
     );
     project.selections = vec![selection];

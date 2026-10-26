@@ -16,6 +16,8 @@ Initialization creates local Git metadata when needed and supports a branch with
 It creates no remote repository or placeholder commit.
 Issue creation applies the normal issue document checks.
 Selection refuses existing dirty implementation outside open issue scopes registered before those edits.
+Selection uses Git's tracked changes and nonignored untracked paths without reading generated artifact contents.
+If a committed or indexed `.gitignore` is missing, selection names that file and requires its restoration before listing untracked artifacts.
 Local issues can register separate or overlapping scopes.
 
 An existing directory without a first commit uses an explicit initial import instead of normal selection.
@@ -67,6 +69,11 @@ An explicit initial import also retains a signed artifact baseline, which the pr
 An unborn selection binds the actual named branch and Git directory.
 The first observed real commit becomes a persisted source binding under the local state lock.
 A selection with a real source binding requires its tree and ancestry.
+
+At the import boundary, a selection whose source commit object no longer exists is stale and doesn't count as a prior selection.
+Import preview and import ignore these stale selections.
+A dangling commit still counts as an existing source, and a previous signed import still prevents another import.
+Preview leaves the local records unchanged, and a successful import replaces the stale selections while preserving their history records.
 
 Adding a remote doesn't grant publication authority.
 After publication becomes authorized, create or select an open issue in the exact remote repository and use the normal checked start.
