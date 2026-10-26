@@ -2111,7 +2111,7 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
     let github = Github::connect()?;
     let live = live_document(&github, target, pr)?;
     let checked = review_policy::live_binding(&github, target, &live.body, &live)?;
-    evidence::remember(&target.repo, pr, &checked.object)?;
+    review_policy::remember(&checked, target, &github, pr)?;
     let document = validate(target, live.title, live.body, r#final)?;
     let destination = destination(&github, &target.repo)?;
     written_to_standard(destination, PULL_REQUEST, &document)?;
@@ -2211,6 +2211,7 @@ fn create(
     let checked =
         review_policy::create_binding(&github, &target, &document.body, head, Some(work.base()))?;
     let head = review_policy::qualified_head(&checked, head)?;
+    review_policy::admit_publication(&checked, &document.body)?;
     admit_review_request(
         Operation::Create,
         target.generation,
@@ -2257,7 +2258,7 @@ fn create(
     let created = gh(&args)?;
     print!("{created}");
     let number = created_number(&created)?;
-    evidence::remember(&target.repo, number, &checked.object)?;
+    review_policy::remember(&checked, &target, &github, number)?;
     work.published(number)?;
     stack.published(&target, number)
 }
@@ -2268,6 +2269,7 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     let github = Github::connect()?;
     let live = live_document(&github, &target, pr)?;
     let checked = review_policy::live_binding(&github, &target, &document.body, &live)?;
+    review_policy::admit_publication(&checked, &document.body)?;
     review_policy::preserve_edit(&github, &target, pr, &checked)?;
     admit_review_request(
         Operation::Edit,
@@ -2307,7 +2309,7 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     ];
     let _body = write_document(&mut args, &document)?;
     print!("{}", gh(&args)?);
-    evidence::remember(&target.repo, pr, &checked.object)?;
+    review_policy::remember(&checked, &target, &github, pr)?;
     settle_pause(&target.repo, pr, checked.route, &document.body)
 }
 
@@ -2373,7 +2375,7 @@ fn make_ready(
     let mut args = arguments("ready", &target.repo);
     args.push(pr.to_string().into());
     print!("{}", gh(&args)?);
-    evidence::remember(&target.repo, pr, &reviewed.object)?;
+    review_policy::remember(&reviewed, target, github, pr)?;
     settle_ready(target, pr, head, marked)?;
     Ok(document.body)
 }
@@ -2535,7 +2537,8 @@ fn merge_state(
             &view.head_ref_oid,
             signer,
         )?;
-        evidence::remember(&target.repo, pr, &reviewed.object)?;
+        review_policy::admit_publication(&reviewed, &view.body)?;
+        review_policy::remember(&reviewed, target, github, pr)?;
         review_policy::validate_live_source(&reviewed, &view.source)?;
         review_policy::labels(&reviewed, &view.labels)?;
         if lifecycle == Lifecycle::Ready

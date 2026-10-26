@@ -2389,6 +2389,16 @@ fn reject_a_high_change_spending_the_pr_review_pool() {
     assert_eq!(production::route(production::ReviewLevel::High), production::ReviewRoute::Pr);
 }
 #[kani::proof]
+fn reject_suppressing_review_under_the_repository_pr_policy() {
+    use production::{ReviewLevel, ReviewPolicy, ReviewRoute, repository_route};
+    assert_eq!(repository_route(ReviewLevel::Medium, ReviewPolicy::AlwaysPr), ReviewRoute::None);
+}
+#[kani::proof]
+fn reject_substituting_cli_under_the_repository_pr_policy() {
+    use production::{ReviewLevel, ReviewPolicy, ReviewRoute, repository_route};
+    assert_eq!(repository_route(ReviewLevel::High, ReviewPolicy::AlwaysPr), ReviewRoute::Cli);
+}
+#[kani::proof]
 fn reject_a_severe_classification_without_concrete_risk() {
     assert!(production::assessment_allowed(production::ReviewLevel::High, None));
 }

@@ -4,12 +4,15 @@ Assess every proposed PR from its actual current diff before publication.
 Use the least severe level justified by concrete remaining consequences after the change's existing protections.
 Don't infer importance from a filename, changed-line count, issue priority, or the presence of security, hooks, CI, dotfiles, or proof tooling.
 
-| Level | Consequences | Required CodeRabbit route |
+| Level | Consequences | Default CodeRabbit route |
 | --- | --- | --- |
 | `low` | Behavior-preserving work or a small recoverable effect. | None. |
 | `medium` | Ordinary bounded behavior changes with effective recovery and no supported severe failure scenario. | None. |
 | `high` | A credible severe failure in an authorization, secret, security, irreversible data, or foundational assurance boundary. | Guarded CLI. |
 | `critical` | A credible catastrophic failure across a broad or systemic boundary with difficult or irreversible recovery. | GitHub PR. |
+
+The [owner-local repository policy](workflow.md#repository-pr-review-policy) selects GitHub PR review for every level while keeping these assessment criteria.
+The default routing and suppression rules below apply without that policy.
 
 Keep `high` and `critical` exceptional.
 Explain the affected code and concrete consequence for every assessment.
@@ -33,8 +36,8 @@ Create drafts before requesting any PR review.
 The severe routes remain exclusive: a `critical` PR doesn't require CLI review, and a `high` PR doesn't require PR review.
 
 Review evidence must cover the same current diff as the assessment.
-For `high`, use the guard's authenticated committed-review receipt rather than a successful invocation, reservation, or handwritten result.
-For `critical`, inspect the actual current-head bot review from the PR merge base, coverage of the assessment's severity-bearing evidence paths, and all paginated unresolved findings.
+For the CLI route, use the guard's authenticated committed-review receipt rather than a successful invocation, reservation, or handwritten result.
+For the PR route, inspect the actual current-head bot review from the PR merge base, coverage of the assessment's evidence paths, and all paginated unresolved findings.
 An incremental-only response or unknown coverage at those paths remains pending until an authorized full PR review covers them.
 Skipped, stale, failed, incomplete, rate-limited, or paused required reviews remain pending.
 A pause never changes the assessed level or satisfies its required route.

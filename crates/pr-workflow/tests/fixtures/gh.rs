@@ -485,6 +485,7 @@ fn view_fields(mut view: String) -> Result<String, Box<dyn std::error::Error>> {
     // An assessed head carries only the standing exclusion of a noncritical route, because the assessment stays in owner-local state.
     if let (Some(_), Some((start, end))) = (assessment, string_field(&view, "body"))
         && std::env::var("GH_FIXTURE_LEVEL").as_deref() != Ok("critical")
+        && std::env::var("GH_FIXTURE_ALWAYS_PR").as_deref() != Ok("true")
         && !view[start..end].contains("@coderabbitai ignore")
     {
         view.insert_str(end, "\\n@coderabbitai ignore\\n");
