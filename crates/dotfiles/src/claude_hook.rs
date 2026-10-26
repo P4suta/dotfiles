@@ -961,6 +961,23 @@ mod tests {
     }
 
     #[test]
+    fn regex_end_anchors_pass_shell_policy_and_open_parameters_still_refuse() -> Result<()> {
+        for command in [r#"rg -v "^\s*$""#, r#"rg "foo$" file"#] {
+            assert!(
+                policy_refusals_with(&bash(command), test_bundle)?.is_empty(),
+                "{command}"
+            );
+        }
+        let findings = policy_refusals_with(&bash(r#"rg "${name" file"#), test_bundle)?;
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "hook.shell-syntax")
+        );
+        Ok(())
+    }
+
+    #[test]
     fn powershell_literal_scripts_use_the_tool_workdir_and_keep_body_checks() -> Result<()> {
         let session = tempfile::tempdir()?;
         let execution = tempfile::tempdir()?;

@@ -162,7 +162,6 @@ pub fn inspect(command: &str) -> Verdict {
                 double = false;
                 broken_path |= windows_path(&body) && body.contains("\\$");
                 frozen |= body.contains("${") && !body.contains('}');
-                frozen |= body.ends_with('$') && !body.ends_with("\\$");
                 body.clear();
             } else {
                 escaped = c == '\\' && !escaped;
@@ -326,6 +325,22 @@ mod tests {
     const REFUSED_FROZEN: Verdict = Verdict::Refuse(Reason::FrozenExpansion);
 
     #[test]
+    fn dollar_followers_without_parameter_openers_are_well_formed() {
+        for command in [
+            r#"rg -v "^\s*$""#,
+            r#"rg "foo$" file"#,
+            r#"printf '%s' "$ " "$\t" "$)" "$|" "$$""#,
+            "printf '%s' \"$\t\"",
+            "printf '%s' $",
+        ] {
+            assert_eq!(inspect(command), Verdict::Admit, "{command}");
+        }
+        for command in [r#"rg "${" file"#, r#"rg "${name" file"#] {
+            assert_eq!(inspect(command), REFUSED_FROZEN, "{command}");
+        }
+    }
+
+    #[test]
     fn both_parsers_must_pass() {
         for [refused, available, errors] in crate::domain::flags() {
             super::proofs::spec_checked(refused, available, errors);
@@ -368,7 +383,6 @@ mod tests {
             ("echo 'never closed", REFUSED_QUOTES),
             ("echo $'open", REFUSED_QUOTES),
             ("echo \"${name\"", REFUSED_FROZEN),
-            ("echo \"prefix $\"", REFUSED_FROZEN),
             ("export DIR='D:\\cargo$k'", REFUSED_FROZEN),
         ] {
             assert_eq!(inspect(command), expected, "{command}");
@@ -396,6 +410,7 @@ mod tests {
             "echo 'D:\\cargo'",
             "echo \"D:/cargo/$name\"",
             "echo \"${name}\"",
+            "echo \"prefix $\"",
             "git commit -m \"quotes: it's fine\"",
             "rg \"pattern\" src",
             "echo a; echo b",
