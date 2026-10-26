@@ -863,6 +863,20 @@ mod tests {
     #[cfg(unix)]
     const TEST_TIMEOUT: Duration = Duration::from_millis(30);
 
+    #[cfg(unix)]
+    #[test]
+    fn powershell_syntax_parsers_own_distinct_caches_until_the_child_exits() -> Result<()> {
+        const PROJECTION: &str = "$cache = $env:XDG_CACHE_HOME; if (-not [IO.Directory]::Exists($cache)) { exit 1 }; [Console]::Write($cache)";
+        let first = PathBuf::from(powershell_syntax_tree("", PROJECTION)?);
+        assert!(first.is_absolute());
+        assert!(!first.exists());
+        let second = PathBuf::from(powershell_syntax_tree("", PROJECTION)?);
+        assert!(second.is_absolute());
+        assert_ne!(first, second);
+        assert!(!second.exists());
+        Ok(())
+    }
+
     #[test]
     fn shell_syntax_limits_reject_oversized_sources_and_truncated_output() {
         let source = "x".repeat(usize::try_from(MAX_FILE_BYTES).unwrap());

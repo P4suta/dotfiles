@@ -1903,11 +1903,15 @@ fn reject_a_late_start_adopting_unregistered_dirty_work() {
 }
 #[kani::proof]
 fn reject_an_initial_import_after_the_baseline_changes() {
-    assert_eq!(production::initial_import(production::InitialImportFacts { local: true, unborn: true, unused: true, open: true, nonempty: true, clean: true, scoped: true, unchanged: false }), production::InitialImport::Ready);
+    assert_eq!(production::initial_import(production::InitialImportFacts { local: true, unborn: true, compatible_history: true, open: true, nonempty: true, clean: true, scoped: true, unchanged: false }), production::InitialImport::Ready);
 }
 #[kani::proof]
 fn reject_an_initial_import_of_committed_work() {
-    assert_eq!(production::initial_import(production::InitialImportFacts { local: true, unborn: false, unused: true, open: true, nonempty: true, clean: true, scoped: true, unchanged: true }), production::InitialImport::Ready);
+    assert_eq!(production::initial_import(production::InitialImportFacts { local: true, unborn: false, compatible_history: true, open: true, nonempty: true, clean: true, scoped: true, unchanged: true }), production::InitialImport::Ready);
+}
+#[kani::proof]
+fn reject_an_initial_import_with_incompatible_history() {
+    assert_eq!(production::initial_import(production::InitialImportFacts { local: true, unborn: true, compatible_history: false, open: true, nonempty: true, clean: true, scoped: true, unchanged: true }), production::InitialImport::Ready);
 }
 #[kani::proof]
 fn reject_implementation_without_a_checked_context() {

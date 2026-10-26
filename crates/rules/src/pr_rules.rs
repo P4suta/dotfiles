@@ -225,7 +225,7 @@ pub enum InitialImport {
 pub struct InitialImportFacts {
     pub local: bool,
     pub unborn: bool,
-    pub unused: bool,
+    pub compatible_history: bool,
     pub open: bool,
     pub nonempty: bool,
     pub clean: bool,
@@ -237,7 +237,7 @@ pub struct InitialImportFacts {
 pub const fn initial_import(facts: InitialImportFacts) -> InitialImport {
     if facts.local
         && facts.unborn
-        && facts.unused
+        && facts.compatible_history
         && facts.open
         && facts.nonempty
         && facts.clean
@@ -699,7 +699,7 @@ mod proofs {
         let [
             local,
             unborn,
-            unused,
+            compatible_history,
             open,
             nonempty,
             clean,
@@ -709,7 +709,7 @@ mod proofs {
         let result = initial_import(InitialImportFacts {
             local,
             unborn,
-            unused,
+            compatible_history,
             open,
             nonempty,
             clean,
@@ -1233,6 +1233,35 @@ mod tests {
         ] {
             assert_eq!(registered_path(scope.as_bytes(), path.as_bytes()), expected);
         }
+    }
+
+    #[test]
+    fn compatible_import_history_never_overrides_a_committed_source() {
+        let facts = InitialImportFacts {
+            local: true,
+            unborn: true,
+            compatible_history: true,
+            open: true,
+            nonempty: true,
+            clean: true,
+            scoped: true,
+            unchanged: true,
+        };
+        assert_eq!(initial_import(facts), InitialImport::Ready);
+        assert_eq!(
+            initial_import(InitialImportFacts {
+                unborn: false,
+                ..facts
+            }),
+            InitialImport::Refused
+        );
+        assert_eq!(
+            initial_import(InitialImportFacts {
+                compatible_history: false,
+                ..facts
+            }),
+            InitialImport::Refused
+        );
     }
 
     #[test]

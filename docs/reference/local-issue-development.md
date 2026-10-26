@@ -30,7 +30,10 @@ pr-workflow local import --root . --issue 1 --path src --path Cargo.toml --snaps
 ```
 
 The preview prints the actual staged tree, paths, and a digest without granting edit authority.
-Import requires that exact digest, an unused local provider, an unborn branch without refs or remotes, an open issue, and no unstaged or nonignored untracked artifacts.
+Import requires that exact digest, an unborn branch without refs or remotes, an open issue, and no unstaged or nonignored untracked artifacts.
+The local provider must have no prior import or remote promotion.
+Import accepts prior selections only for that same issue and branch, with every source binding still unborn.
+Import replaces those selections with the reviewed baseline scopes, so include every scope needed for future edits.
 Every imported artifact must fall within the explicit scopes.
 Alternate indexes and index flags that hide working changes refuse.
 The existing signing identity attests the baseline using trusted owner signers outside the project from the owner's global Git configuration.
@@ -40,7 +43,7 @@ The evidence object has no parent and updates no branch or ref.
 The signed baseline records the existing artifacts and permits future scoped edits, including repairs before the first real commit.
 It doesn't claim the issue preceded those artifacts.
 Changed content, scopes, branch, issue state, or local state revision invalidate an earlier preview.
-Ordinary selection still refuses late adoption, and import refuses an existing source history or a prior selection.
+Ordinary selection still refuses late adoption, and import refuses an existing source history or incompatible selections.
 
 Supported mutation hooks require the selected open issue, actual project and branch, current source, and registered path.
 Read-only discovery and issue preparation remain available.
