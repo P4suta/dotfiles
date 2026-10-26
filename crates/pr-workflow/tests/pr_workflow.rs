@@ -1692,6 +1692,71 @@ fn an_initial_local_import_refuses_an_alternate_or_hidden_index() -> Result<()> 
     Ok(())
 }
 
+#[test]
+fn initial_import_ignores_only_selections_whose_source_commits_no_longer_exist() -> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    commit_first_local_source(root)?;
+    let head = git(root, &["rev-parse", "HEAD"])?;
+    let branch = git(root, &["symbolic-ref", "HEAD"])?;
+    let selected = fixture
+        .command(&["select", "--issue", "1", "--path", "main.rs"])?
+        .output()?;
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    let native = PathBuf::from(git(root, &["--exec-path"])?)
+        .join(format!("git{}", std::env::consts::EXE_SUFFIX));
+    let remove = |arguments: &[&str]| -> Result<()> {
+        let output = fixture_git::command(&native, &root.join("gitconfig"))
+            .current_dir(root)
+            .args(arguments)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "fixture removal: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    };
+    remove(&["update-ref", "-d", &branch])?;
+    assert!(
+        fixture.preview().is_err(),
+        "an existing dangling commit still binds its selection"
+    );
+    remove(&["reflog", "expire", "--expire=now", "--all"])?;
+    remove(&["prune", "--expire=now"])?;
+    assert!(git(root, &["cat-file", "-e", &head]).is_err());
+    let state = fixture.state()?;
+    let before = fs::read(&state)?;
+    let preview = fixture.preview()?;
+    assert_eq!(
+        fs::read(&state)?,
+        before,
+        "preview must leave history unchanged"
+    );
+    fixture.signer()?;
+    let imported = fixture.import(preview["snapshot"].as_str().context("snapshot")?)?;
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert!(
+        fixture.preview().is_err(),
+        "an earlier signed import still prevents another import"
+    );
+    let stored: serde_json::Value = serde_json::from_slice(&fs::read(state)?)?;
+    assert_eq!(stored["selections"][0]["source"]["kind"], "unborn");
+    assert_eq!(
+        stored["selections"].as_array().context("selections")?.len(),
+        1
+    );
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn an_initial_local_import_refuses_paths_whose_normalization_changes_identity() -> Result<()> {

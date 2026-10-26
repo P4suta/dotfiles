@@ -40,7 +40,10 @@ The evidence object has no parent and updates no branch or ref.
 The signed baseline records the existing artifacts and permits future scoped edits, including repairs before the first real commit.
 It doesn't claim the issue preceded those artifacts.
 Changed content, scopes, branch, issue state, or local state revision invalidate an earlier preview.
-Ordinary selection still refuses late adoption, and import refuses an existing source history or a prior selection.
+Ordinary selection still refuses late adoption, and import refuses an existing source history or a prior selection whose source still exists.
+Import preview and import ignore selections whose source commit objects no longer exist.
+A dangling commit still counts as an existing source, and a previous signed import still prevents another import.
+Preview leaves the local records unchanged, and a successful import replaces the stale selections while preserving their history records.
 
 Supported mutation hooks require the selected open issue, actual project and branch, current source, and registered path.
 Read-only discovery and issue preparation remain available.

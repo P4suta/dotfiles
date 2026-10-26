@@ -617,6 +617,35 @@ fn baseline_digest(baseline: &InitialBaseline) -> Result<String> {
     )))
 }
 
+fn import_project(root: &Path, home: &Path) -> Result<Project> {
+    let mut project = read(root, home)?;
+    let mut selections = Vec::new();
+    for selection in project.selections {
+        if let Source::Commit { head, .. } = &selection.source {
+            ensure!(
+                rules::shape_rules::commit_id(head.as_bytes()),
+                "invalid local selection source commit"
+            );
+            let head = head.to_ascii_lowercase();
+            let object = git(
+                root,
+                &["cat-file", "--batch-check=%(objectname) %(objecttype)"],
+                Some(format!("{head}\n").as_bytes()),
+            )?;
+            if object.trim() == format!("{head} missing") {
+                continue;
+            }
+            ensure!(
+                object.trim() == format!("{head} commit"),
+                "local selection source is not a commit"
+            );
+        }
+        selections.push(selection);
+    }
+    project.selections = selections;
+    Ok(project)
+}
+
 /// # Errors
 /// Returns an error unless the existing staged artifacts qualify for an explicit initial import.
 pub fn import_preview(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<ImportPreview> {
@@ -624,7 +653,7 @@ pub fn import_preview(root: &Path, issue: u64, scopes: &[PathBuf]) -> Result<Imp
     no_remote(&root)?;
     let home = home()?;
     let _lock = lock(&root, &home)?;
-    let project = read(&root, &home)?;
+    let project = import_project(&root, &home)?;
     let baseline = initial_baseline(&root, &project, issue, scopes, None)?;
     Ok(ImportPreview {
         snapshot: baseline_digest(&baseline)?,
@@ -640,12 +669,18 @@ pub fn import_initial(root: &Path, issue: u64, scopes: &[PathBuf], expected: &st
     no_remote(&root)?;
     let home = home()?;
     let _lock = lock(&root, &home)?;
-    let mut project = read(&root, &home)?;
+    let mut project = import_project(&root, &home)?;
     let baseline = initial_baseline(&root, &project, issue, scopes, Some(expected))?;
     let signed =
         crate::signed_git::create_initial(&root, &baseline.tree, &serde_json::to_vec(&baseline)?)?;
     ensure!(
-        initial_baseline(&root, &project, issue, scopes, Some(expected))? == baseline,
+        initial_baseline(
+            &root,
+            &import_project(&root, &home)?,
+            issue,
+            scopes,
+            Some(expected)
+        )? == baseline,
         "initial import baseline changed during signing"
     );
     let selection = Selection {
@@ -670,7 +705,13 @@ pub fn import_initial(root: &Path, issue: u64, scopes: &[PathBuf], expected: &st
         "initial import signature closure differs"
     );
     ensure!(
-        initial_baseline(&root, &project, issue, scopes, Some(expected))? == import.baseline,
+        initial_baseline(
+            &root,
+            &import_project(&root, &home)?,
+            issue,
+            scopes,
+            Some(expected)
+        )? == import.baseline,
         "initial import baseline changed before persistence"
     );
     project.selections.push(selection);
