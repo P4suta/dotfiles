@@ -1,5 +1,6 @@
 use crate::lint_hook_rules::{
-    self as rules, Admission, BiomeSource, Configuration, FileType, Linter, Outcome,
+    self as rules, ActionlintDeclaration, Admission, BiomeSource, Configuration, FileType, Linter,
+    Outcome,
 };
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
@@ -604,6 +605,115 @@ fn apply_configuration(command: &mut Command, linter: Linter, config: &Path) {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct MiseSource {
+    r#type: String,
+    path: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+struct MiseInstallation {
+    version: String,
+    requested_version: String,
+    install_path: PathBuf,
+    source: MiseSource,
+    installed: bool,
+    active: bool,
+}
+
+fn actionlint_command(path: &Path, root: Option<&Path>) -> Result<Command> {
+    let Some(root) = root else {
+        return Ok(Tool::Actionlint.command());
+    };
+    let directory = path.parent().context("workflow has no parent directory")?;
+    let metadata = bounded(
+        Tool::Mise
+            .command()
+            .current_dir(directory)
+            .env("MISE_AUTO_INSTALL", "false")
+            .args(["ls", "--local", "--json"]),
+        None,
+    )?;
+    ensure!(
+        metadata.outcome == Outcome::Clean,
+        "project Actionlint metadata is unavailable: {:?}: {}",
+        metadata.outcome,
+        metadata.stderr.trim()
+    );
+    let tools: BTreeMap<String, Value> =
+        serde_json::from_str(&metadata.stdout).context("parse project Actionlint metadata")?;
+    let project = platform::paths::canonical(root)?;
+    let mut candidates = Vec::new();
+    for (key, value) in tools {
+        if key.rsplit([':', '/']).next() != Some(Tool::Actionlint.program()) {
+            continue;
+        }
+        let installations: Vec<MiseInstallation> =
+            serde_json::from_value(value).context("parse the project Actionlint installation")?;
+        ensure!(
+            !installations.is_empty(),
+            "project Actionlint installation metadata is empty"
+        );
+        for installation in installations {
+            ensure!(
+                installation.source.r#type == "mise.toml"
+                    && installation.source.path.is_absolute()
+                    && installation.source.path.is_file(),
+                "project Actionlint requires configuration file provenance"
+            );
+            if platform::paths::canonical(&installation.source.path)?.starts_with(&project) {
+                candidates.push((key.clone(), installation));
+            }
+        }
+    }
+    match rules::actionlint_declaration(candidates.len()) {
+        ActionlintDeclaration::Absent => return Ok(Tool::Actionlint.command()),
+        ActionlintDeclaration::Ambiguous => {
+            anyhow::bail!("project Actionlint declarations are ambiguous")
+        }
+        ActionlintDeclaration::Unique => {}
+    }
+    let (key, installation) = &candidates[0];
+    ensure!(
+        installation.installed
+            && installation.active
+            && installation.version == installation.requested_version
+            && installation.install_path.is_absolute()
+            && installation.install_path.is_dir(),
+        "project Actionlint must resolve to its installed exact project pin; run mise install for {key}"
+    );
+    let resolved = bounded(
+        Tool::Mise
+            .command()
+            .current_dir(directory)
+            .env("MISE_AUTO_INSTALL", "false")
+            .args([
+                "which",
+                "--tool",
+                &format!("{key}@{}", installation.version),
+                Tool::Actionlint.program(),
+            ]),
+        None,
+    )?;
+    ensure!(
+        resolved.outcome == Outcome::Clean,
+        "project Actionlint executable is unavailable: {:?}: {}",
+        resolved.outcome,
+        resolved.stderr.trim()
+    );
+    let program = PathBuf::from(resolved.stdout.trim());
+    ensure!(
+        program.is_absolute() && program.is_file(),
+        "project Actionlint requires an installed absolute executable"
+    );
+    let program = platform::paths::canonical(&program)?;
+    ensure!(
+        program.starts_with(platform::paths::canonical(&installation.install_path)?),
+        "project Actionlint executable is outside its declared installation"
+    );
+    Ok(platform::tool::external(program))
+}
+
 fn lint_command(
     path: &Path,
     linter: Linter,
@@ -611,10 +721,10 @@ fn lint_command(
     config: Option<&Path>,
     source: Configuration,
 ) -> Result<Command> {
-    let mut command = if linter == Linter::Biome {
-        biome_command(path, root)?
-    } else {
-        tool(linter).command()
+    let mut command = match linter {
+        Linter::Biome => biome_command(path, root)?,
+        Linter::Actionlint => actionlint_command(path, root)?,
+        _ => tool(linter).command(),
     };
     let directory = if linter == Linter::Biome && source == Configuration::Repository {
         config.and_then(Path::parent)
@@ -638,11 +748,12 @@ fn lint_command(
 }
 
 fn lint(path: &Path, linter: Linter, root: Option<&Path>) -> Result<(Outcome, Option<String>)> {
-    let absolute = (linter == Linter::Biome)
+    let project_tool = matches!(linter, Linter::Biome | Linter::Actionlint);
+    let absolute = project_tool
         .then(|| std::path::absolute(path))
         .transpose()?;
     let path = absolute.as_deref().unwrap_or(path);
-    let absolute_root = if linter == Linter::Biome {
+    let absolute_root = if project_tool {
         root.map(std::path::absolute).transpose()?
     } else {
         None

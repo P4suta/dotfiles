@@ -289,6 +289,225 @@ fn patches_lint_only_written_destinations_and_ignore_deleted_files() {
     assert!(success && !clean.contains("block"), "{clean}");
 }
 
+#[derive(Debug)]
+struct ActionlintFixture<'a> {
+    scope: &'a Path,
+    root: &'a Path,
+    bin: &'a Path,
+    native: &'a Path,
+    project: &'a Path,
+}
+
+impl ActionlintFixture<'_> {
+    fn run(
+        &self,
+        tools: &Value,
+        program: &Path,
+        which: &str,
+        allow_global: bool,
+        target: &Path,
+    ) -> (String, String) {
+        let metadata = self.scope.join("metadata.json");
+        let log = self.scope.join("selected");
+        std::fs::write(&metadata, tools.to_string()).unwrap();
+        if log.exists() {
+            std::fs::remove_file(&log).unwrap();
+        }
+        let mut directories = vec![self.bin.to_path_buf()];
+        directories.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), self.scope)
+            .arg("lint-hook")
+            .current_dir(self.root)
+            .env("PATH", std::env::join_paths(directories).unwrap())
+            .env("ACTIONLINT_FIXTURE_NATIVE", self.native)
+            .env("ACTIONLINT_FIXTURE_LOG", &log)
+            .env("ACTIONLINT_FIXTURE_CWD", target.parent().unwrap())
+            .env("ACTIONLINT_FIXTURE_ROOT", self.root)
+            .env("ACTIONLINT_FIXTURE_METADATA", &metadata)
+            .env("ACTIONLINT_FIXTURE_EXECUTABLE", program)
+            .env("ACTIONLINT_FIXTURE_PROJECT", self.project)
+            .env("ACTIONLINT_FIXTURE_WHICH", which)
+            .env(
+                "ACTIONLINT_FIXTURE_GLOBAL",
+                if allow_global { "allow" } else { "refuse" },
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(
+                write_event(self.root, target.to_str().unwrap())
+                    .to_string()
+                    .as_bytes(),
+            )
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        (
+            String::from_utf8(output.stdout).unwrap() + &String::from_utf8(output.stderr).unwrap(),
+            std::fs::read_to_string(&log).unwrap_or_default(),
+        )
+    }
+}
+
+fn actionlint_refuses_invalid_metadata(
+    fixture: &ActionlintFixture<'_>,
+    entry: &Value,
+    action: &Path,
+    configuration: &Path,
+) {
+    for (field, value) in [
+        ("installed", json!(false)),
+        ("active", json!(false)),
+        ("requested_version", json!("latest")),
+        ("source", json!({"type":"environment","path":configuration})),
+    ] {
+        let mut invalid = entry.clone();
+        invalid[field] = value;
+        let (blocked, selected) = fixture.run(
+            &json!({"github:kjanat/actionlint":[invalid]}),
+            fixture.project,
+            "ok",
+            true,
+            action,
+        );
+        assert!(blocked.contains("block"), "{field}: {blocked}");
+        assert_eq!(selected, "metadata\n");
+    }
+    for invalid in [
+        json!("invalid metadata"),
+        json!({"github:kjanat/actionlint":[]}),
+        json!({"github:kjanat/actionlint":[entry.clone(),entry.clone()]}),
+        json!({"actionlint":[entry.clone()],"github:kjanat/actionlint":[entry.clone()]}),
+        json!({"github:kjanat/actionlint":[{"installed":true}]}),
+    ] {
+        let (blocked, selected) = fixture.run(&invalid, fixture.project, "ok", true, action);
+        assert!(blocked.contains("block"), "{blocked}");
+        assert_eq!(selected, "metadata\n");
+    }
+}
+
+fn actionlint_executables(
+    scope: &Path,
+    bin: &Path,
+    project: &Path,
+    global: &Path,
+) -> std::path::PathBuf {
+    let native = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|directory| directory.join(format!("actionlint{}", std::env::consts::EXE_SUFFIX)))
+        .find(|path| path.is_file())
+        .expect("the project pins Actionlint for its integration tests");
+    let compiled = bin.join(format!("mise{}", std::env::consts::EXE_SUFFIX));
+    let status = fixture_process::command("rustc", scope)
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/actionlint_project.rs"))
+        .args(["--edition", "2024", "-o"])
+        .arg(&compiled)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    for destination in [project, global] {
+        std::fs::copy(&compiled, destination).unwrap();
+    }
+    native
+}
+
+#[test]
+fn actionlint_uses_only_the_declared_project_installation() {
+    let scope = tempfile::tempdir().unwrap();
+    let root = scope.path().join("project space 日本語");
+    let bin = scope.path().join("bin");
+    let installation = scope.path().join("installed space 日本語");
+    let action = root.join(".github/actions/probe/action.yml");
+    for directory in [
+        root.join(".git"),
+        action.parent().unwrap().into(),
+        bin.clone(),
+        installation.clone(),
+    ] {
+        std::fs::create_dir_all(directory).unwrap();
+    }
+    let executable = |directory: &Path, name: &str| {
+        directory.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
+    };
+    let project = executable(&installation, "actionlint");
+    let global = executable(&bin, "actionlint");
+    let native = actionlint_executables(scope.path(), &bin, &project, &global);
+    let configuration = root.join("mise.toml");
+    std::fs::write(
+        &configuration,
+        "[tools]\n\"github:kjanat/actionlint\" = \"1.17.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".github/actionlint.yaml"),
+        "self-hosted-runner:\n  labels: []\n",
+    )
+    .unwrap();
+    std::fs::write(&action, "name: Example\ndescription: Example action\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: printf '%s\\n' clean\n").unwrap();
+    let entry = json!({
+        "version":"1.17.0", "requested_version":"1.17.0", "install_path":installation,
+        "source":{"type":"mise.toml","path":configuration}, "installed":true,"active":true
+    });
+    let fixture = ActionlintFixture {
+        scope: scope.path(),
+        root: &root,
+        bin: &bin,
+        native: &native,
+        project: &project,
+    };
+    let run = |tools: &Value, program: &Path, which: &str, allow_global: bool| {
+        fixture.run(tools, program, which, allow_global, &action)
+    };
+    let tools = json!({"github:kjanat/actionlint":[entry.clone()]});
+    let (clean, selected) = run(&tools, &project, "ok", false);
+    assert!(!clean.contains("block"), "{clean}");
+    assert_eq!(selected, "metadata\nwhich\nproject\n");
+    let workflow = root.join(".github/workflows/probe.yml");
+    std::fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+    std::fs::write(&workflow, "on: push\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo '${{ invalid.property }}'\n").unwrap();
+    let (blocked, selected) = fixture.run(&tools, &project, "ok", false, &workflow);
+    assert!(
+        blocked.contains("block") && blocked.contains("expression"),
+        "{blocked}"
+    );
+    assert_eq!(selected, "metadata\nwhich\nproject\n");
+    actionlint_refuses_invalid_metadata(&fixture, &entry, &action, &configuration);
+    for (program, which) in [
+        (project.as_path(), "fail"),
+        (global.as_path(), "ok"),
+        (Path::new("actionlint"), "ok"),
+        (installation.join("missing").as_path(), "ok"),
+    ] {
+        let (blocked, selected) = run(&tools, program, which, true);
+        assert!(blocked.contains("block"), "{blocked}");
+        assert_eq!(selected, "metadata\nwhich\n");
+    }
+    let (clean, selected) = run(&json!({}), &project, "ok", true);
+    assert!(!clean.contains("block"), "{clean}");
+    assert_eq!(selected, "metadata\nglobal\n");
+    let inherited_configuration = scope.path().join("mise.toml");
+    std::fs::write(
+        &inherited_configuration,
+        "[tools]\nactionlint = \"1.17.0\"\n",
+    )
+    .unwrap();
+    let mut inherited = entry;
+    inherited["source"]["path"] = json!(inherited_configuration);
+    let (clean, selected) = run(
+        &json!({"github:kjanat/actionlint":[inherited]}),
+        &project,
+        "ok",
+        true,
+    );
+    assert!(!clean.contains("block"), "{clean}");
+    assert_eq!(selected, "metadata\nglobal\n");
+}
+
 #[test]
 fn clean_action_metadata_is_checked_through_actionlint() {
     let root = tempfile::tempdir().unwrap();
