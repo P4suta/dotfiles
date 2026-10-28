@@ -169,6 +169,110 @@ fn repository_configs_are_respected_for_biome_taplo_and_shellcheck() {
 }
 
 #[test]
+fn biome_uses_the_project_installation_and_configuration_directory() {
+    let scope = tempfile::tempdir().unwrap();
+    let root = scope.path().join("project space 日本語");
+    let bin = scope.path().join("bin");
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::create_dir(&bin).unwrap();
+    let executable = |name: &str| bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    let native = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|directory| directory.join(format!("biome{}", std::env::consts::EXE_SUFFIX)))
+        .find(|path| path.is_file())
+        .expect("the project pins Biome for its integration tests");
+    let compiled = fixture_process::command("rustc", scope.path())
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/biome_project.rs"))
+        .args(["--edition", "2024", "-o"])
+        .arg(executable("mise"))
+        .status()
+        .unwrap();
+    assert!(compiled.success());
+    std::fs::copy(executable("mise"), executable("biome")).unwrap();
+    let log = scope.path().join("selected");
+    let run = |path: &Path, global: bool| {
+        if log.exists() {
+            std::fs::remove_file(&log).unwrap();
+        }
+        let mut directories = vec![bin.clone()];
+        directories.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+        let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), scope.path())
+            .arg("lint-hook")
+            .current_dir(&root)
+            .env("PATH", std::env::join_paths(directories).unwrap())
+            .env("BIOME_FIXTURE_NATIVE", &native)
+            .env("BIOME_FIXTURE_LOG", &log)
+            .env(
+                "BIOME_FIXTURE_GLOBAL",
+                if global { "allow" } else { "refuse" },
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let event = write_event(&root, path.to_str().unwrap());
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(event.to_string().as_bytes())
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        (
+            output.status,
+            String::from_utf8(output.stdout).unwrap() + &String::from_utf8(output.stderr).unwrap(),
+            std::fs::read_to_string(&log).ok(),
+        )
+    };
+    for directory in [&root, &root.join("web")] {
+        std::fs::create_dir_all(directory).unwrap();
+        let manifest = directory.join("package.json");
+        std::fs::write(
+            &manifest,
+            r#"{"devDependencies":{"@biomejs/biome":"2.5.1"}}"#,
+        )
+        .unwrap();
+        let config = directory.join("biome.json");
+        std::fs::write(&config, r#"{"root":true,"files":{"includes":["*.js"]},"linter":{"rules":{"recommended":true}}}"#).unwrap();
+        let package = directory.join("node_modules/@biomejs/biome");
+        std::fs::create_dir_all(package.join("bin")).unwrap();
+        std::fs::write(
+            package.join("package.json"),
+            r#"{"name":"@biomejs/biome","version":"2.5.1","bin":{"biome":"bin/biome"}}"#,
+        )
+        .unwrap();
+        let launcher = package.join("bin/biome");
+        std::fs::write(&launcher, "fixture launcher\n").unwrap();
+        let path = directory.join("probe space 日本語.js");
+        std::fs::write(&path, "console.log(1);\n").unwrap();
+        let (status, clean, selected) = run(&path, false);
+        assert_eq!(status.code(), Some(0), "{clean}");
+        assert!(!clean.contains("block"), "{clean}");
+        assert_eq!(selected.as_deref(), Some("local"));
+        std::fs::write(&path, "debugger;\n").unwrap();
+        let (status, blocked, selected) = run(&path, false);
+        assert_eq!(status.code(), Some(0), "{blocked}");
+        let decision: Value = serde_json::from_str(blocked.lines().next().unwrap()).unwrap();
+        assert_eq!(decision["decision"], "block");
+        assert!(blocked.contains("noDebugger"), "{blocked}");
+        assert_eq!(selected.as_deref(), Some("local"));
+        std::fs::write(&path, "console.log(1);\n").unwrap();
+        std::fs::remove_file(&launcher).unwrap();
+        let (status, missing, selected) = run(&path, true);
+        assert_eq!(status.code(), Some(0), "{missing}");
+        assert!(missing.contains("@biomejs/biome"), "{missing}");
+        assert!(missing.contains("block"), "{missing}");
+        assert_eq!(selected, None);
+        std::fs::remove_file(&manifest).unwrap();
+        let (status, fallback, selected) = run(&path, true);
+        assert_eq!(status.code(), Some(0), "{fallback}");
+        assert!(!fallback.contains("block"), "{fallback}");
+        assert_eq!(selected.as_deref(), Some("global"));
+        std::fs::remove_file(&config).unwrap();
+    }
+}
+
+#[test]
 fn patches_lint_only_written_destinations_and_ignore_deleted_files() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("unrelated.py"), "import os\n").unwrap();

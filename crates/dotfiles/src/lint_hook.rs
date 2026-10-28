@@ -1,4 +1,6 @@
-use crate::lint_hook_rules::{self as rules, Admission, Configuration, FileType, Linter, Outcome};
+use crate::lint_hook_rules::{
+    self as rules, Admission, BiomeSource, Configuration, FileType, Linter, Outcome,
+};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
@@ -23,6 +25,14 @@ const FIRST_LINE_BYTES: u64 = 4096;
 const SHARED_VERSIONS: &str = include_str!("../../../home/.chezmoidata/versions.toml");
 const STRICT_BIOME: &str = r#"{"root":true,"linter":{"rules":{"recommended":true}}}"#;
 const STRICT_HADOLINT: &str = "ignored: []\n";
+const BIOME_PACKAGE: &str = "@biomejs/biome";
+const PACKAGE_MANIFEST: &str = "package.json";
+const DEPENDENCY_SECTIONS: &[&str] = &[
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "peerDependencies",
+];
 
 #[derive(Debug, Default)]
 pub struct Report {
@@ -218,6 +228,90 @@ fn configuration(path: &Path, root: Option<&Path>, linter: Linter) -> Option<Pat
         }
     }
     None
+}
+
+fn biome_declaration(path: &Path, root: &Path) -> Result<Option<PathBuf>> {
+    for directory in path
+        .parent()
+        .context("file has no parent")?
+        .ancestors()
+        .take_while(|directory| directory.starts_with(root))
+    {
+        let manifest = directory.join(PACKAGE_MANIFEST);
+        if !manifest.is_file() {
+            continue;
+        }
+        let package: Value = serde_json::from_str(&fs::read_to_string(&manifest)?)
+            .with_context(|| format!("read {}", manifest.display()))?;
+        if DEPENDENCY_SECTIONS
+            .iter()
+            .any(|section| package[section].get(BIOME_PACKAGE).is_some())
+        {
+            return Ok(Some(directory.to_path_buf()));
+        }
+    }
+    Ok(None)
+}
+
+fn biome_launcher(directory: &Path, root: &Path) -> Result<Option<PathBuf>> {
+    for directory in directory
+        .ancestors()
+        .take_while(|directory| directory.starts_with(root))
+    {
+        let package = directory.join("node_modules").join(BIOME_PACKAGE);
+        if !package.try_exists()? {
+            continue;
+        }
+        let manifest = package.join(PACKAGE_MANIFEST);
+        let metadata: Value = serde_json::from_str(&fs::read_to_string(&manifest)?)
+            .with_context(|| format!("read {}", manifest.display()))?;
+        let bin = metadata["bin"]
+            .as_str()
+            .or_else(|| metadata["bin"]["biome"].as_str())
+            .context("@biomejs/biome has no executable in package.json")?;
+        let relative = Path::new(bin);
+        ensure!(
+            !bin.is_empty()
+                && relative.components().all(|part| matches!(
+                    part,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )),
+            "@biomejs/biome executable must be a relative path inside its package"
+        );
+        let launcher = package.join(relative);
+        return Ok(launcher.is_file().then_some(launcher));
+    }
+    Ok(None)
+}
+
+fn biome_command(path: &Path, root: Option<&Path>) -> Result<Command> {
+    let declaration = root
+        .map(|root| biome_declaration(path, root))
+        .transpose()?
+        .flatten();
+    let launcher = match (declaration.as_deref(), root) {
+        (Some(directory), Some(root)) => biome_launcher(directory, root)?,
+        _ => None,
+    };
+    match rules::biome_source(declaration.is_some(), launcher.is_some()) {
+        BiomeSource::Global => Ok(Tool::Biome.command()),
+        BiomeSource::Project => {
+            let mut command = Tool::Mise.command();
+            command
+                .args(["x", "--no-deps", "--", "node"])
+                .arg(platform::paths::canonical(
+                    &launcher.context("project Biome has a launcher")?,
+                )?)
+                .env("MISE_AUTO_INSTALL", "false");
+            Ok(command)
+        }
+        BiomeSource::Missing => anyhow::bail!(
+            "missing declared {BIOME_PACKAGE} installation in {}; install the project's locked dependencies before linting",
+            declaration
+                .context("missing Biome has a declaration")?
+                .display()
+        ),
+    }
 }
 
 fn arguments(linter: Linter, config: Configuration) -> Vec<&'static str> {
@@ -510,7 +604,50 @@ fn apply_configuration(command: &mut Command, linter: Linter, config: &Path) {
     }
 }
 
+fn lint_command(
+    path: &Path,
+    linter: Linter,
+    root: Option<&Path>,
+    config: Option<&Path>,
+    source: Configuration,
+) -> Result<Command> {
+    let mut command = if linter == Linter::Biome {
+        biome_command(path, root)?
+    } else {
+        tool(linter).command()
+    };
+    let directory = if linter == Linter::Biome && source == Configuration::Repository {
+        config.and_then(Path::parent)
+    } else {
+        None
+    };
+    command.current_dir(
+        directory
+            .or(root)
+            .or_else(|| path.parent())
+            .context("file has no parent")?,
+    );
+    command.args(arguments(linter, source));
+    if linter == Linter::Shfmt && source == Configuration::Strict {
+        command.env("SHFMT_NO_EDITORCONFIG", "1");
+    }
+    if let Some(config) = config {
+        apply_configuration(&mut command, linter, config);
+    }
+    Ok(command)
+}
+
 fn lint(path: &Path, linter: Linter, root: Option<&Path>) -> Result<(Outcome, Option<String>)> {
+    let absolute = (linter == Linter::Biome)
+        .then(|| std::path::absolute(path))
+        .transpose()?;
+    let path = absolute.as_deref().unwrap_or(path);
+    let absolute_root = if linter == Linter::Biome {
+        root.map(std::path::absolute).transpose()?
+    } else {
+        None
+    };
+    let root = absolute_root.as_deref().or(root);
     let mut config = configuration(path, root, linter);
     let source = rules::configuration(config.is_some());
     let defaults =
@@ -528,18 +665,7 @@ fn lint(path: &Path, linter: Linter, root: Option<&Path>) -> Result<(Outcome, Op
         } else {
             None
         };
-    let mut command = tool(linter).command();
-    command.current_dir(
-        root.or_else(|| path.parent())
-            .context("file has no parent")?,
-    );
-    command.args(arguments(linter, source));
-    if linter == Linter::Shfmt && source == Configuration::Strict {
-        command.env("SHFMT_NO_EDITORCONFIG", "1");
-    }
-    if let Some(config) = config {
-        apply_configuration(&mut command, linter, &config);
-    }
+    let mut command = lint_command(path, linter, root, config.as_deref(), source)?;
     let action = rules::classify(&path.to_string_lossy(), "") == FileType::Action
         && linter == Linter::Actionlint;
     let synthetic = if action {

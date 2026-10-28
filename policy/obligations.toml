@@ -1209,6 +1209,10 @@ verifier = "kani"
 source = "crates/rules/src/lint_hook_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_global_fallback_for_a_missing_project_biome() {
+    assert!(production::biome_source(true, false) == production::BiomeSource::Global);
+}
+#[kani::proof]
 #[kani::unwind(4)]
 fn reject_admitting_findings() {
     assert!(production::admission(&[production::Outcome::Findings]) == production::Admission::Admit);

@@ -39,6 +39,22 @@ pub enum Configuration {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BiomeSource {
+    Global,
+    Project,
+    Missing,
+}
+
+#[must_use]
+pub fn biome_source(declared: bool, installed: bool) -> BiomeSource {
+    match (declared, installed) {
+        (false, _) => BiomeSource::Global,
+        (true, true) => BiomeSource::Project,
+        (true, false) => BiomeSource::Missing,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Outcome {
     Clean,
     Excluded,
@@ -310,6 +326,33 @@ pub fn bash4_features(line: &str) -> Vec<BashFeature> {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    fn spec_biome_source(declared: bool, installed: bool) {
+        let selected = biome_source(declared, installed);
+        assert_eq!(selected == BiomeSource::Global, !declared);
+        assert_eq!(selected == BiomeSource::Project, declared && installed);
+        assert_eq!(selected == BiomeSource::Missing, declared && !installed);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn declared_biome_never_falls_back_to_a_global_installation() {
+        let declared = kani::any();
+        let installed = kani::any();
+        spec_biome_source(declared, installed);
+        kani::cover!(biome_source(declared, installed) == BiomeSource::Missing);
+        kani::cover!(biome_source(declared, installed) == BiomeSource::Project);
+        kani::cover!(biome_source(declared, installed) == BiomeSource::Global);
+    }
+
+    #[test]
+    fn biome_selection_covers_declarations_and_installations() {
+        for declared in [false, true] {
+            for installed in [false, true] {
+                spec_biome_source(declared, installed);
+            }
+        }
+    }
 
     pub fn spec_admission(outcomes: &[Outcome]) {
         let blocked = outcomes
