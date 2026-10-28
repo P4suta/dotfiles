@@ -1209,6 +1209,14 @@ verifier = "kani"
 source = "crates/rules/src/lint_hook_rules.rs"
 probes = '''
 #[kani::proof]
+fn reject_global_fallback_for_a_project_actionlint() {
+    assert!(production::actionlint_declaration(1) == production::ActionlintDeclaration::Absent);
+}
+#[kani::proof]
+fn reject_selecting_ambiguous_project_actionlint() {
+    assert!(production::actionlint_declaration(2) == production::ActionlintDeclaration::Unique);
+}
+#[kani::proof]
 fn reject_global_fallback_for_a_missing_project_biome() {
     assert!(production::biome_source(true, false) == production::BiomeSource::Global);
 }

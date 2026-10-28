@@ -45,6 +45,22 @@ pub enum BiomeSource {
     Missing,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActionlintDeclaration {
+    Absent,
+    Unique,
+    Ambiguous,
+}
+
+#[must_use]
+pub fn actionlint_declaration(count: usize) -> ActionlintDeclaration {
+    match count {
+        0 => ActionlintDeclaration::Absent,
+        1 => ActionlintDeclaration::Unique,
+        _ => ActionlintDeclaration::Ambiguous,
+    }
+}
+
 #[must_use]
 pub fn biome_source(declared: bool, installed: bool) -> BiomeSource {
     match (declared, installed) {
@@ -326,6 +342,30 @@ pub fn bash4_features(line: &str) -> Vec<BashFeature> {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    fn spec_actionlint_declaration(count: usize) {
+        let selected = actionlint_declaration(count);
+        assert_eq!(selected == ActionlintDeclaration::Absent, count == 0);
+        assert_eq!(selected == ActionlintDeclaration::Unique, count == 1);
+        assert_eq!(selected == ActionlintDeclaration::Ambiguous, count > 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn actionlint_requires_one_project_declaration() {
+        let count = kani::any();
+        spec_actionlint_declaration(count);
+        kani::cover!(actionlint_declaration(count) == ActionlintDeclaration::Absent);
+        kani::cover!(actionlint_declaration(count) == ActionlintDeclaration::Unique);
+        kani::cover!(actionlint_declaration(count) == ActionlintDeclaration::Ambiguous);
+    }
+
+    #[test]
+    fn actionlint_selection_covers_absent_unique_and_ambiguous_declarations() {
+        for count in [0, 1, 2, usize::MAX] {
+            spec_actionlint_declaration(count);
+        }
+    }
 
     fn spec_biome_source(declared: bool, installed: bool) {
         let selected = biome_source(declared, installed);
