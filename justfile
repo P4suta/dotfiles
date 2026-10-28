@@ -9,7 +9,7 @@ trust:
     mise trust --quiet {{ quote(justfile_directory() / "mise.toml") }}
 
 [private]
-lint-tools: (mise-install "python" "uv" "yamllint")
+lint-tools: (mise-install "--locked" "python" "uv" "yamllint")
 
 mise-install *args: trust
     mise x rust -- cargo run --locked --package dotfiles --bin dotfiles -- mise-install {{ args }}
