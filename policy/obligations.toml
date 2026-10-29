@@ -1236,6 +1236,11 @@ fn reject_blocking_unknown_types() {
     assert!(production::admission(&[]) == production::Admission::Block);
 }
 #[kani::proof]
+#[kani::unwind(4)]
+fn reject_skipping_the_comment_check_for_unknown_types() {
+    assert!(production::linters(production::FileType::Other).is_empty());
+}
+#[kani::proof]
 fn reject_an_xargs_supplied_script() {
     assert!(production::script_argument(true, production::ScriptInput::Missing, false) == production::ScriptArgument::Literal);
 }

@@ -178,6 +178,7 @@ fn tool(linter: Linter) -> Tool {
         Linter::TaploFormat | Linter::TaploCheck => Tool::Taplo,
         Linter::Hadolint => Tool::Hadolint,
         Linter::Just => Tool::Just,
+        Linter::Ocomment => Tool::Ocomment,
     }
 }
 
@@ -198,6 +199,7 @@ fn config_names(linter: Linter) -> &'static [&'static str] {
         Linter::Zizmor => &["zizmor.yml", ".github/zizmor.yml"],
         Linter::TaploFormat | Linter::TaploCheck => &["taplo.toml", ".taplo.toml"],
         Linter::Hadolint => &[".hadolint.yaml", ".hadolint.yml", "hadolint.yaml"],
+        Linter::Ocomment => &[".ocomment.toml"],
         Linter::Zsh | Linter::Just => &[],
     }
 }
@@ -362,7 +364,7 @@ fn arguments(linter: Linter, config: Configuration) -> Vec<&'static str> {
         Linter::TaploFormat if strict => vec!["fmt", "--check", "--no-auto-config"],
         Linter::TaploFormat => vec!["fmt", "--check"],
         Linter::TaploCheck if strict => vec!["check", "--no-auto-config"],
-        Linter::TaploCheck => vec!["check"],
+        Linter::TaploCheck | Linter::Ocomment => vec!["check"],
         Linter::Hadolint if strict => vec!["--format", "json", "--failure-threshold", "style"],
         Linter::Hadolint => vec!["--format", "json"],
         Linter::Just => vec!["--fmt", "--check", "--unstable", "--justfile"],
@@ -592,7 +594,8 @@ fn apply_configuration(command: &mut Command, linter: Linter, config: &Path) {
         | Linter::TaploCheck
         | Linter::TaploFormat
         | Linter::Hadolint
-        | Linter::Zizmor => {
+        | Linter::Zizmor
+        | Linter::Ocomment => {
             command.arg("--config").arg(config);
         }
         Linter::Biome => {
@@ -924,16 +927,20 @@ pub fn file(path: &Path, interpreter: Option<&str>) -> Result<Report> {
             FileType::Shell
         };
     }
-    if kind == FileType::Other {
+    let metadata = fs::metadata(path)?;
+    if kind == FileType::Other && !(metadata.is_file() && metadata.len() <= MAX_FILE_BYTES) {
         return Ok(Report::default());
     }
-    let metadata = fs::metadata(path)?;
     ensure!(
         metadata.is_file() && metadata.len() <= MAX_FILE_BYTES,
         "{} must be a regular file no larger than {MAX_FILE_BYTES} bytes",
         path.display()
     );
-    let text = fs::read_to_string(path)?;
+    let text = if kind == FileType::Shell {
+        fs::read_to_string(path)?
+    } else {
+        String::new()
+    };
     let root = repository(path);
     let mut report = Report::default();
     let mut outcomes = Vec::new();
