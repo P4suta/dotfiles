@@ -1,5 +1,16 @@
 {
   "rules": {
-    "preset-ja-technical-writing": true
+    "preset-jtf-style": {
+      "2.1.5.カタカナ": true,
+      "2.1.6.カタカナの長音": true,
+      "3.2.カタカナ語間のスペースの有無": false
+    },
+    "preset-ja-technical-writing": {
+      "no-mix-dearu-desumasu": {
+        "preferInBody": "",
+        "preferInHeader": "",
+        "preferInList": ""
+      }
+    }
   }
 }
