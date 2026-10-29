@@ -667,11 +667,21 @@ fn reject_passing_an_edited_readme() {
 }
 #[kani::proof]
 fn reject_rewriting_reviewed_licenses() {
-    assert!(generation(LicenseAssets::Preserved { mit_matches: true, apache_matches: true }) == Generation::All);
+    assert!(generation(LicenseAssets::PreservedDual { mit_matches: true, apache_matches: true }) == Generation::All);
 }
 #[kani::proof]
 fn reject_generating_a_readme_with_changed_reviewed_licenses() {
-    assert!(generation(LicenseAssets::Preserved { mit_matches: true, apache_matches: false }) == Generation::Readme);
+    assert!(generation(LicenseAssets::PreservedDual { mit_matches: true, apache_matches: false }) == Generation::Readme);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_matching_a_different_single_license_expression() {
+    assert!(production::matches_license_expression(production::LicenseExpression::MitOnly, b"AGPL-3.0-or-later"));
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_matching_a_malformed_license_expression() {
+    assert!(production::matches_license_expression(production::LicenseExpression::AgplOrLater, b"AGPL-3.0-or-later "));
 }
 '''
 
