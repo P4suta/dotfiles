@@ -1,0 +1,11 @@
+{
+  "revision": "cb2941ac02bebde1f3958cef5bb8a0bef7b0973129d57caa423e92d2eb6deedb",
+  "outcome": "implemented",
+  "reason": "An unreleased project received v1 and v2 labels in its plan, diagram, and briefs, and Japanese replies used a translated metaphor and a Chinese term; the owner rejected both and asked for mechanical enforcement that does not depend on a list of known mistakes. This skill names designs by their distinguishing decision, keeps one living document with ADR supersession as history, and confines version numbers to released contracts and persisted formats. The agent policy references the skill next to the ADR rule; the prose, catalog, and reply checks that enforce it land in their own changes.",
+  "evidence": [
+    "home/dot_agents/skills/decision-naming/SKILL.md",
+    "home/dot_claude/skills/symlink_decision-naming",
+    "home/.chezmoitemplates/partials/agent_policy"
+  ],
+  "revisit": "Refuse bare version labels in prose and identifiers and Han characters outside the Japanese repertoire in replies through the checkers, then add a path check for version-like segments in file and directory names."
+}

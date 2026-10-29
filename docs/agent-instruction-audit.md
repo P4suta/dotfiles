@@ -127,6 +127,16 @@ Choosing a descriptive name still requires reading the decision.
 
 Follow-up F8: the dotfiles index has a generator, but no shared gate checks index drift and historical reference preservation across personal repositories.
 
+> - Use decision-naming before labeling a plan, design, diagram, branch, API, schema, or file, so names carry the decision or property instead of v1, v2, new, old, final, or next.
+
+Judgment: choosing a descriptive name, naming files and directories, and version labels inside replies have no check.
+The `decision-naming` skill states the rule, and the prose, catalog, and reply checks that refuse version labels and foreign characters follow in their own changes.
+
+> - Use monochrome-design for every visual design task, including interfaces, websites, diagrams, and documents.
+
+Judgment: whether an artifact is a visual design task, and whether its hierarchy reads as intended, stays a design review.
+The `monochrome-design` skill states the defaults, and a project's browser checks with positive and negative fixtures cover the computed styles.
+
 > - For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
 
 Judgment: selecting relevant skill instructions and checking their verification obligations requires a review of the implementation and its evidence.

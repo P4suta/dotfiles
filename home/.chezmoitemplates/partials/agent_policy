@@ -27,9 +27,11 @@ A project's own instructions take precedence when they conflict.
 - Use `pr-workflow` for PR creation, document edits, and ready transitions, and keep the diff within the issue's scope.
 - In personal repositories, use stable descriptive document paths and name new ADRs after the decision with a front-matter date, as the shared `adr` skill describes.
   Preserve existing filenames and references, and regenerate shared indexes from source records when the repository has a generator.
+- Use decision-naming before labeling a plan, design, diagram, branch, API, schema, or file, so names carry the decision or property instead of v1, v2, new, old, final, or next.
 - For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
 - Use japanese-lexicon to verify Japanese readings and romanizations with identified public lexical records or major dictionaries and a named spelling standard.
 - Use checked-arguments for substantive reasoning, comparisons, explanations, and recommendations, including the checks for scope, semantic roles, evidence, counterarguments, and suitable formal methods.
+- Use monochrome-design for every visual design task, including interfaces, websites, diagrams, and documents.
 - Before completing a request, check the exact answer draft with `dotfiles answer check` using the request's managed session context.
 - Keep premise truth, natural-language interpretation, formal entailment, and decision relevance separate, and report unsupported or incomplete checks without claiming verification.
 - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
