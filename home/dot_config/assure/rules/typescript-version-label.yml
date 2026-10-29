@@ -1,0 +1,25 @@
+id: typescript-version-label
+language: typescript
+severity: error
+message: An identifier carries a version label instead of the decision or property it embodies.
+note: Name the distinguishing decision or property, as the `decision-naming` skill describes; a stored format keeps its number beside the code that reads it. The segments `v4` and `v6` stay admitted because they name IP protocol versions.
+metadata:
+  cwe: CWE-1099
+  ruleset: decision-naming
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/*.d.ts"
+  - "**/*.d.mts"
+  - "**/*.d.cts"
+  - "**/tests/**"
+  - "**/__tests__/**"
+  - "**/__stubs__/**"
+  - "**/fixtures/**"
+  - "**/__fixtures__/**"
+rule:
+  any:
+    - kind: identifier
+    - kind: type_identifier
+    - kind: property_identifier
+  regex: '(^|_)[vV]([0-35789]|[1-9][0-9]+)(_|$)|[a-z]V([0-35789]|[1-9][0-9]+)([A-Z]|$)|^v([0-35789]|[1-9][0-9]+)[A-Z]'

@@ -19,6 +19,10 @@ tokens = [
   "リクエスト通り",
 ]
 
+[rules."Dotfiles.VersionLabel"]
+message = "Name the design by its decision or the release by its product and number instead of a bare version label."
+tokens = ["v1", "v2", "v3", "V1", "V2", "V3"]
+
 [rules."Dotfiles.FigurativeJargon"]
 message = "Name the actual limit, list, or state instead of a translated metaphor."
 tokens = ["窓から外れ", "窓に載", "窓に入", "窓の外", "窓の中"]
