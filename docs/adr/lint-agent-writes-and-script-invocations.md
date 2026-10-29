@@ -1,6 +1,7 @@
 ---
-status: proposed
+status: amended
 date: 2026-10-22
+changed_by: [check-agent-written-comments-at-write-time.md]
 ---
 # Lint agent writes and script invocations through one runtime
 

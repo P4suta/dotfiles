@@ -102,7 +102,7 @@
 | [2026-10-22 Assurance follows change provenance](assurance-follows-change-provenance.md) | proposed |  |
 | [2026-10-22 Decide PR independence from merge results](decide-pr-independence-from-merge-results.md) | proposed |  |
 | [2026-10-22 First push requires an empty remote advertisement](first-push-requires-an-empty-remote-advertisement.md) | accepted |  |
-| [2026-10-22 Lint agent writes and script invocations through one runtime](lint-agent-writes-and-script-invocations.md) | proposed |  |
+| [2026-10-22 Lint agent writes and script invocations through one runtime](lint-agent-writes-and-script-invocations.md) | amended | [2026-10-29](check-agent-written-comments-at-write-time.md) |
 | [2026-10-22 Run heavy verification at the release gate](run-heavy-verification-at-the-release-gate.md) | accepted |  |
 | [2026-10-22 Scope a legacy bypass to one script invocation](script-scoped-legacy-bypass.md) | accepted |  |
 | [2026-10-22 Make one stack the unit of open work and merge it through a merge queue](stack-first-pull-requests-through-a-merge-queue.md) | amended | [2026-10-23](keep-independent-work-reasons-owner-local.md) |
@@ -120,5 +120,7 @@
 | [2026-10-25 Hold mutation campaign temporary ownership](hold-mutation-campaign-temporary-ownership.md) | proposed |  |
 | [2026-10-25 Resolve script inspection from invocation directories](resolve-script-inspection-from-invocation-directories.md) | proposed |  |
 | [2026-10-25 Verify CI pin readers from the offered source](verify-ci-pin-readers-from-offered-source.md) | proposed |  |
+| [2026-10-26 Identify originless checkouts in the owner map](identify-originless-checkouts-in-the-owner-map.md) | accepted |  |
 | [2026-10-26 Import unborn artifacts after same-issue selections](import-unborn-artifacts-after-same-issue-selections.md) | proposed |  |
 | [2026-10-26 Require PR review by repository policy](require-pr-review-by-repository-policy.md) | proposed |  |
+| [2026-10-29 Check agent-written comments at write time](check-agent-written-comments-at-write-time.md) | proposed |  |

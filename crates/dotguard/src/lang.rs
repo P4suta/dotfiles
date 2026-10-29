@@ -9,6 +9,10 @@
 //! 2. **Simplified Chinese:** the Japanese and Chinese writing systems share most ideographs, so `日本語` reads the same in both.
 //!    A Chinese sentence of any length contains simplified forms such as `这 个 说 时 门 现`, which Japanese lacks.
 //!
+//!    Japanese prose goes further.
+//!    Every Han character must belong to the Japanese Industrial Standards (JIS) X 0208 or X 0213 repertoire, which `jis_kanji_table` derives from Unihan.
+//!    A character outside that repertoire comes from Chinese or a rare variant, whatever its shape.
+//!
 //! 3. **Invisible characters:** zero-width spaces, bidirectional overrides, and byte-order marks have no place here.
 //!
 //! Latin-1 accents pass, as in `naïve`, `Gödel`, and `São`.
@@ -156,6 +160,37 @@ fn invisible(c: char) -> Option<&'static str> {
 fn simplified(c: char) -> bool {
     in_ranges(c, SIMPLIFIED_RANGES) || SIMPLIFIED_EXTRA.contains(c)
 }
+
+/// The Han script blocks: unified ideographs, their extensions, and the compatibility ideographs.
+const fn han(c: char) -> bool {
+    matches!(
+        c,
+        '\u{2E80}'..='\u{2FDF}' // CJK and Kangxi radicals.
+        | '\u{3400}'..='\u{4DBF}' // Extension A.
+        | '\u{4E00}'..='\u{9FFF}' // Unified ideographs.
+        | '\u{F900}'..='\u{FAFF}' // Compatibility ideographs.
+        | '\u{20000}'..='\u{323AF}' // Extensions B through I.
+    )
+}
+
+/// Whether a character has a Japanese Industrial Standards source in Unihan.
+fn jis_kanji(c: char) -> bool {
+    let n = c as u32;
+    crate::jis_kanji_table::JIS_KANJI_RANGES
+        .binary_search_by(|&(low, high)| {
+            if high < n {
+                core::cmp::Ordering::Less
+            } else if low > n {
+                core::cmp::Ordering::Greater
+            } else {
+                core::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
+}
+
+/// The diagnostic kind for a Han character outside the Japanese repertoire.
+pub const OUTSIDE_JAPANESE_REPERTOIRE: &str = "outside the Japanese kanji repertoire";
 
 /// The Greek and Coptic block and the Greek Extended block.
 const fn greek(c: char) -> bool {
@@ -308,6 +343,16 @@ pub fn scan(text: &str, mode: Mode) -> Vec<Diagnostic> {
                     col,
                     ch: c,
                     kind: "simplified Chinese",
+                });
+                continue;
+            }
+            // Japanese prose admits only the kanji of the Japanese standards.
+            if matches!(mode, Mode::Japanese) && han(c) && !jis_kanji(c) {
+                diagnostics.push(Diagnostic {
+                    line: line_no,
+                    col,
+                    ch: c,
+                    kind: OUTSIDE_JAPANESE_REPERTOIRE,
                 });
                 continue;
             }
@@ -530,6 +575,29 @@ mod tests {
             );
         }
         assert!(kinds("커밋", Mode::Japanese).contains(&"Hangul"));
+    }
+
+    /// Simplified forms outside the radical runs and the frequent list still fail, because no Japanese standard contains them.
+    #[test]
+    fn japanese_mode_refuses_han_outside_the_jis_repertoire() {
+        for s in [
+            "缓存", "默认", "运行", "错误", "网络", "请求", "删除", "变更",
+        ] {
+            assert!(
+                kinds(s, Mode::Japanese).iter().any(|kind| {
+                    *kind == super::OUTSIDE_JAPANESE_REPERTOIRE || *kind == "simplified Chinese"
+                }),
+                "missed: {s}"
+            );
+        }
+        for s in ["快照", "黙認", "網羅", "鷗外", "弌弐参"] {
+            assert_eq!(kinds(s, Mode::Japanese), NONE, "false positive: {s}");
+        }
+        assert!(
+            crate::jis_kanji_table::JIS_KANJI_RANGES
+                .windows(2)
+                .all(|pair| matches!(pair, [earlier, later] if earlier.1 + 1 < later.0))
+        );
     }
 
     /// The kanji China and Japan simplified the same way.

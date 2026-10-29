@@ -19,15 +19,31 @@ tokens = [
   "リクエスト通り",
 ]
 
+[rules."Dotfiles.VersionLabel"]
+message = "Name the design by its decision or the release by its product and number instead of a bare version label."
+tokens = ["v1", "v2", "v3", "V1", "V2", "V3"]
+
+[rules."Dotfiles.FigurativeJargon"]
+message = "Name the actual limit, list, or state instead of a translated metaphor."
+tokens = ["窓から外れ", "窓に載", "窓に入", "窓の外", "窓の中"]
+
+[rules."Dotfiles.ForeignTerm"]
+message = "Write the Japanese term instead of a Chinese technical term."
+tokens = [
+  "快照",
+  "缓存",
+  "默认",
+  "运行",
+  "错误",
+  "网络",
+  "用户",
+  "数据",
+  "请求",
+  "返回",
+  "删除",
+  "变更",
+]
+
 [rules."Dotfiles.Hedging"]
 message = "State the fact or its condition without the hedge."
-tokens = [
-  "かもしれません",
-  "かもしれない",
-  "と思います",
-  "と思われます",
-  "おそらく",
-  "たぶん",
-  "多分",
-  "気がします",
-]
+tokens = ["かもしれません", "かもしれない", "と思います", "と思われます", "おそらく", "たぶん", "多分", "気がします"]

@@ -94,6 +94,12 @@ doppler-organize *args: trust
 gen: trust
     mise x -- cargo xtask gen
 
+# Vendors the Japanese kanji repertoire from the pinned Unihan release and regenerates the Rust table.
+kanji-repertoire: trust
+    xh GET --follow --download --output "{{ justfile_directory() }}/target/Unihan.zip" https://www.unicode.org/Public/16.0.0/ucd/Unihan.zip
+    ouch decompress --yes "{{ justfile_directory() }}/target/Unihan.zip" --dir "{{ justfile_directory() }}/target/unihan"
+    mise x -- cargo xtask gen --irg-sources "{{ justfile_directory() }}/target/unihan/Unihan_IRGSources.txt"
+
 decide skill: trust
     mise x -- cargo xtask decide {{ quote(skill) }}
 

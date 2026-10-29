@@ -1,0 +1,23 @@
+{
+  "revision": "cb2941ac02bebde1f3958cef5bb8a0bef7b0973129d57caa423e92d2eb6deedb",
+  "outcome": "implemented",
+  "reason": "An unreleased project received v1 and v2 labels in its plan, diagram, and briefs, and Japanese replies used a translated metaphor and a Chinese term; the owner rejected both and asked for mechanical enforcement that does not depend on a list of known mistakes. This skill names designs by their distinguishing decision, keeps one living document with ADR supersession as history, and confines version numbers to released contracts and persisted formats. The agent policy references the skill next to the ADR rule. The prose checker refuses bare version labels in English documents and Japanese replies, the assurance catalog refuses versioned identifier segments in Rust and TypeScript with fixtures, and the Stop hook and answer check refuse any Han character outside JIS X 0208 and JIS X 0213 in Japanese replies from a Unihan-derived table.",
+  "evidence": [
+    "home/dot_agents/skills/decision-naming/SKILL.md",
+    "home/dot_claude/skills/symlink_decision-naming",
+    "home/.chezmoitemplates/partials/agent_policy",
+    "home/dot_config/prose/styles/Dotfiles/VersionLabel.yml",
+    "home/dot_config/assure/catalog.toml",
+    "home/dot_config/assure/rules/version-label.yml",
+    "home/dot_config/assure/rules/typescript-version-label.yml",
+    "home/dot_config/assure/rule-tests/version-label-test.yml",
+    "home/dot_config/assure/rule-tests/typescript-version-label-test.yml",
+    "home/dot_config/prose/japanese.toml",
+    "data/unihan-jis-kanji.txt",
+    "crates/dotguard/src/jis_kanji_table.rs",
+    "crates/dotguard/src/lang.rs",
+    "crates/dotfiles/src/assure.rs",
+    "crates/dotfiles/src/answer.rs"
+  ],
+  "revisit": "Make the reply checker read japanese.toml, or add a generated set of Chinese compounds absent from Japanese dictionaries, so compounds of Japanese characters also fail; add a path check for version-like segments in file and directory names."
+}

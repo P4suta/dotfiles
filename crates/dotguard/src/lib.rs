@@ -17,6 +17,7 @@ pub mod git_wrapper;
 pub mod gitargv;
 #[cfg(unix)]
 pub mod herdr;
+mod jis_kanji_table;
 pub mod lang;
 pub mod locate;
 pub mod postcommit;

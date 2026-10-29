@@ -188,10 +188,10 @@ fn digest(bytes: &[u8]) -> String {
     platform::build_inputs::hex(&Sha256::digest(bytes))
 }
 
-/// The owner-side map for the checkout's GitHub origin, or none for an unsupported origin.
+/// The owner-side map for a GitHub origin or an originless canonical local checkout, or none for an unsupported origin.
 ///
 /// # Errors
-/// Returns an error when Git can't read the checkout's origin.
+/// Returns an error when Git can't read the checkout's origin or the originless checkout has no canonical UTF-8 path.
 pub fn owner_path(root: &Path, catalog: &Catalog) -> Result<Option<PathBuf>> {
     let output = Tool::Git
         .command()
@@ -201,7 +201,17 @@ pub fn owner_path(root: &Path, catalog: &Catalog) -> Result<Option<PathBuf>> {
         .output()
         .context("read checkout origin")?;
     if output.status.code() == Some(1) {
-        return Ok(None);
+        let checkout = platform::paths::canonical(root).context("canonicalize local checkout")?;
+        let identity = checkout
+            .to_str()
+            .context("local checkout path is not UTF-8")?;
+        return Ok(Some(
+            catalog
+                .directory
+                .join(REPOS)
+                .join("local")
+                .join(format!("{}.toml", digest(identity.as_bytes()))),
+        ));
     }
     ensure!(output.status.success(), "cannot read checkout origin");
     let origin = std::str::from_utf8(&output.stdout)?.trim();
@@ -1881,6 +1891,17 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                 );
                 for finding in prose::sentence_per_line(&reply) {
                     reasons.push(format!("Reply line {}: {}", finding.line, finding.message));
+                }
+            }
+            if matches!(language, Some(Language::Japanese)) {
+                for hit in dotguard::lang::scan(
+                    input.last_assistant_message.as_deref().unwrap_or_default(),
+                    dotguard::lang::Mode::Japanese,
+                ) {
+                    reasons.push(format!(
+                        "Reply line {}: {:?} U+{:04X} is {}; write the Japanese form or name the character by its code point.",
+                        hit.line, hit.ch, hit.ch as u32, hit.kind
+                    ));
                 }
             }
             if let Some(language) = language

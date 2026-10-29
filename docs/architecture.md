@@ -59,6 +59,7 @@ The plan runs, in order:
 Agent mutation hooks run `dotfiles lint-hook` over only the written paths.
 The same bounded linter adapter checks scripts before the Bash guard admits execution.
 The pure `lint_hook_rules` selects file types, linters, configuration sources, and admission, while repository configuration keeps its supported exclusions.
+Every file type ends with the OComment check, so comment findings reach the agent in the same turn as the edit.
 Missing linters, timeouts, and findings block with reproducing commands.
 
 The Bash guard collects GitHub publication bodies during the same bounded shell traversal that inspects legacy commands.

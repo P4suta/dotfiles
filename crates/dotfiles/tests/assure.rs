@@ -1,6 +1,6 @@
 //! Each enforcement point refuses a fixture repository with an unowned shape and admits it once its owner exists.
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use dotfiles::assure::{self, Catalog, Kind};
 use dotfiles::refusal::Refusal;
 use dotfiles::shape_rules::{Cause, Verdict};
@@ -407,7 +407,25 @@ fn origin_url_forms_and_case_resolve_the_same_owner_path() -> Result<()> {
         assert_eq!(assure::owner_path(&fixture.root, &catalog)?, None);
     }
     fixture.git(&["remote", "remove", "origin"])?;
-    assert_eq!(assure::owner_path(&fixture.root, &catalog)?, None);
+    let local = assure::owner_path(&fixture.root, &catalog)?.context("missing local owner path")?;
+    assert_eq!(
+        local.parent(),
+        Some(catalog.directory.join("repos/local").as_path())
+    );
+    assert_eq!(
+        assure::owner_path(&fixture.root.join("."), &catalog)?,
+        Some(local.clone())
+    );
+    let another = Fixture::new()?;
+    another.git(&["remote", "remove", "origin"])?;
+    assert_ne!(assure::owner_path(&another.root, &catalog)?, Some(local));
+    fixture.git(&[
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/P4suta/Fixture.git",
+    ])?;
+    assert_eq!(assure::owner_path(&fixture.root, &catalog)?, Some(expected));
     Ok(())
 }
 

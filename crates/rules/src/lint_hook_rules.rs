@@ -30,6 +30,7 @@ pub enum Linter {
     TaploCheck,
     Hadolint,
     Just,
+    Ocomment,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -131,18 +132,23 @@ pub fn classify(path: &str, first_line: &str) -> FileType {
     }
 }
 
+/// The linters of a file type, ending with the comment check that every type receives.
+///
+/// `OComment` selects languages by its own table and skips the rest, so an unknown type still runs it.
 #[must_use]
 pub fn linters(kind: FileType) -> &'static [Linter] {
     match kind {
-        FileType::Shell => &[Linter::Shellcheck, Linter::Shfmt],
-        FileType::Zsh => &[Linter::Zsh],
-        FileType::Python => &[Linter::RuffCheck, Linter::RuffFormat],
-        FileType::JavaScript => &[Linter::Biome],
-        FileType::Workflow | FileType::Action => &[Linter::Actionlint, Linter::Zizmor],
-        FileType::Toml => &[Linter::TaploFormat, Linter::TaploCheck],
-        FileType::Dockerfile => &[Linter::Hadolint],
-        FileType::Justfile => &[Linter::Just],
-        FileType::Other => &[],
+        FileType::Shell => &[Linter::Shellcheck, Linter::Shfmt, Linter::Ocomment],
+        FileType::Zsh => &[Linter::Zsh, Linter::Ocomment],
+        FileType::Python => &[Linter::RuffCheck, Linter::RuffFormat, Linter::Ocomment],
+        FileType::JavaScript => &[Linter::Biome, Linter::Ocomment],
+        FileType::Workflow | FileType::Action => {
+            &[Linter::Actionlint, Linter::Zizmor, Linter::Ocomment]
+        }
+        FileType::Toml => &[Linter::TaploFormat, Linter::TaploCheck, Linter::Ocomment],
+        FileType::Dockerfile => &[Linter::Hadolint, Linter::Ocomment],
+        FileType::Justfile => &[Linter::Just, Linter::Ocomment],
+        FileType::Other => &[Linter::Ocomment],
     }
 }
 
@@ -442,7 +448,7 @@ mod proofs {
     fn any_finding_or_missing_linter_blocks_and_unknown_types_are_admitted() {
         let outcomes = [outcome(), outcome(), outcome()];
         spec_admission(&outcomes);
-        assert!(linters(FileType::Other).is_empty());
+        assert_eq!(linters(FileType::Other), &[Linter::Ocomment]);
         assert_eq!(admission(&[]), Admission::Admit);
         kani::cover!(admission(&outcomes) == Admission::Block);
         kani::cover!(admission(&outcomes) == Admission::Admit);
@@ -456,7 +462,8 @@ mod proofs {
     fn linter_choice_and_configuration_cover_every_type() {
         let kind = kind();
         let present: bool = kani::any();
-        assert_eq!(linters(kind).is_empty(), kind == FileType::Other);
+        assert_eq!(linters(kind).last(), Some(&Linter::Ocomment));
+        assert_eq!(linters(kind).len() == 1, kind == FileType::Other);
         assert_eq!(configuration(present) == Configuration::Repository, present);
         kani::cover!(present && kind == FileType::Shell);
         kani::cover!(!present && kind == FileType::Other);
@@ -605,7 +612,12 @@ mod tests {
             (FileType::Justfile, &[Linter::Just][..]),
             (FileType::Other, &[][..]),
         ] {
-            assert_eq!(linters(kind), expected);
+            let (language, comment) = linters(kind)
+                .split_last()
+                .map(|(last, rest)| (rest, *last))
+                .expect("every type ends with the comment check");
+            assert_eq!(language, expected);
+            assert_eq!(comment, Linter::Ocomment);
         }
         assert_eq!(configuration(true), Configuration::Repository);
         assert_eq!(configuration(false), Configuration::Strict);

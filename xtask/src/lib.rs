@@ -17,6 +17,7 @@ pub mod ignore_audit;
 pub mod input_audit;
 pub mod instruction_audit;
 pub mod inventory;
+pub mod kanji_repertoire;
 pub mod launchers;
 pub mod lean;
 pub mod lint;
