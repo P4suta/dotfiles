@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
+use std::num::NonZeroU16;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -25,6 +26,14 @@ const MILLIS_PER_PERCENT: u64 = 10;
 /// The terminal every cell grid renders into.
 pub const GRID_ROWS: u16 = 24;
 pub const GRID_COLUMNS: u16 = 80;
+const GRID_ROWS_NONZERO: NonZeroU16 = match NonZeroU16::new(GRID_ROWS) {
+    Some(value) => value,
+    None => panic!("terminal grid rows must be nonzero"),
+};
+const GRID_COLUMNS_NONZERO: NonZeroU16 = match NonZeroU16::new(GRID_COLUMNS) {
+    Some(value) => value,
+    None => panic!("terminal grid columns must be nonzero"),
+};
 
 /// The committed cell grids and the file the pager renders, relative to the checkout.
 pub const GOLDENS: &str = "xtask/tests/goldens";
@@ -58,7 +67,7 @@ fn color(color: vt100::Color) -> String {
 /// The cells a terminal shows after `output`, one line each for every cell with text, a color, or an attribute.
 #[must_use]
 pub fn grid(output: &[u8]) -> Vec<String> {
-    let mut parser = vt100::Parser::new(GRID_ROWS, GRID_COLUMNS, 0);
+    let mut parser = vt100::Parser::new(GRID_ROWS_NONZERO, GRID_COLUMNS_NONZERO, 0);
     let mut normalized = Vec::with_capacity(output.len());
     for byte in output {
         if *byte == b'\n' {
@@ -287,7 +296,7 @@ fn fzf_output(config: &str, scope: &Path) -> Result<Vec<u8>> {
     let capture = (|| -> Result<Vec<u8>> {
         let deadline = Instant::now() + TERMINAL_TIMEOUT;
         let mut output = Vec::new();
-        let mut terminal = vt100::Parser::new(GRID_ROWS, GRID_COLUMNS, 0);
+        let mut terminal = vt100::Parser::new(GRID_ROWS_NONZERO, GRID_COLUMNS_NONZERO, 0);
         let mut answered = 0;
         loop {
             let chunk = receiver

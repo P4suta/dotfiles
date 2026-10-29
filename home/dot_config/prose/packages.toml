@@ -1,6 +1,6 @@
 # Pinned Vale and its vendored style packages.
 # The checker refuses a style tree whose digest differs from this record.
-vale = "3.24.0"
+vale = "3.25.1"
 
 [[package]]
 name = "Google"
