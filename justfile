@@ -136,6 +136,9 @@ install-prose: trust
 install-pr-workflow: trust
     mise x -- cargo xtask install-pr-workflow
 
+install-pr-workflow-binary: trust
+    mise x -- cargo xtask install-pr-workflow-binary
+
 install-answer-prover: trust
     mise x -- cargo xtask install-answer-prover
 

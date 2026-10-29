@@ -4709,6 +4709,251 @@ fn work_unit_fixture() -> Result<(Fixture, PathBuf)> {
 }
 
 #[test]
+fn binary_refresh_needs_no_skill_catalog_and_preserves_unrelated_files() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let unrelated = home.path().join("personal-setting.txt");
+    fs::write(&unrelated, b"preserve the owner setting")?;
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_pr-workflow"));
+    let source = platform::freshness::embedded().root;
+    pr_workflow::install_binary(&source, binary, home.path())?;
+    let installed = platform::freshness::Built::PrWorkflow.installed_binary(home.path());
+    assert_eq!(
+        Sha256::digest(fs::read(binary)?),
+        Sha256::digest(fs::read(&installed)?)
+    );
+    let record: serde_json::Value = serde_json::from_slice(&fs::read(
+        home.path()
+            .join(".local/state/dotfiles/installed/pr-workflow"),
+    )?)?;
+    let stamp = platform::freshness::verify_artifact(
+        &source,
+        &installed,
+        platform::freshness::Built::PrWorkflow,
+    )?;
+    assert_eq!(record["build"], serde_json::to_value(stamp)?);
+    assert_eq!(fs::read(unrelated)?, b"preserve the owner setting");
+    assert!(!home.path().join(".agents").exists());
+    assert!(!home.path().join(".config/skill-ops").exists());
+    Ok(())
+}
+
+#[test]
+fn binary_refresh_refuses_a_foreign_source_before_replacing_the_installation() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let source = tempfile::tempdir()?;
+    fs::create_dir_all(source.path().join("crates/platform"))?;
+    fs::write(
+        source.path().join("crates/platform/Cargo.toml"),
+        "[package]\nname = \"platform\"\n",
+    )?;
+    let installed = platform::freshness::Built::PrWorkflow.installed_binary(home.path());
+    fs::create_dir_all(installed.parent().context("installed binary parent")?)?;
+    fs::write(&installed, b"preserve the existing executable")?;
+    let error = pr_workflow::install_binary(
+        source.path(),
+        std::path::Path::new(env!("CARGO_BIN_EXE_pr-workflow")),
+        home.path(),
+    )
+    .expect_err("reject a different producing checkout");
+    assert!(
+        error.to_string().contains("producing checkout differs"),
+        "{error:#}"
+    );
+    assert_eq!(fs::read(installed)?, b"preserve the existing executable");
+    assert!(!home.path().join(".local/state/dotfiles/installed").exists());
+    Ok(())
+}
+
+fn work_command(
+    fixture: &Fixture,
+    checkout: &std::path::Path,
+    operation: &str,
+    pulls: &serde_json::Value,
+) -> Result<Command> {
+    let mut command = fixture.personal_command(operation)?;
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(name);
+        }
+    }
+    command
+        .current_dir(checkout)
+        .env("HOME", fixture.context_home.path())
+        .env("USERPROFILE", fixture.context_home.path())
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            fixture.directory.path().join("gitconfig"),
+        )
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("PWF_FIXTURE_FETCH_CHECKOUT", checkout)
+        .env(
+            "PWF_FIXTURE_FETCH_BARE",
+            fixture.directory.path().join("remote.git"),
+        )
+        .env("GH_FIXTURE_PULLS", pulls.to_string());
+    Ok(command)
+}
+
+#[test]
+fn stack_creation_retires_a_pending_independent_declaration() -> Result<()> {
+    let (fixture, checkout) = work_unit_fixture()?;
+    let parent = git(&checkout, &["rev-parse", "a"])?;
+    let feature = git(&checkout, &["rev-parse", "feature"])?;
+    fixture.assessment(&checkout, "P4suta/project", "feature", "member")?;
+    scoped_git(
+        &checkout,
+        fixture.directory.path(),
+        &["checkout", "-q", "member"],
+    );
+    let pulls = serde_json::json!([
+        owned_work(4, "a", "main", &parent, "P4suta/project"),
+        owned_work(5, "feature", "a", &feature, "P4suta/project")
+    ]);
+    let started = work_command(&fixture, &checkout, "start", &pulls)?
+        .args([
+            "--issue",
+            "23",
+            "--independent",
+            "Pending explicit stack membership",
+        ])
+        .output()?;
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let directory = fixture
+        .context_home
+        .path()
+        .join(".local/state/pr-workflow/independent/p4suta__project");
+    assert_eq!(fs::read_dir(&directory)?.count(), 1);
+    let open = serde_json::json!([
+        {"number":4,"headRefName":"a","baseRefName":"main","author":{"login":"P4suta"},"mergeable":"MERGEABLE"},
+        {"number":5,"headRefName":"feature","baseRefName":"a","author":{"login":"P4suta"},"mergeable":"MERGEABLE"}
+    ]);
+    let output = creation_among_open_prs_command(
+        &fixture,
+        &checkout,
+        "member",
+        &open.to_string(),
+        "feature",
+        "stack create",
+    )?
+    .env("HOME", fixture.context_home.path())
+    .env("USERPROFILE", fixture.context_home.path())
+    .env("GH_FIXTURE_PULLS", pulls.to_string())
+    .args(["--base", "feature"])
+    .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fixture
+            .stack_log()
+            .contains("gh-stack link --base main 4 5 17")
+    );
+    assert_eq!(fs::read_dir(directory)?.count(), 0);
+    Ok(())
+}
+
+#[test]
+fn stack_link_retires_independent_records_only_after_exact_readback() -> Result<()> {
+    for fault in ["none", "provider", "head", "base", "draft"] {
+        let (fixture, checkout) = dependency_fixture()?;
+        let parent = git(&checkout, &["rev-parse", "a"])?;
+        let child = git(&checkout, &["rev-parse", "feature"])?;
+        let assessments = fixture.assessment_records(
+            &checkout,
+            "P4suta/project",
+            &[("a", "main"), ("feature", "a")],
+        )?;
+        let pulls = serde_json::json!([
+            owned_work(4, "a", "main", &parent, "P4suta/project"),
+            owned_work(5, "feature", "main", &child, "P4suta/project")
+        ]);
+        for (branch, head) in [("a", &parent), ("feature", &child)] {
+            scoped_git(
+                &checkout,
+                fixture.directory.path(),
+                &["checkout", "-q", branch],
+            );
+            let started = work_command(&fixture, &checkout, "start", &pulls)?
+                .args([
+                    "--issue",
+                    "23",
+                    "--independent",
+                    "Temporarily separate work",
+                ])
+                .env("GH_FIXTURE_HEAD", head)
+                .output()?;
+            assert!(
+                started.status.success(),
+                "{}",
+                String::from_utf8_lossy(&started.stderr)
+            );
+        }
+        let directory = fixture
+            .context_home
+            .path()
+            .join(".local/state/pr-workflow/independent/p4suta__project");
+        assert_eq!(fs::read_dir(&directory)?.count(), 2);
+        let body = fixture.assessed_body(&fs::read_to_string(&fixture.body)?);
+        let view = |head: &str, base: &str, draft: bool| {
+            serde_json::json!({
+                "title":"fix: preserve edits", "body":body, "state":"OPEN", "isDraft":draft,
+                "headRefOid":head, "baseRefName":base
+            })
+        };
+        let after = view(
+            if fault == "head" { &parent } else { &child },
+            if fault == "base" { "main" } else { "a" },
+            fault != "draft",
+        );
+        let views = format!(
+            "4={}\n4={}\n5={}\n5={}",
+            view(&parent, "main", true),
+            view(&parent, "main", true),
+            view(&child, "main", true),
+            after
+        );
+        let branches = format!(
+            "repos/P4suta/project/branches/main={}\nrepos/P4suta/project/branches/a={}",
+            serde_json::json!({"name":"main","commit":{"sha":git(&checkout, &["rev-parse", "main"])?}}),
+            serde_json::json!({"name":"a","commit":{"sha":parent}})
+        );
+        let mut linking = work_command(&fixture, &checkout, "stack link", &pulls)?;
+        linking
+            .args(["--base", "main", "4", "5"])
+            .env("GH_FIXTURE_VIEWS", views)
+            .env("GH_FIXTURE_BRANCHES", branches)
+            .env("GH_FIXTURE_ASSESSMENTS", assessments);
+        if fault == "provider" {
+            linking.env("GH_STACK_FIXTURE_EXIT", "42");
+        }
+        let output = linking.output()?;
+        assert_eq!(
+            output.status.success(),
+            fault == "none",
+            "{fault}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_dir(&directory)?.count(),
+            if fault == "none" { 0 } else { 2 }
+        );
+        assert!(
+            fixture
+                .stack_log()
+                .contains("gh-stack link --base main 4 5")
+        );
+        assert!(!fixture.stack_log().contains("--open"));
+    }
+    Ok(())
+}
+
+#[test]
 fn a_stack_counts_once_and_independent_units_obey_the_limit() -> Result<()> {
     let (fixture, checkout) = work_unit_fixture()?;
     let scope = fixture.directory.path();
@@ -6681,7 +6926,18 @@ fn create_among_open_prs_command(
     open: &str,
     assessment_base: &str,
 ) -> Result<Command> {
-    let mut command = fixture.personal_command("create")?;
+    creation_among_open_prs_command(fixture, checkout, head, open, assessment_base, "create")
+}
+
+fn creation_among_open_prs_command(
+    fixture: &Fixture,
+    checkout: &std::path::Path,
+    head: &str,
+    open: &str,
+    assessment_base: &str,
+    operation: &str,
+) -> Result<Command> {
+    let mut command = fixture.personal_command(operation)?;
     let (packet, _) = fixture.assessment(
         checkout,
         "P4suta/project",

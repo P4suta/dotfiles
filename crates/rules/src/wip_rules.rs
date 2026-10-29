@@ -19,6 +19,37 @@ pub const fn admits_creation(units: u32, limit: u32, joins_stack: bool) -> bool 
     joins_stack || admits(units, limit)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LinkFacts {
+    pub members: usize,
+    pub distinct: bool,
+    pub owned_open: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InvalidLink {
+    TooShort,
+    Duplicate,
+    NotOwnedOpen,
+}
+
+/// Check the selected membership before changing any remote parent or local declaration.
+///
+/// # Errors
+/// Refuses fewer than two members, duplicate members, or members outside the owned open inventory.
+pub const fn link_admission(facts: LinkFacts) -> Result<(), InvalidLink> {
+    const MIN_LINK_MEMBERS: usize = 2;
+    if facts.members < MIN_LINK_MEMBERS {
+        Err(InvalidLink::TooShort)
+    } else if !facts.distinct {
+        Err(InvalidLink::Duplicate)
+    } else if !facts.owned_open {
+        Err(InvalidLink::NotOwnedOpen)
+    } else {
+        Ok(())
+    }
+}
+
 /// A parent names another member's position in the same live inventory.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(kani, derive(kani::Arbitrary))]
@@ -128,6 +159,38 @@ mod proofs {
         let admitted = admits_creation(units, limit, joins_stack);
         assert_eq!(admitted, joins_stack || units < limit);
         assert!(joins_stack || !admitted || units.saturating_add(1) <= limit);
+    }
+
+    pub fn spec_link_admission(facts: LinkFacts) {
+        let result = link_admission(facts);
+        assert_eq!(
+            result.is_ok(),
+            facts.members >= 2 && facts.distinct && facts.owned_open
+        );
+        match result {
+            Ok(()) => {}
+            Err(InvalidLink::TooShort) => assert!(facts.members < 2),
+            Err(InvalidLink::Duplicate) => assert!(facts.members >= 2 && !facts.distinct),
+            Err(InvalidLink::NotOwnedOpen) => {
+                assert!(facts.members >= 2 && facts.distinct && !facts.owned_open);
+            }
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(2)]
+    fn stack_link_admission_requires_every_membership_fact() {
+        let facts = LinkFacts {
+            members: kani::any(),
+            distinct: kani::any(),
+            owned_open: kani::any(),
+        };
+        spec_link_admission(facts);
+        kani::cover!(link_admission(facts).is_ok() && facts.members == 2);
+        kani::cover!(link_admission(facts).is_ok() && facts.members == usize::MAX);
+        kani::cover!(link_admission(facts) == Err(InvalidLink::Duplicate));
+        kani::cover!(link_admission(facts) == Err(InvalidLink::NotOwnedOpen));
     }
 
     pub fn spec_workload(members: &[StackMember]) -> Result<Workload, InvalidWork> {
@@ -254,6 +317,22 @@ mod tests {
     use super::*;
 
     const BOUNDARIES: [u32; 5] = [0, 1, 2, u32::MAX - 1, u32::MAX];
+
+    #[test]
+    fn stack_linking_requires_a_distinct_owned_open_selection() {
+        for members in [0, 1, 2, 3, usize::MAX] {
+            for distinct in [true, false] {
+                for owned_open in [true, false] {
+                    let facts = LinkFacts {
+                        members,
+                        distinct,
+                        owned_open,
+                    };
+                    proofs::spec_link_admission(facts);
+                }
+            }
+        }
+    }
 
     #[test]
     fn stack_members_at_the_limit_keep_the_existing_unit() {

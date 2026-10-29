@@ -2810,6 +2810,21 @@ fn reject_accepting_a_cycle_as_a_stack() {
     ];
     assert!(production::workload(&members).is_ok());
 }
+#[kani::proof]
+fn reject_linking_a_single_member() {
+    let facts = production::LinkFacts { members: 1, distinct: true, owned_open: true };
+    assert!(production::link_admission(facts).is_ok());
+}
+#[kani::proof]
+fn reject_linking_duplicate_members() {
+    let facts = production::LinkFacts { members: 2, distinct: false, owned_open: true };
+    assert!(production::link_admission(facts).is_ok());
+}
+#[kani::proof]
+fn reject_linking_members_outside_the_owned_open_inventory() {
+    let facts = production::LinkFacts { members: 2, distinct: true, owned_open: false };
+    assert!(production::link_admission(facts).is_ok());
+}
 '''
 
 # `pr-workflow ready` while other hosts push and CI reports, which the model checker visits state by state and the replay test in crates/pr-workflow runs through `pr_ready_rules`.
