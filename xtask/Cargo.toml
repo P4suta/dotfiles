@@ -15,7 +15,7 @@ coderabbit-guard = { path = "../crates/coderabbit-guard" }
 dotfiles = { path = "../crates/dotfiles" }
 dotguard = { path = "../crates/dotguard" }
 flate2 = "1.1.10"
-jsonschema = { version = "=0.58.6", default-features = false }
+jsonschema = { version = "=0.60.1", default-features = false }
 model = { path = "../crates/model" }
 platform = { path = "../crates/platform", features = ["pty"] }
 portable-pty = "0.9.0"
@@ -33,7 +33,7 @@ skill-ops = { path = "../crates/skill-ops" }
 syn = { version = "2.0.119", features = ["full", "visit"] }
 tempfile = "3.27"
 toml = "1.0"
-vt100 = "0.16.2"
+vt100 = "0.18.0"
 yaml-rust2 = "0.13"
 
 [target.'cfg(unix)'.dependencies]

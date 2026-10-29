@@ -5,9 +5,9 @@
     "check": "tsc --noEmit"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.34",
-    "@opencode-ai/sdk": "1.18.34",
-    "@types/bun": "1.4.2",
+    "@opencode-ai/plugin": "1.19.4",
+    "@opencode-ai/sdk": "1.19.4",
+    "@types/bun": "1.4.4",
     "typescript": "7.0.2"
   }
 }
