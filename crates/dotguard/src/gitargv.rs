@@ -2171,10 +2171,49 @@ mod tests {
         }
     }
 
+    /// Claude Code's plugin installer clones a marketplace with every hook off, as it runs here.
+    #[test]
+    fn a_plugin_installer_may_clone_without_hooks() {
+        let args: Vec<String> = [
+            "-c",
+            "core.fsmonitor=",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "core.askPass=",
+            "-c",
+            "submodule.recurse=false",
+            "-c",
+            "hook.post-checkout.enabled=false",
+            "-c",
+            "core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes",
+            "-c",
+            "protocol.ext.allow=never",
+            "-c",
+            "init.defaultRefFormat=files",
+            "clone",
+            "--depth",
+            "1",
+            "--no-recurse-submodules",
+            "--",
+            "https://github.com/P4suta/claude-code-session-band.git",
+            "plugins/marketplaces/P4suta-claude-code-session-band..clone",
+        ]
+        .map(str::to_owned)
+        .into();
+        assert!(
+            inspect(&args).is_none(),
+            "should allow: git {}",
+            args.join(" ")
+        );
+    }
+
     #[test]
     fn the_same_overrides_are_refused_where_they_would_bite() {
         for line in [
             "-c core.hooksPath=/dev/null commit -m x",
+            "-c core.hooksPath=/dev/null pull origin main",
+            "-c core.hooksPath=/dev/null checkout main",
             "-c core.hooksPath= push origin main",
             "-c core.hooksPath=/tmp/other push origin main",
             "-c commit.gpgsign=false commit -m x",
