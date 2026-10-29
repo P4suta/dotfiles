@@ -188,10 +188,10 @@ fn digest(bytes: &[u8]) -> String {
     platform::build_inputs::hex(&Sha256::digest(bytes))
 }
 
-/// The owner-side map for the checkout's GitHub origin, or none for an unsupported origin.
+/// The owner-side map for a GitHub origin or an originless canonical local checkout, or none for an unsupported origin.
 ///
 /// # Errors
-/// Returns an error when Git can't read the checkout's origin.
+/// Returns an error when Git can't read the checkout's origin or the originless checkout has no canonical UTF-8 path.
 pub fn owner_path(root: &Path, catalog: &Catalog) -> Result<Option<PathBuf>> {
     let output = Tool::Git
         .command()
@@ -201,7 +201,17 @@ pub fn owner_path(root: &Path, catalog: &Catalog) -> Result<Option<PathBuf>> {
         .output()
         .context("read checkout origin")?;
     if output.status.code() == Some(1) {
-        return Ok(None);
+        let checkout = platform::paths::canonical(root).context("canonicalize local checkout")?;
+        let identity = checkout
+            .to_str()
+            .context("local checkout path is not UTF-8")?;
+        return Ok(Some(
+            catalog
+                .directory
+                .join(REPOS)
+                .join("local")
+                .join(format!("{}.toml", digest(identity.as_bytes()))),
+        ));
     }
     ensure!(output.status.success(), "cannot read checkout origin");
     let origin = std::str::from_utf8(&output.stdout)?.trim();

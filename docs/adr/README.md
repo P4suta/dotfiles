@@ -120,6 +120,7 @@
 | [2026-10-25 Hold mutation campaign temporary ownership](hold-mutation-campaign-temporary-ownership.md) | proposed |  |
 | [2026-10-25 Resolve script inspection from invocation directories](resolve-script-inspection-from-invocation-directories.md) | proposed |  |
 | [2026-10-25 Verify CI pin readers from the offered source](verify-ci-pin-readers-from-offered-source.md) | proposed |  |
+| [2026-10-26 Identify originless checkouts in the owner map](identify-originless-checkouts-in-the-owner-map.md) | accepted |  |
 | [2026-10-26 Import unborn artifacts after same-issue selections](import-unborn-artifacts-after-same-issue-selections.md) | proposed |  |
 | [2026-10-26 Require PR review by repository policy](require-pr-review-by-repository-policy.md) | proposed |  |
 | [2026-10-29 Check agent-written comments at write time](check-agent-written-comments-at-write-time.md) | proposed |  |
