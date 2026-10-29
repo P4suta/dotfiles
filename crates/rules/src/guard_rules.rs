@@ -1341,8 +1341,14 @@ mod proofs {
     pub const VALUES: [&[u8]; 6] = [b"false", b"OFF", b"", b"ssh", b"x509", b"true"];
     /// How many subcommands the override proofs range over.
     pub const SUBCOMMAND_COUNT: u8 = 6;
-    pub const SUBCOMMANDS: [&[u8]; SUBCOMMAND_COUNT as usize] =
-        [b"commit", b"rev-parse", b"push", b"tag", b"status", b"clone"];
+    pub const SUBCOMMANDS: [&[u8]; SUBCOMMAND_COUNT as usize] = [
+        b"commit",
+        b"rev-parse",
+        b"push",
+        b"tag",
+        b"status",
+        b"clone",
+    ];
 
     /// Every day maps to a valid date that maps back to it, and the next day maps to a later date.
     pub fn spec_date(days: i64) -> (i64, i64, i64) {

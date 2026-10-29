@@ -2201,7 +2201,11 @@ mod tests {
         ]
         .map(str::to_owned)
         .into();
-        assert!(inspect(&args).is_none(), "should allow: git {}", args.join(" "));
+        assert!(
+            inspect(&args).is_none(),
+            "should allow: git {}",
+            args.join(" ")
+        );
     }
 
     #[test]
