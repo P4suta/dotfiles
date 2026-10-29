@@ -60,6 +60,9 @@ enum Action {
         /// Refuses a stale generated file instead of writing it.
         #[arg(long)]
         check: bool,
+        /// Vendors the Japanese kanji repertoire from this verified `Unihan_IRGSources.txt` first.
+        #[arg(long)]
+        irg_sources: Option<PathBuf>,
     },
     /// Compares every profile, signing, and role rendering with its committed manifest and lists the scripts that depend on the command line.
     ProfileSnapshots {
@@ -407,11 +410,15 @@ fn check_profiles(root: &Path, checks: &mut Checks) {
     checks.run("profiles.inputs", || xtask::input_audit::check(root));
 }
 
-fn generate(root: &Path, check: bool) -> Result<()> {
+fn generate(root: &Path, check: bool, irg_sources: Option<&Path>) -> Result<()> {
+    if let Some(irg_sources) = irg_sources {
+        xtask::kanji_repertoire::refresh(root, irg_sources)?;
+    }
     xtask::adr::generate(root, check)?;
     xtask::profiles::data_schema(root, check)?;
     xtask::obligations::schemas(root, check)?;
     xtask::lean::vectors(root, check)?;
+    xtask::kanji_repertoire::table(root, check)?;
     xtask::manifest_model::instance(root, check)?;
     xtask::launchers::generate(root, check)?;
     xtask::njutest_assessment::generate(root, check)?;
@@ -499,7 +506,7 @@ fn run() -> Result<()> {
         } => observe_benchmarks(&cli.root, &output, metadata_only)?,
         Action::BenchmarksObserveReport => report_benchmark_observation(&cli.root)?,
         Action::BenchmarksCpuFeatures => xtask::benchmark_profile::print_processor_features()?,
-        Action::Gen { check } => generate(&cli.root, check)?,
+        Action::Gen { check, irg_sources } => generate(&cli.root, check, irg_sources.as_deref())?,
         Action::ThemeGrids { write } => xtask::profiles::write_theme_grids(&cli.root, write)?,
         Action::FzfGrid => fzf_grid(&cli.root)?,
         Action::ThemePixels(request) => xtask::pixels::advisory(&request),
