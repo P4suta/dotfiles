@@ -244,8 +244,9 @@ pub fn image_is_pinned(image: &[u8]) -> bool {
 }
 
 /// Subcommands that run the commit, merge, push, and checkout hooks.
+/// A clone is absent: its only hook runs the configuration of the repository it just downloaded.
 #[cfg(any(test, kani))]
-const RUNS_HOOKS: [&[u8]; 12] = [
+const RUNS_HOOKS: [&[u8]; 11] = [
     b"commit",
     b"merge",
     b"rebase",
@@ -257,7 +258,6 @@ const RUNS_HOOKS: [&[u8]; 12] = [
     b"checkout",
     b"switch",
     b"applypatch",
-    b"clone",
 ];
 
 /// Subcommands that create a signable object.
@@ -324,6 +324,7 @@ pub fn overrides_policy(key: &[u8], value: &[u8], sub: &[u8]) -> bool {
                     .any(|off| ascii_eq(off, value))
         }
         // A per-invocation hooksPath change can replace every gate in ~/.config/git/hooks.
+        // A clone fires only `post-checkout`, which runs the downloaded repository's own Lefthook configuration, so a plugin installer may turn it off.
         Some(HOOKS_PATH) => matches!(
             sub,
             b"commit"
@@ -337,7 +338,6 @@ pub fn overrides_policy(key: &[u8], value: &[u8], sub: &[u8]) -> bool {
                 | b"checkout"
                 | b"switch"
                 | b"applypatch"
-                | b"clone"
         ),
         // The SSH agent signs every commit, so any other format names a key this machine lacks.
         Some(GPG_FORMAT) => creates_signed_objects(sub) && !ascii_eq(value, b"ssh"),
@@ -1339,7 +1339,16 @@ mod proofs {
         b"user.name",
     ];
     pub const VALUES: [&[u8]; 6] = [b"false", b"OFF", b"", b"ssh", b"x509", b"true"];
-    pub const SUBCOMMANDS: [&[u8]; 5] = [b"commit", b"rev-parse", b"push", b"tag", b"status"];
+    /// How many subcommands the override proofs range over.
+    pub const SUBCOMMAND_COUNT: u8 = 6;
+    pub const SUBCOMMANDS: [&[u8]; SUBCOMMAND_COUNT as usize] = [
+        b"commit",
+        b"rev-parse",
+        b"push",
+        b"tag",
+        b"status",
+        b"clone",
+    ];
 
     /// Every day maps to a valid date that maps back to it, and the next day maps to a later date.
     pub fn spec_date(days: i64) -> (i64, i64, i64) {
@@ -1813,7 +1822,7 @@ mod proofs {
         lower: &[u8],
         kind: u8,
     ) -> bool {
-        let sub = kani::any::<u8>() % 5;
+        let sub = kani::any::<u8>() % SUBCOMMAND_COUNT;
         let offends = spec_override_case::<0>(key, lower, kind, sub)
             | spec_override_case::<2>(key, lower, kind, sub)
             | spec_override_case::<FIRST>(key, lower, kind, sub)
@@ -1877,7 +1886,7 @@ mod proofs {
     #[kani::unwind(20)]
     fn an_unrelated_key_never_overrides() {
         let value = VALUES[usize::from(kani::any::<u8>() % 6)];
-        let sub = SUBCOMMANDS[usize::from(kani::any::<u8>() % 5)];
+        let sub = SUBCOMMANDS[usize::from(kani::any::<u8>() % SUBCOMMAND_COUNT)];
         assert!(!spec_override(KEYS[7], value, sub));
         kani::cover!(sub == b"commit");
         kani::cover!(sub == b"rev-parse");
@@ -2190,7 +2199,7 @@ mod tests {
             (b"gpg.ssh.program", b"gpg.ssh.program", 3),
         ];
         for (key, lower, kind) in keys {
-            for sub in 0..5 {
+            for sub in 0..proofs::SUBCOMMAND_COUNT {
                 proofs::spec_override_case::<0>(key, lower, kind, sub);
                 proofs::spec_override_case::<1>(key, lower, kind, sub);
                 proofs::spec_override_case::<2>(key, lower, kind, sub);
