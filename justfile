@@ -25,6 +25,8 @@ push-check: lint-tools
 
 # The hosted gate for a pull request that skipped the local hooks, such as a Renovate update.
 dependency-gate: trust
+    mise x rust -- cargo fetch --locked --manifest-path benchmarks/Cargo.toml
+    mise x rust -- cargo fetch --locked --manifest-path fuzz/Cargo.toml
     mise x rust -- cargo check --locked --workspace --all-targets
     mise x rust -- cargo test --locked --package xtask --test pins
 
