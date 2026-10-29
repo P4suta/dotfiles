@@ -1893,6 +1893,17 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                     reasons.push(format!("Reply line {}: {}", finding.line, finding.message));
                 }
             }
+            if matches!(language, Some(Language::Japanese)) {
+                for hit in dotguard::lang::scan(
+                    input.last_assistant_message.as_deref().unwrap_or_default(),
+                    dotguard::lang::Mode::Japanese,
+                ) {
+                    reasons.push(format!(
+                        "Reply line {}: {:?} U+{:04X} is {}; write the Japanese form or name the character by its code point.",
+                        hit.line, hit.ch, hit.ch as u32, hit.kind
+                    ));
+                }
+            }
             if let Some(language) = language
                 && reply_language_rules::check(
                     language,

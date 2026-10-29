@@ -785,6 +785,16 @@ fn check(home: &Path, session: &str, draft: &Path, evidence: &Path) -> Result<()
     let state = request(&directory)?;
     let draft = read(draft)?;
     let evidence = read(evidence)?;
+    let foreign = dotguard::lang::scan(&draft, dotguard::lang::Mode::Japanese);
+    ensure!(
+        foreign.is_empty(),
+        "answer draft holds characters outside the Japanese and English repertoires; name a foreign character by its code point instead:\n{}",
+        foreign
+            .iter()
+            .map(|hit| dotguard::lang::evidence("draft", hit))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
     let Plan {
         document,
         proof,

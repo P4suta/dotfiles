@@ -5,7 +5,13 @@
   "evidence": [
     "home/dot_agents/skills/decision-naming/SKILL.md",
     "home/dot_claude/skills/symlink_decision-naming",
-    "home/.chezmoitemplates/partials/agent_policy"
+    "home/.chezmoitemplates/partials/agent_policy",
+    "home/dot_config/prose/japanese.toml",
+    "data/unihan-jis-kanji.txt",
+    "crates/dotguard/src/jis_kanji_table.rs",
+    "crates/dotguard/src/lang.rs",
+    "crates/dotfiles/src/assure.rs",
+    "crates/dotfiles/src/answer.rs"
   ],
   "revisit": "Refuse bare version labels in prose and identifiers and Han characters outside the Japanese repertoire in replies through the checkers, then add a path check for version-like segments in file and directory names."
 }

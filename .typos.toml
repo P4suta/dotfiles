@@ -3,7 +3,9 @@
 # Schema pins and the upstream document manifest keep imported text byte-exact.
 # The signed issue-context transport also contains opaque authenticated bytes.
 # Binary fuzz corpus entries preserve malformed input bytes.
+# The vendored Unihan code point list is hexadecimal numbers.
 extend-exclude = [
+  "data/unihan-jis-kanji.txt",
   ".git/",
   "schemas/vendor/",
   ".pr-workflow/contexts.json",

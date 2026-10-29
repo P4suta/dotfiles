@@ -11,3 +11,5 @@ xtask/proofs/fuzz-fixture/corpus/** binary
 schemas/vendor/*.gz binary
 # Keep prepared pulse code modulation bytes identical to their fixed manifest.
 home/dot_config/dotfiles/notifications/audio/*.wav binary
+# The Japanese word rules list the Chinese terms they refuse, so the language guard must not refuse the list itself.
+home/dot_config/prose/japanese.toml dotguard-lang=off

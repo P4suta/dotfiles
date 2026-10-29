@@ -131,6 +131,8 @@ Follow-up F8: the dotfiles index has a generator, but no shared gate checks inde
 
 Judgment: choosing a descriptive name, naming files and directories, and version labels inside replies have no check.
 The `decision-naming` skill states the rule, and the prose, catalog, and reply checks that refuse version labels and foreign characters follow in their own changes.
+The Stop hook and `dotfiles answer check` refuse a Han character outside the Japanese Industrial Standards X 0208 and X 0213 repertoire in Japanese replies through `dotguard::lang` and the Unihan-derived table in `crates/dotguard/src/jis_kanji_table.rs`.
+The word rules in `japanese.toml` wait for a reply checker that reads them.
 
 > - Use monochrome-design for every visual design task, including interfaces, websites, diagrams, and documents.
 
