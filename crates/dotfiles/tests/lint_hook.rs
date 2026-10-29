@@ -126,6 +126,37 @@ fn scripts_assigned_in_commands_are_linted_and_unresolved_paths_have_a_next_acti
 }
 
 #[test]
+fn a_wrapped_comment_sentence_blocks_and_one_sentence_per_line_is_admitted() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("probe.rs");
+    std::fs::write(
+        &path,
+        "/// Creates the document a New command shows, with its caret placed\n/// after the front matter so typing starts in the body.\npub fn fresh() -> u8 {\n    1\n}\n",
+    )
+    .unwrap();
+    let (_, blocked) = hook(
+        root.path(),
+        "lint-hook",
+        &write_event(root.path(), "probe.rs"),
+    );
+    assert!(blocked.contains("\"decision\":\"block\""), "{blocked}");
+    assert!(blocked.contains("ocomment"), "{blocked}");
+    assert!(blocked.contains("TIDY"), "{blocked}");
+    assert!(blocked.contains("ocomment fix --tidy"), "{blocked}");
+    std::fs::write(
+        &path,
+        "/// Creates the document a New command shows, with its caret placed after the front matter so typing starts in the body.\npub fn fresh() -> u8 {\n    1\n}\n",
+    )
+    .unwrap();
+    let (success, clean) = hook(
+        root.path(),
+        "lint-hook",
+        &write_event(root.path(), "probe.rs"),
+    );
+    assert!(success && !clean.contains("block"), "{clean}");
+}
+
+#[test]
 fn unsupported_binary_files_stay_with_existing_gates() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("image.png"), [0xff, 0xfe]).unwrap();
