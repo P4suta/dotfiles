@@ -1,7 +1,7 @@
 {
-  "revision": "af1f455f2b267bdc710962db543b8e9dfba214029723a0848b88c114fffe0c96",
+  "revision": "e10dacec5abec15bd9f9bfaeaac44822429142a6b152d585e8e2c422ada66c89",
   "outcome": "implemented",
-  "reason": "Separate project verification through documented runners from owner-host caches and authorized configuration rollout checks.",
+  "reason": "The skill tool inventory now pins chezmoi 2.73.3. The existing generation and verification workflow is unchanged, and this metadata update does not claim a current-source build or rollout verification.",
   "evidence": [
     "home/dot_agents/skills/dotfiles/SKILL.md",
     "home/dot_agents/skills/dotfiles/tools.toml",
