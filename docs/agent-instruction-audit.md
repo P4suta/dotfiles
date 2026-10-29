@@ -129,8 +129,9 @@ Follow-up F8: the dotfiles index has a generator, but no shared gate checks inde
 
 > - Use decision-naming before labeling a plan, design, diagram, branch, API, schema, or file, so names carry the decision or property instead of v1, v2, new, old, final, or next.
 
-Judgment: choosing a descriptive name, naming files and directories, and version labels inside replies have no check.
-The `decision-naming` skill states the rule, and the prose, catalog, and reply checks that refuse version labels and foreign characters follow in their own changes.
+Judgment: choosing a descriptive name and naming files and directories have no check.
+The prose checker refuses bare version labels in English documents through `Dotfiles.VersionLabel`.
+The assurance catalog refuses versioned identifier segments in Rust and TypeScript through `version-label`.
 The Stop hook and `dotfiles answer check` refuse a Han character outside the Japanese Industrial Standards X 0208 and X 0213 repertoire in Japanese replies through `dotguard::lang` and the Unihan-derived table in `crates/dotguard/src/jis_kanji_table.rs`.
 The word rules in `japanese.toml` wait for a reply checker that reads them.
 
