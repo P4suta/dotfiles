@@ -11,10 +11,6 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-#[cfg(test)]
-#[path = "../../dotguard/tests/support/fixture_git.rs"]
-mod git_fixture;
-
 /// The one README template of every owner repository.
 const README: &str = include_str!("../assets/repository/README.template");
 
@@ -747,7 +743,7 @@ mod tests {
             format!("[user]\n\tname = {contributor}\n\temail = fixture@example.invalid\n[commit]\n\tgpgsign = false\n"),
         )
         .unwrap();
-        let status = super::git_fixture::command("git", &global)
+        let status = crate::fixture_git::command("git", &global)
             .current_dir(root)
             .args(arguments)
             .status()
