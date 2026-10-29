@@ -1,4 +1,4 @@
 [tools]
 "pr-workflow" = "latest"
-"gh" = "2.102.0|latest"
+"gh" = "2.103.2|latest"
 "gh-stack" = "v0.2.1"
