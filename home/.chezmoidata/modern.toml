@@ -145,7 +145,7 @@ legacy = ["jq"]
 preferred = "jaq"
 tool = "jaq"
 # renovate: datasource=github-releases depName=01mf02/jaq extractVersion=^v(?<version>.+)$
-version = "3.1.1"
+version = "3.1.2"
 reason = "It runs faster and refuses ambiguous filters that jq accepts."
 keep = "A filter that relies on a jq builtin jaq lacks."
 next = "jaq {args}"
@@ -165,7 +165,7 @@ legacy = ["curl", "wget"]
 preferred = "xh"
 tool = "xh"
 # renovate: datasource=github-releases depName=ducaale/xh extractVersion=^v(?<version>.+)$
-version = "0.26.2"
+version = "0.26.3"
 reason = "It prints readable requests and responses."
 keep = "A script that depends on curl's exact behavior, such as a download that a checksum verifies."
 next = "xh {args}"
@@ -207,7 +207,7 @@ legacy = ["man"]
 preferred = "tldr"
 tool = "tealdeer"
 # renovate: datasource=github-releases depName=tealdeer-rs/tealdeer extractVersion=^v(?<version>.+)$
-version = "1.9.0"
+version = "1.9.1"
 reason = "It shows short examples, and `--help` stays the authority."
 keep = "Reading a full manual section."
 next = "`{args} --help`, or tldr {args}"
@@ -250,7 +250,7 @@ legacy = ["df"]
 preferred = "dysk"
 tool = "github:Canop/dysk"
 # renovate: datasource=github-releases depName=Canop/dysk extractVersion=^v(?<version>.+)$
-version = "3.7.1"
+version = "3.8.1"
 reason = "It shows readable mounts and free space on every host."
 keep = "A POSIX script that runs before provisioning, or a caller that parses df's exact output."
 next = "dysk {args}"

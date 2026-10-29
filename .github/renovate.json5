@@ -6,7 +6,7 @@
   // A release waits three days before Renovate proposes it, so a pulled release never reaches a host.
   minimumReleaseAge: '3 days',
   // Version changes arrive only through these managers, as pull requests that pass the required checks.
-  enabledManagers: ['github-actions', 'mise', 'cargo', 'npm', 'dockerfile', 'custom.regex'],
+  enabledManagers: ['github-actions', 'mise', 'cargo', 'bun', 'npm', 'dockerfile', 'custom.regex'],
   // Renovate finds no conda result for zsh, so zsh moves by hand.
   ignoreDeps: ['conda:zsh'],
   customManagers: [
