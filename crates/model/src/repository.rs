@@ -1,5 +1,6 @@
 //! The metadata file every owner repository carries, from which `dotfiles repository` generates the README, the GitHub description, and the license files.
 
+use rules::repository_rules::{LicenseExpression, matches_license_expression};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -18,9 +19,15 @@ pub enum License {
     /// Preserve the existing Apache-2.0-only license assets.
     #[serde(rename = "Apache-2.0")]
     ApacheOnly,
+    /// Preserve the existing Massachusetts Institute of Technology (MIT) license assets.
+    #[serde(rename = "MIT")]
+    MitOnly,
     /// Preserve the existing Affero General Public License version 3 assets.
     #[serde(rename = "AGPL-3.0-only")]
     AgplOnly,
+    /// Preserve the existing Affero General Public License version 3 or later assets.
+    #[serde(rename = "AGPL-3.0-or-later")]
+    AgplOrLater,
     /// Keep the repository unlicensed and make no license claim.
     #[serde(rename = "unlicensed")]
     Unlicensed,
@@ -30,12 +37,15 @@ impl License {
     /// Whether a package manifest declares this exact existing license state.
     #[must_use]
     pub fn matches_expression(self, expression: &str) -> bool {
-        match self {
-            Self::MitOrApache => expression == LICENSE || expression == "Apache-2.0 OR MIT",
-            Self::ApacheOnly => expression == "Apache-2.0",
-            Self::AgplOnly => expression == "AGPL-3.0-only",
-            Self::Unlicensed => false,
-        }
+        let state = match self {
+            Self::MitOrApache => LicenseExpression::MitOrApache,
+            Self::ApacheOnly => LicenseExpression::ApacheOnly,
+            Self::MitOnly => LicenseExpression::MitOnly,
+            Self::AgplOnly => LicenseExpression::AgplOnly,
+            Self::AgplOrLater => LicenseExpression::AgplOrLater,
+            Self::Unlicensed => LicenseExpression::Unlicensed,
+        };
+        matches_license_expression(state, expression.as_bytes())
     }
 }
 
@@ -178,7 +188,7 @@ fn validate_license(value: &Repository) -> Result<(), String> {
                 }
             }
         }
-        License::ApacheOnly | License::AgplOnly => {
+        License::ApacheOnly | License::MitOnly | License::AgplOnly | License::AgplOrLater => {
             let Some(preserved) = preserved else {
                 return Err(format!(
                     "{FILE}: {} requires reviewed preserved license assets",
@@ -241,7 +251,9 @@ fn license_name(license: License) -> &'static str {
     match license {
         License::MitOrApache => LICENSE,
         License::ApacheOnly => "Apache-2.0",
+        License::MitOnly => "MIT",
         License::AgplOnly => "AGPL-3.0-only",
+        License::AgplOrLater => "AGPL-3.0-or-later",
         License::Unlicensed => "unlicensed",
     }
 }
@@ -300,7 +312,9 @@ mod tests {
     fn existing_single_license_states_require_reviewed_root_assets() {
         for (expression, expected) in [
             ("Apache-2.0", License::ApacheOnly),
+            ("MIT", License::MitOnly),
             ("AGPL-3.0-only", License::AgplOnly),
+            ("AGPL-3.0-or-later", License::AgplOrLater),
         ] {
             let text = metadata(
                 &format!("license = \"{expression}\"\n"),
@@ -353,5 +367,24 @@ mod tests {
         assert!(License::MitOrApache.matches_expression("MIT OR Apache-2.0"));
         assert!(License::MitOrApache.matches_expression("Apache-2.0 OR MIT"));
         assert!(!License::MitOrApache.matches_expression("MIT"));
+    }
+
+    #[test]
+    fn single_license_manifest_expressions_match_only_their_exact_state() {
+        for (license, expression) in [
+            (License::ApacheOnly, "Apache-2.0"),
+            (License::MitOnly, "MIT"),
+            (License::AgplOnly, "AGPL-3.0-only"),
+            (License::AgplOrLater, "AGPL-3.0-or-later"),
+        ] {
+            assert!(license.matches_expression(expression));
+            for other in ["Apache-2.0", "MIT", "AGPL-3.0-only", "AGPL-3.0-or-later"] {
+                assert_eq!(
+                    license.matches_expression(other),
+                    other == expression,
+                    "license={license:?}, expression={other}"
+                );
+            }
+        }
     }
 }

@@ -105,9 +105,19 @@
           "const": "Apache-2.0"
         },
         {
+          "description": "Preserve the existing Massachusetts Institute of Technology (MIT) license assets.",
+          "type": "string",
+          "const": "MIT"
+        },
+        {
           "description": "Preserve the existing Affero General Public License version 3 assets.",
           "type": "string",
           "const": "AGPL-3.0-only"
+        },
+        {
+          "description": "Preserve the existing Affero General Public License version 3 or later assets.",
+          "type": "string",
+          "const": "AGPL-3.0-or-later"
         },
         {
           "description": "Keep the repository unlicensed and make no license claim.",

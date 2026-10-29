@@ -108,7 +108,7 @@ fn license_section(metadata: &Repository) -> String {
             }
             section
         }
-        License::ApacheOnly | License::AgplOnly => {
+        License::ApacheOnly | License::MitOnly | License::AgplOnly | License::AgplOrLater => {
             let links = metadata
                 .preserved_licenses
                 .as_ref()
@@ -202,7 +202,7 @@ fn artifacts(root: &Path, metadata: &Repository) -> Result<Generated> {
                     }
                 })
         }
-        License::ApacheOnly | License::AgplOnly => {
+        License::ApacheOnly | License::MitOnly | License::AgplOnly | License::AgplOrLater => {
             if let Some(preserved) = &metadata.preserved_licenses {
                 for asset in &preserved.assets {
                     if !tracked
@@ -420,12 +420,14 @@ fn cargo_declaration_matches(
         };
         let preserved = metadata.preserved_licenses.as_ref();
         return Some(
-            matches!(metadata.license, License::ApacheOnly | License::AgplOnly)
-                && preserved.is_some_and(|preserved| {
-                    preserved.assets.iter().any(|asset| {
-                        asset.path == path && license_matches(root, &asset.path, &asset.sha256)
-                    })
-                }),
+            matches!(
+                metadata.license,
+                License::ApacheOnly | License::MitOnly | License::AgplOnly | License::AgplOrLater
+            ) && preserved.is_some_and(|preserved| {
+                preserved.assets.iter().any(|asset| {
+                    asset.path == path && license_matches(root, &asset.path, &asset.sha256)
+                })
+            }),
         );
     }
     license.map(|value| {
@@ -756,6 +758,10 @@ mod tests {
     }
 
     fn preserved_license_fixture(expression: &str) -> tempfile::TempDir {
+        preserved_license_fixture_at(expression, "LICENSE")
+    }
+
+    fn preserved_license_fixture_at(expression: &str, license_path: &str) -> tempfile::TempDir {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         let git = |args: &[&str]| {
@@ -775,12 +781,12 @@ mod tests {
         };
         git(&["init", "-q"]);
         let license = b"Reviewed existing license grant\nCopyright remains unchanged\n";
-        fs::write(root.join("LICENSE"), license).unwrap();
+        fs::write(root.join(license_path), license).unwrap();
         let digest = platform::build_inputs::hex(Sha256::digest(license).as_ref());
         fs::write(
             root.join(FILE),
             format!(
-                "name = \"fixture\"\nsummary = \"A fixture repository\"\ninstall = \"cargo install fixture\"\nusage = \"fixture --help\"\nlicense = \"{expression}\"\n\n[preserved_licenses]\n[[preserved_licenses.assets]]\npath = \"LICENSE\"\nsha256 = \"{digest}\"\n"
+                "name = \"fixture\"\nsummary = \"A fixture repository\"\ninstall = \"cargo install fixture\"\nusage = \"fixture --help\"\nlicense = \"{expression}\"\n\n[preserved_licenses]\n[[preserved_licenses.assets]]\npath = \"{license_path}\"\nsha256 = \"{digest}\"\n"
             ),
         )
         .unwrap();
@@ -927,8 +933,8 @@ mod tests {
     }
 
     #[test]
-    fn existing_apache_and_agpl_assets_survive_readme_generation() {
-        for expression in ["Apache-2.0", "AGPL-3.0-only"] {
+    fn existing_single_license_assets_survive_readme_generation() {
+        for expression in ["Apache-2.0", "MIT", "AGPL-3.0-only", "AGPL-3.0-or-later"] {
             let directory = preserved_license_fixture(expression);
             let root = directory.path();
             let license = fs::read(root.join("LICENSE")).unwrap();
@@ -945,8 +951,32 @@ mod tests {
     }
 
     #[test]
+    fn mit_license_file_and_readme_link_are_preserved() {
+        let directory = preserved_license_fixture_at("MIT", "LICENSE-MIT");
+        let root = directory.path();
+        fs::write(root.join(README_PATH), "Old README\n").unwrap();
+
+        write(root).unwrap();
+        check(root, None).unwrap();
+
+        assert_eq!(
+            fs::read(root.join("LICENSE-MIT")).unwrap(),
+            b"Reviewed existing license grant\nCopyright remains unchanged\n"
+        );
+        let readme = fs::read_to_string(root.join(README_PATH)).unwrap();
+        assert!(readme.contains("The existing license terms are in [LICENSE-MIT](LICENSE-MIT)."));
+        assert!(!root.join("LICENSE-APACHE").exists());
+    }
+
+    #[test]
     fn untracked_preserved_assets_refuse_before_readme_write_and_staged_assets_pass() {
-        for expression in ["Apache-2.0", "MIT OR Apache-2.0"] {
+        for expression in [
+            "Apache-2.0",
+            "MIT",
+            "AGPL-3.0-only",
+            "AGPL-3.0-or-later",
+            "MIT OR Apache-2.0",
+        ] {
             let directory = if expression == "MIT OR Apache-2.0" {
                 fixture()
             } else {
@@ -981,14 +1011,16 @@ mod tests {
 
     #[test]
     fn changed_single_license_asset_refuses_before_rewriting_the_readme() {
-        let directory = preserved_license_fixture("Apache-2.0");
-        let root = directory.path();
-        let marker = "Keep this README\n";
-        fs::write(root.join(README_PATH), marker).unwrap();
-        fs::write(root.join("LICENSE"), "Changed grant\n").unwrap();
-        let error = write(root).unwrap_err().to_string();
-        assert!(error.contains("LICENSE"), "{error}");
-        assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+        for expression in ["Apache-2.0", "MIT", "AGPL-3.0-only", "AGPL-3.0-or-later"] {
+            let directory = preserved_license_fixture(expression);
+            let root = directory.path();
+            let marker = "Keep this README\n";
+            fs::write(root.join(README_PATH), marker).unwrap();
+            fs::write(root.join("LICENSE"), "Changed grant\n").unwrap();
+            let error = write(root).unwrap_err().to_string();
+            assert!(error.contains("LICENSE"), "{error}");
+            assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+        }
     }
 
     #[test]
@@ -1117,29 +1149,64 @@ mod tests {
     }
 
     #[test]
+    fn npm_manifest_matches_only_the_exact_single_license_state() {
+        for (expression, other) in [
+            ("MIT", "Apache-2.0"),
+            ("AGPL-3.0-or-later", "AGPL-3.0-only"),
+        ] {
+            let directory = preserved_license_fixture(expression);
+            let root = directory.path();
+            let package_json = root.join("package.json");
+            fs::write(
+                &package_json,
+                format!("{{\"name\":\"fixture\",\"license\":\"{expression}\"}}\n"),
+            )
+            .unwrap();
+            stage(root, "package.json");
+            write(root).unwrap();
+            check(root, None).unwrap();
+
+            let marker = "Keep the README unchanged\n";
+            fs::write(root.join(README_PATH), marker).unwrap();
+            fs::write(
+                &package_json,
+                format!("{{\"name\":\"fixture\",\"license\":\"{other}\"}}\n"),
+            )
+            .unwrap();
+
+            let error = write(root).unwrap_err().to_string();
+
+            assert!(error.contains("package.json"), "{error}");
+            assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+        }
+    }
+
+    #[test]
     fn cargo_license_file_is_preserved_only_when_its_asset_digest_is_reviewed() {
-        let directory = preserved_license_fixture("Apache-2.0");
-        let root = directory.path();
-        fs::write(
-            root.join("Cargo.toml"),
-            "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nlicense-file = \"LICENSE\"\n",
-        )
-        .unwrap();
-        write(root).unwrap();
-        check(root, None).unwrap();
+        for expression in ["Apache-2.0", "MIT", "AGPL-3.0-only", "AGPL-3.0-or-later"] {
+            let directory = preserved_license_fixture(expression);
+            let root = directory.path();
+            fs::write(
+                root.join("Cargo.toml"),
+                "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nlicense-file = \"LICENSE\"\n",
+            )
+            .unwrap();
+            write(root).unwrap();
+            check(root, None).unwrap();
 
-        let marker = "Keep the README unchanged\n";
-        fs::write(root.join(README_PATH), marker).unwrap();
-        fs::write(
-            root.join("Cargo.toml"),
-            "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nlicense-file = \"COPYING\"\n",
-        )
-        .unwrap();
+            let marker = "Keep the README unchanged\n";
+            fs::write(root.join(README_PATH), marker).unwrap();
+            fs::write(
+                root.join("Cargo.toml"),
+                "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nlicense-file = \"COPYING\"\n",
+            )
+            .unwrap();
 
-        let error = write(root).unwrap_err().to_string();
+            let error = write(root).unwrap_err().to_string();
 
-        assert!(error.contains("Cargo.toml"), "{error}");
-        assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+            assert!(error.contains("Cargo.toml"), "{error}");
+            assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+        }
     }
 
     #[test]
@@ -1472,7 +1539,9 @@ mod tests {
                 License::ApacheOnly,
                 Some(single_preserved("LICENSE-APACHE")),
             ),
+            (License::MitOnly, Some(single_preserved("LICENSE-MIT"))),
             (License::AgplOnly, Some(single_preserved("LICENSE"))),
+            (License::AgplOrLater, Some(single_preserved("LICENSE"))),
             (License::Unlicensed, None),
         ];
 
