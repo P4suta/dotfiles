@@ -11,6 +11,10 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+#[cfg(test)]
+#[path = "../../dotguard/tests/support/fixture_git.rs"]
+mod git_fixture;
+
 /// The one README template of every owner repository.
 const README: &str = include_str!("../assets/repository/README.template");
 
@@ -541,12 +545,15 @@ fn inherited_workspace_package(
     Ok(None)
 }
 
-/// The authors in the history besides the copyright holder and bots, which need recorded consent before relicensing.
+/// The authors in the history that `HEAD` contains besides the copyright holder and bots, which need recorded consent before relicensing.
 fn contributors(root: &Path, metadata: &Repository) -> Result<Vec<String>> {
+    if platform::local_issues::source(root)? == platform::local_issues::Source::Unborn {
+        return Ok(Vec::new());
+    }
     let log = Tool::Git
         .command()
         .current_dir(root)
-        .args(["log", "--all", "--format=%an"])
+        .args(["log", "--format=%an", "HEAD", "--"])
         .output()?;
     let mut found: Vec<String> = String::from_utf8_lossy(&log.stdout)
         .lines()
@@ -731,6 +738,46 @@ mod tests {
             .downcast_ref::<Refusal>()
             .expect("a structured refusal")
             .clone()
+    }
+
+    fn git_as(root: &Path, contributor: &str, arguments: &[&str]) {
+        let global = root.join(".git").join("fixture.gitconfig");
+        fs::write(
+            &global,
+            format!("[user]\n\tname = {contributor}\n\temail = fixture@example.invalid\n[commit]\n\tgpgsign = false\n"),
+        )
+        .unwrap();
+        let status = super::git_fixture::command("git", &global)
+            .current_dir(root)
+            .args(arguments)
+            .status()
+            .unwrap();
+        assert!(status.success(), "{arguments:?}");
+    }
+
+    #[test]
+    fn consent_covers_only_the_history_head_contains() {
+        let directory = fixture();
+        let root = directory.path();
+        git_as(root, "Owner", &["commit", "--quiet", "-m", "start"]);
+        git_as(root, "Owner", &["switch", "--quiet", "-c", "elsewhere"]);
+        git_as(
+            root,
+            "Contributor",
+            &["commit", "--quiet", "--allow-empty", "-m", "elsewhere"],
+        );
+        git_as(root, "Owner", &["switch", "--quiet", "-"]);
+        check(root, None).unwrap();
+        git_as(
+            root,
+            "Owner",
+            &["merge", "--quiet", "--ff-only", "elsewhere"],
+        );
+        let refusal = refused(root);
+        assert_eq!(
+            (refusal.rule.as_str(), refusal.evidence.as_slice()),
+            ("repository.consent", ["Contributor".to_owned()].as_slice())
+        );
     }
 
     fn preserve_licenses(root: &Path) -> [(&'static str, Vec<u8>); 2] {
