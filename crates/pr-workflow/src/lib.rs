@@ -273,6 +273,15 @@ pub enum Commands {
 
 #[derive(Debug, Subcommand)]
 pub enum StackAction {
+    /// Link an ordered set of existing owned PRs and retire their independent declarations after readback.
+    Link {
+        #[command(flatten)]
+        target: Target,
+        #[arg(long)]
+        base: String,
+        #[arg(num_args = 2.., value_parser = clap::value_parser!(u64).range(1..))]
+        prs: Vec<u64>,
+    },
     /// Create a draft PR for the head on top of the open PR of the base branch, and link the chain as one stack.
     Create {
         #[command(flatten)]
@@ -2205,7 +2214,11 @@ fn create(
         head,
         base,
         independent,
-        work::Operation::Create,
+        if matches!(creation, Creation::Stack) {
+            work::Operation::StackCreate
+        } else {
+            work::Operation::Create
+        },
     )?;
     let stack = CreationStack::select(&target, &work, creation)?;
     let checked =
@@ -2259,8 +2272,8 @@ fn create(
     print!("{created}");
     let number = created_number(&created)?;
     review_policy::remember(&checked, &target, &github, number)?;
-    work.published(number)?;
-    stack.published(&target, number)
+    stack.published(&target, number)?;
+    work.published(number)
 }
 
 fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
@@ -3325,8 +3338,77 @@ fn create_stacked(document: DocumentArgs, head: &str, base: &str, rerun: &str) -
     create(document, head, Some(base), &Creation::Stack, rerun)
 }
 
+fn link_stack(target: &Target, numbers: &[u64], base: &str) -> Result<()> {
+    target.conventional_required()?;
+    require_checkout(target)?;
+    let github = Github::connect()?;
+    let plan = work::LinkPlan::prepare(&github, target, numbers, base)?;
+    let mut before = Vec::new();
+    for member in &plan.members {
+        let live = live_document(&github, target, member.number)?;
+        ensure!(
+            live.state == "OPEN" && live.author.login.eq_ignore_ascii_case(&github.login),
+            "stack members must remain owned open PRs"
+        );
+        ensure!(
+            live.head_ref_oid.as_deref() == Some(&member.sha),
+            "stack PR head changed before linking"
+        );
+        let checked = review_policy::create_binding(
+            &github,
+            target,
+            &live.body,
+            &member.head,
+            Some(&member.base),
+        )?;
+        review_policy::validate_live_source(&checked, &live.source)?;
+        review_policy::admit_publication(&checked, &live.body)?;
+        review_policy::labels(&checked, &live.labels)?;
+        admit_review_request(
+            Operation::Edit,
+            target.generation,
+            &live.body,
+            checked.route,
+            || {
+                Ok((
+                    live.is_draft,
+                    review_exclusion(&target.repo, member.number, &live.body)?,
+                ))
+            },
+        )?;
+        before.push(live);
+    }
+    plan.require_current()?;
+    let mut args = vec!["link".to_owned(), "--base".to_owned(), base.to_owned()];
+    args.extend(numbers.iter().map(u64::to_string));
+    gh_stack(
+        target,
+        None,
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+    )?;
+    for (member, original) in plan.members.iter().zip(before) {
+        let live = live_document(&github, target, member.number)?;
+        ensure!(
+            live.state == "OPEN"
+                && live.head_ref_oid.as_deref() == Some(&member.sha)
+                && live.base_ref_name.as_deref() == Some(&member.base)
+                && live.is_draft == original.is_draft
+                && live.body == original.body
+                && live.title == original.title,
+            "stack link readback changed; inspect the remote stack before another write"
+        );
+    }
+    plan.linked()?;
+    println!(
+        "Linked {} PRs and retired their independent declarations",
+        numbers.len()
+    );
+    Ok(())
+}
+
 fn stack(action: StackAction, rerun: &str) -> Result<()> {
     match action {
+        StackAction::Link { target, base, prs } => link_stack(&target, &prs, &base)?,
         StackAction::Create {
             document,
             head,
@@ -3408,6 +3490,22 @@ pub(crate) fn install(binary: &std::path::Path, user_directory: &std::path::Path
     )?;
     println!("Installed pr-workflow in {}", directory.display());
     Ok(())
+}
+
+/// Refresh only the verified executable and its installation origin.
+///
+/// # Errors
+///
+/// Refuses a stale or foreign artifact and reports installation failures.
+pub fn install_binary(
+    source: &std::path::Path,
+    binary: &std::path::Path,
+    user_directory: &std::path::Path,
+) -> Result<()> {
+    let built = platform::freshness::Built::PrWorkflow;
+    platform::freshness::verify_artifact(source, binary, built)?;
+    install(binary, user_directory)?;
+    platform::freshness::record_installation(user_directory, source, built)
 }
 
 /// Installs the checked PR skill through `apply` and the `pr-workflow` binary under `user_directory`, then records the new catalog.
