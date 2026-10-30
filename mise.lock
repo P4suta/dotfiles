@@ -1710,7 +1710,10 @@ provenance = "github-attestations"
 [[tools."github:Canop/dysk"]]
 version = "3.8.1"
 backend = "github:Canop/dysk"
-specifiers = ["v3.8.1"]
+specifiers = ["3.8.1"]
+
+[tools."github:Canop/dysk".options]
+version_prefix = "v"
 
 [tools."github:Canop/dysk"."platforms.linux-arm64"]
 checksum = "sha256:e983c4863d370ba143cab95abeb520c56a22b98c83b647db828614592a9939a4"

@@ -170,6 +170,10 @@ pub fn catalog(path: &Path) -> Result<Catalog> {
 /// Returns a refusal naming `chezmoi apply` when the host lacks the catalog, and an error when it doesn't parse.
 pub fn installed() -> Result<Catalog> {
     let home = platform::home::home().context("native home is unavailable")?;
+    installed_at(&home)
+}
+
+pub(crate) fn installed_at(home: &Path) -> Result<Catalog> {
     let path = home.join(CATALOG);
     if !path.is_file() {
         return Err(Refusal::new(
@@ -1769,6 +1773,45 @@ fn upstream_base(
 pub fn stop(root: &Path, catalog: &Catalog) -> Result<Outcome> {
     let head = Tree::Commit(resolve(root, "HEAD")?);
     decide(root, catalog, Point::Stop, &head, &Tree::WorkingTree)
+}
+
+pub(crate) fn check_request(
+    root: &Path,
+    baseline: &str,
+    cwd: &Path,
+    catalog: &Catalog,
+) -> Result<()> {
+    ensure!(
+        shape_rules::commit_id(baseline.as_bytes()),
+        "invalid answer assurance baseline commit"
+    );
+    let root = platform::paths::canonical(root)?;
+    ensure!(
+        git(
+            &root,
+            &["rev-parse", "--is-inside-work-tree", "--show-prefix"]
+        )? == b"true\n\n",
+        "answer assurance root is not a repository root"
+    );
+    ensure!(
+        git(&root, &["rev-parse", "--absolute-git-dir"])?
+            == git(cwd, &["rev-parse", "--absolute-git-dir"])?,
+        "answer assurance belongs to another repository"
+    );
+    ensure!(
+        resolve(&root, baseline)?.is_some_and(|resolved| resolved.eq_ignore_ascii_case(baseline)),
+        "answer assurance baseline commit is missing or abbreviated"
+    );
+    enforce(
+        catalog,
+        &decide(
+            &root,
+            catalog,
+            Point::Stop,
+            &Tree::Commit(Some(baseline.to_owned())),
+            &Tree::WorkingTree,
+        )?,
+    )
 }
 
 /// The session start report: every gap of the working tree with its next action, or nothing when it has none.

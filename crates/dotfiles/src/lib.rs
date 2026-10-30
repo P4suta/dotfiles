@@ -1,5 +1,9 @@
 //! The installed runtime behind every Git hook, setup launcher, and agent hook, and the Windows machine setup.
 
+#[cfg(test)]
+#[path = "../../dotguard/tests/support/fixture_git.rs"]
+pub(crate) mod fixture_git;
+
 pub mod answer;
 pub mod artifacts;
 pub mod assure;
