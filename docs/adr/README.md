@@ -124,3 +124,4 @@
 | [2026-10-26 Import unborn artifacts after same-issue selections](import-unborn-artifacts-after-same-issue-selections.md) | proposed |  |
 | [2026-10-26 Require PR review by repository policy](require-pr-review-by-repository-policy.md) | proposed |  |
 | [2026-10-29 Check agent-written comments at write time](check-agent-written-comments-at-write-time.md) | proposed |  |
+| [2026-10-30 Bind official tarballs to verified update records](bind-official-tarballs-to-verified-update-records.md) | proposed |  |

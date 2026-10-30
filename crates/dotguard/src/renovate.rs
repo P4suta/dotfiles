@@ -27,6 +27,7 @@ mod cargo;
 pub mod ci_pin;
 pub mod mise;
 pub mod report;
+pub mod tarball;
 
 const DEFAULT_UPDATE_TYPES: &str = "minor patch pin pinDigest";
 const LOOKUP_REQUEST_TIMEOUT: &str = "5s";
