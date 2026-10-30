@@ -30,6 +30,7 @@ Write short labels that name the content, operation, or state.
 Exclude slogans, poetic hero copy, vague promises, motivational language, and decorative introductory text.
 Add explanatory text only when it helps the reader understand the information or make a concrete decision.
 Treat icons and imagery as communication, and use them only when their meaning is clear.
+Cite the primary sources in `source-bound-interface-design` for structure, form controls, accessibility behavior, and copy.
 
 ## Verification
 

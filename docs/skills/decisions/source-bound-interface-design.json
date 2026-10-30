@@ -1,0 +1,12 @@
+{
+  "revision": "bc9ed0fbfde96d4dfc23eb51f4cb06c7a312a95e2529662e87745ed930df5d1d",
+  "outcome": "implemented",
+  "reason": "The owner asked that interface work consult authoritative sources such as W3C and the Digital Agency instead of memory. This skill requires reading and citing the relevant primary pages before deciding interface structure, form controls, accessibility behavior, or user-facing copy, lists verified W3C, WHATWG, Digital Agency, Web Accessibility Infrastructure Committee, Immigration Services Agency, Agency for Cultural Affairs, and Apple accessibility pages, and states how to reconcile conflicting sources and report gaps. The agent policy requires the skill, and monochrome-design points to it; whether a cited page supports a decision stays a review.",
+  "evidence": [
+    "home/dot_agents/skills/source-bound-interface-design/SKILL.md",
+    "home/dot_claude/skills/symlink_source-bound-interface-design",
+    "home/.chezmoitemplates/partials/agent_policy",
+    "docs/agent-instruction-audit.md"
+  ],
+  "revisit": "Cite the Japanese Industrial Standards Committee page for JIS X 8341-3:2016 once that site resolves, and update the WCAG and JIS references when a JIS edition aligned with WCAG 2.2 is published."
+}
