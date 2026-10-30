@@ -1,6 +1,6 @@
 //! The full profile gate on the repository's Linux verification host.
 
-use crate::skill_proofs::{self, PROOF_IMAGE};
+use crate::skill_proofs;
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use std::path::Path;
@@ -17,7 +17,7 @@ const CONTAINER_OPTIONS_START: usize = 2;
 pub fn check(root: &Path) -> Result<()> {
     let root = crate::canonical(root)?;
     let image = skill_proofs::proof_image(&root)?;
-    skill_proofs::ensure_image(&root, &root.join(PROOF_IMAGE), &image)?;
+    skill_proofs::require_image(&image)?;
     let volume = skill_proofs::container_target_volume(&root);
     let mut arguments = skill_proofs::container_run_arguments(&root, &image, &volume);
     *arguments

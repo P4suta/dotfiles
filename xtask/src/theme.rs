@@ -385,11 +385,7 @@ pub fn fzf_grid(root: &Path, config: &str) -> Result<Vec<String>> {
     if cfg!(windows) {
         let root = crate::canonical(root)?;
         let image = crate::skill_proofs::proof_image(&root)?;
-        crate::skill_proofs::ensure_image(
-            &root,
-            &root.join(crate::skill_proofs::PROOF_IMAGE),
-            &image,
-        )?;
+        crate::skill_proofs::require_image(&image)?;
         let volume = crate::skill_proofs::container_target_volume(&root);
         let mut arguments = crate::skill_proofs::container_run_arguments(&root, &image, &volume);
         arguments.splice(

@@ -430,7 +430,7 @@ pub fn kani_environment_driver() -> Result<std::path::PathBuf> {
     Ok(installed_kani_directory()?.join(KANI_DRIVER))
 }
 
-/// Prepares Kani natively in CI or in the bounded owner-side image.
+/// Prepares Kani natively in CI or checks the prepared owner-side image.
 ///
 /// # Errors
 ///
@@ -438,7 +438,7 @@ pub fn kani_environment_driver() -> Result<std::path::PathBuf> {
 pub fn prepare_kani_environment(root: &Path) -> Result<()> {
     if cfg!(windows) || dotfiles::bounded::requires_container() {
         ensure_linux_engine()?;
-        return ensure_image(root, &root.join(PROOF_IMAGE), &proof_image(root)?);
+        return require_image(&proof_image(root)?);
     }
     if kani_environment_version(root).is_ok() {
         return Ok(());
@@ -865,37 +865,15 @@ pub fn proof_image(root: &Path) -> Result<String> {
     Ok(container_image(&definition))
 }
 
-/// Builds an absent image with the native gate's release pins.
+/// Requires an explicitly prepared Linux image.
 ///
 /// # Errors
 ///
-/// Returns an error when a pin or Docker command fails.
-pub fn ensure_image(root: &Path, definition: &Path, image: &str) -> Result<()> {
-    if crate::container::amd64_image_present(image)? {
-        return Ok(());
-    }
-    let mut command = Tool::Docker.command();
-    command
-        .args([
-            "build",
-            "--platform",
-            crate::container::LINUX_AMD64,
-            "--tag",
-            image,
-            "--file",
-        ])
-        .arg(definition);
-    for pin in ImagePins::load(root)?.arguments() {
-        command.arg("--build-arg").arg(pin);
-    }
-    let output = crate::phase_evidence::output(
-        command.arg(root.join("xtask/proofs")),
-        "verification image build",
-    )?;
+/// Refuses an absent or incompatible image and a failed Docker command.
+pub fn require_image(image: &str) -> Result<()> {
     ensure!(
-        output.status.success(),
-        "building the verification image failed: {}",
-        output.status
+        crate::container::amd64_image_present(image)?,
+        "the pinned linux/amd64 image {image} is unavailable; run `just --command cargo xtask verification-env prepare-image --plan` before explicit preparation"
     );
     Ok(())
 }
@@ -1003,9 +981,8 @@ fn verify_container_window(
     window: Option<std::num::NonZeroU32>,
 ) -> Result<()> {
     ensure_linux_engine().context("Kani proofs on this host run in a Linux container")?;
-    let definition = root.join(PROOF_IMAGE);
     let image = proof_image(root)?;
-    ensure_image(root, &definition, &image)?;
+    require_image(&image)?;
     let image_id = verified_image_id(&image)?;
     crate::container::prepare_cargo(root, &image_id)?;
     let manifest = selected_manifest(root, sources)?;
@@ -1430,7 +1407,7 @@ pub fn verify_answer(root: &Path, policy: Option<&Path>) -> Result<()> {
 fn verify_answer_container(root: &Path, policy: &dotfiles::bounded::Policy) -> Result<()> {
     ensure_linux_engine()?;
     let image = proof_image(root)?;
-    ensure_image(root, &root.join(PROOF_IMAGE), &image)?;
+    require_image(&image)?;
     let image = verified_image_id(&image)?;
     crate::container::prepare_cargo(root, &image)?;
     let mut arguments = container_run_arguments(root, &image, &container_target_volume(root));
@@ -3888,7 +3865,7 @@ mod tests {
         if dotfiles::bounded::requires_container() {
             ensure_linux_engine()?;
             let image = proof_image(root)?;
-            ensure_image(root, &root.join(PROOF_IMAGE), &image)?;
+            require_image(&image)?;
             let image = verified_image_id(&image)?;
             crate::container::prepare_cargo(root, &image)?;
             let mut arguments =
