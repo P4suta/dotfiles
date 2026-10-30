@@ -266,7 +266,7 @@
     {"mode":"0755","path":".config/assure","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/assure/catalog.toml","sha256":"0d55a1ae19e660c81a8c676c75d456e407c225de8ba98f390504ffa79968f6a4","type":"file"},
     {"mode":"0755","path":".config/assure/repos","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".config/assure/repos/p4suta__dotfiles.toml","sha256":"ee9f5abcca0a35a0169d1678cd6b9e040aad6e670a13c8c3cd0ece580b625541","type":"file"},
+    {"mode":"0644","path":".config/assure/repos/p4suta__dotfiles.toml","sha256":"a438428fc2c7b91d60486ae9382ccb85538cdd27b6d04ed90e8976b814e8e5be","type":"file"},
     {"mode":"0755","path":".config/assure/rule-tests","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/assure/rule-tests/catalog-suppression-test.yml","sha256":"338e64983c8b27bd3f50375b3a76e890691b08ee867813f8c5c6eedfeeeb6676","type":"file"},
     {"mode":"0644","path":".config/assure/rule-tests/core-bare-text-test.yml","sha256":"971620a21bd131e5379952d9aadc06e8425fc2eeddc66814b99510a62d022972","type":"file"},

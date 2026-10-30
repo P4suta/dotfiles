@@ -163,6 +163,11 @@ by = "fuzz/fuzz_targets/renovate_report.rs"
 
 [[owner]]
 shape = "parser"
+path = "crates/dotguard/src/renovate/tarball.rs"
+by = "fuzz/fuzz_targets/renovate_report.rs"
+
+[[owner]]
+shape = "parser"
 path = "crates/dotguard/src/renovate/ci_pin.rs"
 by = "fuzz/fuzz_targets/ci_pin.rs"
 

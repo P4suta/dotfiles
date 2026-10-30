@@ -768,6 +768,30 @@ source = "crates/rules/src/freshness_rules.rs"
 probes = '''
 use production::{Facts, Verdict, verdict};
 #[kani::proof]
+fn reject_tarball_coverage_without_its_declaration() {
+    assert!(production::verified_tarball(production::TarballFacts { declaration: production::DeclarationBinding::Unbound, unique: true, source: true, version: true, lookup: production::LookupEvidence::Verified }));
+}
+#[kani::proof]
+fn reject_tarball_coverage_with_ambiguous_matches() {
+    assert!(production::verified_tarball(production::TarballFacts { declaration: production::DeclarationBinding::Bound, unique: false, source: true, version: true, lookup: production::LookupEvidence::Verified }));
+}
+#[kani::proof]
+fn reject_tarball_coverage_from_an_unrelated_source() {
+    assert!(production::verified_tarball(production::TarballFacts { declaration: production::DeclarationBinding::Bound, unique: true, source: false, version: true, lookup: production::LookupEvidence::Verified }));
+}
+#[kani::proof]
+fn reject_tarball_coverage_for_a_different_version() {
+    assert!(production::verified_tarball(production::TarballFacts { declaration: production::DeclarationBinding::Bound, unique: true, source: true, version: false, lookup: production::LookupEvidence::Verified }));
+}
+#[kani::proof]
+fn reject_tarball_coverage_without_a_successful_lookup() {
+    assert!(production::verified_tarball(production::TarballFacts { declaration: production::DeclarationBinding::Bound, unique: true, source: true, version: true, lookup: production::LookupEvidence::Missing }));
+}
+#[kani::proof]
+fn reject_tarball_coverage_with_an_excluded_lookup() {
+    assert!(production::verified_tarball(production::TarballFacts { declaration: production::DeclarationBinding::Bound, unique: true, source: true, version: true, lookup: production::LookupEvidence::NotApplicable }));
+}
+#[kani::proof]
 fn reject_treating_an_inherited_dependency_as_new() {
     assert!(production::introduced(true, false));
 }
