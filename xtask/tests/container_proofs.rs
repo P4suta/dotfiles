@@ -712,6 +712,7 @@ fn a_cached_image_is_reused_only_for_the_pinned_linux_x86_64_semantics() -> anyh
             PathBuf::from(directory).join(format!("docker{}", std::env::consts::EXE_SUFFIX));
         let platform = executable.with_extension("platform");
         let built = executable.with_extension("built");
+        let calls = executable.with_extension("calls");
         for installed in [
             None,
             Some("linux/arm64"),
@@ -726,13 +727,34 @@ fn a_cached_image_is_reused_only_for_the_pinned_linux_x86_64_semantics() -> anyh
             if built.exists() {
                 std::fs::remove_file(&built)?;
             }
-            xtask::skill_proofs::ensure_image(
-                root,
-                &root.join(xtask::skill_proofs::PROOF_IMAGE),
-                "dotfiles-proofs:fixture",
-            )?;
-            assert_eq!(std::fs::read_to_string(&platform)?, "linux/amd64");
-            assert_eq!(built.exists(), installed != Some("linux/amd64"));
+            std::fs::write(&calls, "")?;
+            let ready = xtask::skill_proofs::require_image("dotfiles-proofs:fixture");
+            if installed == Some("linux/amd64") {
+                ready?;
+            } else {
+                let failure = ready.expect_err("an unavailable image must fail readiness");
+                assert!(failure.to_string().contains("prepare-image --plan"));
+            }
+            assert_eq!(
+                std::fs::read_to_string(&platform).ok().as_deref(),
+                installed
+            );
+            assert!(!built.exists(), "readiness must not build an image");
+            let observed = std::fs::read_to_string(&calls)?;
+            assert_eq!(observed.lines().count(), 1, "{observed}");
+            assert!(observed.starts_with("image inspect "), "{observed}");
+            assert!(observed.trim_end().ends_with(" dotfiles-proofs:fixture"));
+            #[cfg(windows)]
+            if installed != Some("linux/amd64") {
+                std::fs::write(&calls, "")?;
+                let failure = xtask::theme::fzf_grid(root, "")
+                    .expect_err("a renderer must refuse an unavailable image");
+                assert!(failure.to_string().contains("prepare-image --plan"));
+                let observed = std::fs::read_to_string(&calls)?;
+                assert_eq!(observed.lines().count(), 1, "{observed}");
+                assert!(observed.starts_with("image inspect "), "{observed}");
+                assert!(!built.exists(), "rendering must not build an image");
+            }
         }
         return Ok(());
     }
@@ -758,6 +780,7 @@ fn a_cached_image_is_reused_only_for_the_pinned_linux_x86_64_semantics() -> anyh
             "--nocapture",
         ])
         .env(IMAGE_PLATFORM_FIXTURE, scope.path())
+        .env_remove("DOTFILES_FZF_WSL_DISTRIBUTION")
         .env("PATH", std::env::join_paths(path)?)
         .env("SKILL_OPS_STATE", scope.path().join("state"))
         .env("DOTFILES_EXPECTED_FAILURE", "")

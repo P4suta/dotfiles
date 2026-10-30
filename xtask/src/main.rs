@@ -137,6 +137,8 @@ enum Action {
     InstallReviewGuard,
     InstallSkillOps,
     InstallPrWorkflow,
+    /// Refresh the verified PR workflow executable without applying shared skills.
+    InstallPrWorkflowBinary,
     /// Build the pinned answer proof image and record its immutable identity on this host.
     InstallAnswerProver,
     /// Verify the answer gate's registered Kani contracts, rejecting probes, and parser corpus.
@@ -513,15 +515,10 @@ fn run() -> Result<()> {
         Action::StartupPrograms { profile, home } => {
             xtask::profiles::print_startup(&cli.root, profile.as_deref(), home.as_deref())?;
         }
-        Action::ProfileSnapshots { write } => {
-            if write {
-                xtask::profile_snapshot::write(&cli.root)?;
-            }
-            xtask::profile_snapshot::check(&cli.root)?;
-            xtask::input_audit::check(&cli.root)?;
-        }
+        Action::ProfileSnapshots { write } => profile_snapshots(&cli.root, write)?,
         Action::PublicAudit { denylist } => xtask::profiles::audit_private(&cli.root, &denylist)?,
         Action::InstallPrWorkflow => install_pr_workflow(&cli.root)?,
+        Action::InstallPrWorkflowBinary => install_pr_workflow_binary(&cli.root)?,
         Action::InstallAnswerProver => install_answer_prover(&cli.root)?,
         Action::AnswerProofs { policy } => {
             xtask::skill_proofs::verify_answer(&cli.root, policy.as_deref())?;
@@ -725,6 +722,19 @@ fn install_pr_workflow(root: &Path) -> Result<()> {
             .context("scoped PR skill installation failed")
     })?;
     platform::freshness::record_installation(&user_directory, root, Built::PrWorkflow)
+}
+
+fn install_pr_workflow_binary(root: &Path) -> Result<()> {
+    let binary = release_binary(root, "pr-workflow", "pr-workflow")?;
+    pr_workflow::install_binary(root, &binary, &user_directory()?)
+}
+
+fn profile_snapshots(root: &Path, write: bool) -> Result<()> {
+    if write {
+        xtask::profile_snapshot::write(root)?;
+    }
+    xtask::profile_snapshot::check(root)?;
+    xtask::input_audit::check(root)
 }
 
 fn install_answer_prover(root: &Path) -> Result<()> {

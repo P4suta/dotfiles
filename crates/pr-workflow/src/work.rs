@@ -1,6 +1,8 @@
 use super::{Github, Target, branch, command, evidence, git_output};
 use anyhow::{Context, Result, ensure};
-use rules::wip_rules::{StackMember, Workload, admits_creation, workload};
+use rules::wip_rules::{
+    InvalidLink, LinkFacts, StackMember, Workload, admits_creation, link_admission, workload,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -15,7 +17,7 @@ const REASON_BYTES: usize = 1024;
 const RECORD_BYTES: u64 = 8192;
 const COMMIT_HEX_DIGITS: usize = 40;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Pull {
     number: u64,
     html_url: String,
@@ -24,12 +26,12 @@ struct Pull {
     base: Base,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct User {
     login: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Head {
     #[serde(rename = "ref")]
     name: String,
@@ -37,19 +39,19 @@ struct Head {
     repo: Option<Repository>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Base {
     #[serde(rename = "ref")]
     name: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Repository {
     id: u64,
     full_name: String,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Declaration {
     schema: u32,
@@ -68,6 +70,7 @@ struct Declaration {
 pub(super) enum Operation {
     Start,
     Create,
+    StackCreate,
 }
 
 pub(super) struct Plan {
@@ -78,6 +81,7 @@ pub(super) struct Plan {
     source: platform::source_identity::Checked,
     head: String,
     prepared_at: String,
+    retired: Vec<Retirement>,
 }
 
 impl Plan {
@@ -99,6 +103,7 @@ impl Plan {
             source,
             head,
             prepared_at,
+            retired: Vec::new(),
         })
     }
 
@@ -113,6 +118,7 @@ impl Plan {
     pub(super) fn before_publication(&self) -> Result<()> {
         self.source.require_current()?;
         require_head(&self.head, &self.prepared_at)?;
+        require_records(&self.retired)?;
         if let Some(declaration) = &self.declaration {
             save(&self.record_path, declaration)?;
         }
@@ -135,6 +141,7 @@ impl Plan {
             record.pr = Some(number);
             save(&self.record_path, &record)?;
         }
+        retire(&self.retired)?;
         Ok(())
     }
 }
@@ -326,11 +333,159 @@ struct Inventory {
     evidence: Vec<String>,
 }
 
+fn linked_pulls(mine: &[Pull], numbers: &[u64], trunk: &str) -> Result<Vec<Pull>> {
+    let mut selected = BTreeSet::new();
+    let duplicate = numbers
+        .iter()
+        .copied()
+        .find(|number| !selected.insert(*number));
+    let unknown = numbers
+        .iter()
+        .copied()
+        .find(|number| !mine.iter().any(|pull| pull.number == *number));
+    match link_admission(LinkFacts {
+        members: numbers.len(),
+        distinct: duplicate.is_none(),
+        owned_open: unknown.is_none(),
+    }) {
+        Ok(()) => {}
+        Err(InvalidLink::TooShort) => anyhow::bail!("a stack needs at least two owned open PRs"),
+        Err(InvalidLink::Duplicate) => anyhow::bail!(
+            "duplicate stack PR #{}",
+            duplicate.context("validated duplicate is missing")?
+        ),
+        Err(InvalidLink::NotOwnedOpen) => anyhow::bail!(
+            "stack PR #{} is not an owned open PR",
+            unknown.context("validated unknown member is missing")?
+        ),
+    }
+    let mut after = mine.to_vec();
+    let mut base = trunk.to_owned();
+    for number in numbers {
+        let pull = after
+            .iter_mut()
+            .find(|pull| pull.number == *number)
+            .with_context(|| format!("stack PR #{number} is not an owned open PR"))?;
+        pull.base.name.clone_from(&base);
+        base.clone_from(&pull.head.name);
+    }
+    Ok(after)
+}
+
+struct Retirement {
+    path: PathBuf,
+    prior: Option<Declaration>,
+}
+
+fn retirement(target: &Target, login: &str, head: &str) -> Result<Retirement> {
+    let path = record_path(target, login, head)?;
+    Ok(Retirement {
+        prior: load(&path)?,
+        path,
+    })
+}
+
+fn require_records(records: &[Retirement]) -> Result<()> {
+    for record in records {
+        ensure!(
+            load(&record.path)? == record.prior,
+            "independent work changed during stack linking"
+        );
+    }
+    Ok(())
+}
+
+fn retire(records: &[Retirement]) -> Result<()> {
+    require_records(records)?;
+    for record in records.iter().filter(|record| record.prior.is_some()) {
+        platform::cleanup::remove_file(&record.path);
+        ensure!(
+            !record.path.try_exists()?,
+            "could not retire the selected independent work record"
+        );
+    }
+    Ok(())
+}
+
+pub(super) struct LinkMember {
+    pub(super) number: u64,
+    pub(super) head: String,
+    pub(super) sha: String,
+    pub(super) base: String,
+}
+
+pub(super) struct LinkPlan {
+    pub(super) members: Vec<LinkMember>,
+    source: platform::source_identity::Checked,
+    retired: Vec<Retirement>,
+}
+
+impl LinkPlan {
+    pub(super) fn prepare(
+        github: &Github,
+        target: &Target,
+        numbers: &[u64],
+        trunk: &str,
+    ) -> Result<Self> {
+        branch(trunk)?;
+        let source = super::source_identity(github, &std::env::current_dir()?, &target.repo)?;
+        ensure!(
+            source.binding().same_repository(),
+            "stack linking requires the destination checkout"
+        );
+        let head = git_output(&["branch", "--show-current"])?;
+        let mine = pulls(github, target, head.trim(), &source)?.mine;
+        let after = linked_pulls(&mine, numbers, trunk)?;
+        let joined: BTreeSet<_> = numbers.iter().copied().collect();
+        let inventory = inventory(github, target, &after, None, &joined)?;
+        ensure!(
+            inventory.work.units() <= github.policy.work_in_progress.limit(&target.repo),
+            "linked work exceeds the repository work limit"
+        );
+        let mut members = Vec::new();
+        let mut retired = Vec::new();
+        for number in numbers {
+            let pull = after
+                .iter()
+                .find(|pull| pull.number == *number)
+                .context("validated stack member missing")?;
+            require_head(&pull.head.name, &pull.head.sha)?;
+            retired.push(retirement(target, &github.login, &pull.head.name)?);
+            members.push(LinkMember {
+                number: *number,
+                head: pull.head.name.clone(),
+                sha: pull.head.sha.clone(),
+                base: pull.base.name.clone(),
+            });
+        }
+        Ok(Self {
+            members,
+            source,
+            retired,
+        })
+    }
+
+    pub(super) fn require_current(&self) -> Result<()> {
+        self.source.require_current()?;
+        require_records(&self.retired)?;
+        for member in &self.members {
+            require_head(&member.head, &member.sha)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn linked(&self) -> Result<()> {
+        self.require_current()?;
+        retire(&self.retired)
+    }
+}
+
 fn inventory(
     github: &Github,
     target: &Target,
     mine: &[Pull],
     active: Option<&Declaration>,
+    joined: &BTreeSet<u64>,
 ) -> Result<Inventory> {
     let repository_id = github.repository(&target.repo)?.id;
     let mut heads = BTreeSet::new();
@@ -345,8 +500,9 @@ fn inventory(
         let record = active
             .filter(|record| record.branch == pull.head.name)
             .or(stored.as_ref());
-        let independent =
-            record.is_some_and(|record| declaration_matches(record, github, repository_id, pull));
+        let independent = !joined.contains(&pull.number)
+            && record
+                .is_some_and(|record| declaration_matches(record, github, repository_id, pull));
         let parent = mine.iter().position(|parent| {
             parent.head.name == pull.base.name
                 && parent.head.repo.as_ref().map(|source| source.id)
@@ -480,6 +636,58 @@ fn require_tip(
     Ok(())
 }
 
+fn parent_retirements(
+    target: &Target,
+    login: &str,
+    head: &str,
+    base: Option<&str>,
+    mine: &[Pull],
+) -> Result<(BTreeSet<u64>, Vec<Retirement>)> {
+    let mut joined = BTreeSet::new();
+    let mut retired = vec![retirement(target, login, head)?];
+    let mut parent = base.context("an explicit stack needs its parent")?;
+    while let Some(pull) = mine.iter().find(|pull| pull.head.name == parent) {
+        ensure!(
+            joined.insert(pull.number),
+            "the selected parent chain contains a cycle"
+        );
+        retired.push(retirement(target, login, &pull.head.name)?);
+        parent = &pull.base.name;
+    }
+    Ok((joined, retired))
+}
+
+fn limit_refusal(
+    github: &Github,
+    target: &Target,
+    work: Workload,
+    limit: u32,
+    evidence: Vec<String>,
+) -> super::Refusal {
+    let mut refusal = super::Refusal::new(
+        "pr.wip",
+        format!(
+            "{} holds {} work units in {}, at its limit of {limit}",
+            github.login,
+            work.units(),
+            target.repo
+        ),
+        command(&[
+            "gh",
+            "pr",
+            "list",
+            "--repo",
+            &target.repo,
+            "--author",
+            &github.login,
+        ]),
+    );
+    for line in evidence {
+        refusal = refusal.evidence(line);
+    }
+    refusal
+}
+
 pub(super) fn prepare(
     github: &Github,
     target: &Target,
@@ -530,33 +738,17 @@ pub(super) fn prepare(
             save(&record_path(target, &github.login, head)?, record)?;
         }
     }
-    let Inventory { work, evidence } = inventory(github, target, &mine, active.as_ref())?;
+    let (joined, retired) = if matches!(operation, Operation::StackCreate) {
+        parent_retirements(target, &github.login, head, requested_base, &mine)?
+    } else {
+        (BTreeSet::new(), Vec::new())
+    };
+    let Inventory { work, evidence } = inventory(github, target, &mine, active.as_ref(), &joined)?;
     let tip = work.tip().and_then(|index| mine.get(index));
     let joins_stack = active.is_none() && tip.is_some();
     let limit = github.policy.work_in_progress.limit(&target.repo);
     if !admits_creation(work.units(), limit, joins_stack || existing.is_some()) {
-        let mut refusal = super::Refusal::new(
-            "pr.wip",
-            format!(
-                "{} holds {} work units in {}, at its limit of {limit}",
-                github.login,
-                work.units(),
-                target.repo
-            ),
-            command(&[
-                "gh",
-                "pr",
-                "list",
-                "--repo",
-                &target.repo,
-                "--author",
-                &github.login,
-            ]),
-        );
-        for line in evidence {
-            refusal = refusal.evidence(line);
-        }
-        return Err(refusal.into());
+        return Err(limit_refusal(github, target, work, limit, evidence).into());
     }
     let stacked = joins_stack && existing.is_none();
     let base = if let Some(tip) = tip.filter(|_| stacked) {
@@ -586,12 +778,84 @@ pub(super) fn prepare(
         source,
         head: head.to_owned(),
         prepared_at,
+        retired,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pull(number: u64, head: &str, base: &str) -> Pull {
+        Pull {
+            number,
+            html_url: format!("https://github.com/owner/project/pull/{number}"),
+            user: User {
+                login: "Owner".into(),
+            },
+            head: Head {
+                name: head.into(),
+                sha: "a".repeat(40),
+                repo: Some(Repository {
+                    id: 37,
+                    full_name: "owner/project".into(),
+                }),
+            },
+            base: Base { name: base.into() },
+        }
+    }
+
+    #[test]
+    fn stack_link_replaces_only_selected_parent_edges() -> Result<()> {
+        let mine = vec![
+            pull(4, "parent", "main"),
+            pull(5, "child", "main"),
+            pull(6, "other", "main"),
+        ];
+        let after = linked_pulls(&mine, &[4, 5], "main")?;
+        assert_eq!(after[0].base.name, "main");
+        assert_eq!(after[1].base.name, "parent");
+        assert_eq!(after[2].base.name, "main");
+        assert_eq!(mine[1].base.name, "main");
+        for invalid in [vec![4], vec![4, 4], vec![4, 7]] {
+            assert!(linked_pulls(&mine, &invalid, "main").is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn stack_retirement_preserves_unrelated_and_changed_records() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let first = directory.path().join("first.json");
+        let second = directory.path().join("second.json");
+        let other = directory.path().join("other.json");
+        let original = declaration();
+        for path in [&first, &second, &other] {
+            save(path, &original)?;
+        }
+        let records = vec![
+            Retirement {
+                path: first.clone(),
+                prior: Some(original.clone()),
+            },
+            Retirement {
+                path: second.clone(),
+                prior: Some(original.clone()),
+            },
+        ];
+        let mut changed = original.clone();
+        changed.reason = "Another checked declaration".into();
+        save(&second, &changed)?;
+        assert!(retire(&records).is_err());
+        assert!(first.exists());
+        assert!(second.exists());
+        save(&second, &original)?;
+        retire(&records)?;
+        assert!(!first.exists());
+        assert!(!second.exists());
+        assert!(load(&other)? == Some(original));
+        Ok(())
+    }
 
     fn declaration() -> Declaration {
         Declaration {
