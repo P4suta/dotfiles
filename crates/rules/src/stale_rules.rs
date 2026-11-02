@@ -64,10 +64,57 @@ pub const fn delegates(freshness: Freshness, origin: Origin, delegated: bool) ->
     matches!(freshness, Freshness::Stale) && matches!(origin, Origin::WorkingCopy) && !delegated
 }
 
+/// How a recorded failed reinstall compares with the current run of the tool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub struct Deferral {
+    /// The failure came from the checkout this run compares with.
+    pub same_checkout: bool,
+    /// That checkout still holds the content the failed reinstall saw.
+    pub same_content: bool,
+    /// The running build is the one installed before the failure.
+    pub same_build: bool,
+}
+
+/// A stale build keeps running, with a warning, while a failed reinstall stays recorded for this checkout, its current content, and this build.
+/// Another checkout, any later source change, or another build refuses again, so the next change retries the reinstall.
+#[must_use]
+pub const fn tolerates(freshness: Freshness, deferral: Option<Deferral>) -> bool {
+    matches!(freshness, Freshness::Stale)
+        && matches!(
+            deferral,
+            Some(Deferral {
+                same_checkout: true,
+                same_content: true,
+                same_build: true
+            })
+        )
+}
+
 /// The properties Kani proves for every input and the tests check over every input they list.
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_tolerates(state: Freshness, deferral: Option<Deferral>) {
+        let tolerated = tolerates(state, deferral);
+        let matching = deferral
+            .is_some_and(|facts| facts.same_checkout && facts.same_content && facts.same_build);
+        assert_eq!(tolerated, state == Freshness::Stale && matching);
+        assert!(!tolerated || !runs(state));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_a_matching_failed_reinstall_keeps_a_stale_build_running() {
+        let state = freshness(kani::any(), kani::any());
+        let deferral: Option<Deferral> = kani::any();
+        spec_tolerates(state, deferral);
+        kani::cover!(tolerates(state, deferral));
+        kani::cover!(
+            state == Freshness::Stale && deferral.is_some() && !tolerates(state, deferral)
+        );
+    }
 
     pub fn spec_delegates(state: Freshness, chosen: Origin, delegated: bool) {
         let handed = delegates(state, chosen, delegated);
@@ -175,6 +222,22 @@ mod tests {
             if let Some(chosen) = super::origin(explicit, working, true) {
                 super::proofs::spec_delegates(super::freshness(found, matching), chosen, delegated);
             }
+        }
+        for [
+            found,
+            matching,
+            recorded,
+            same_checkout,
+            same_content,
+            same_build,
+        ] in flags()
+        {
+            let deferral = recorded.then_some(super::Deferral {
+                same_checkout,
+                same_content,
+                same_build,
+            });
+            super::proofs::spec_tolerates(super::freshness(found, matching), deferral);
         }
     }
 }

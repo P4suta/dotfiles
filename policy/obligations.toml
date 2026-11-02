@@ -2870,6 +2870,30 @@ fn reject_handing_a_handed_run_on_again() {
 fn reject_refusing_a_stale_working_copy() {
     assert!(!production::delegates(production::freshness(true, false), production::Origin::WorkingCopy, false));
 }
+#[kani::proof]
+fn reject_tolerating_a_build_after_its_sources_change_again() {
+    let deferral = production::Deferral { same_checkout: true, same_content: false, same_build: true };
+    assert!(production::tolerates(production::freshness(true, false), Some(deferral)));
+}
+#[kani::proof]
+fn reject_tolerating_another_build() {
+    let deferral = production::Deferral { same_checkout: true, same_content: true, same_build: false };
+    assert!(production::tolerates(production::freshness(true, false), Some(deferral)));
+}
+#[kani::proof]
+fn reject_tolerating_a_failure_from_another_checkout() {
+    let deferral = production::Deferral { same_checkout: false, same_content: true, same_build: true };
+    assert!(production::tolerates(production::freshness(true, false), Some(deferral)));
+}
+#[kani::proof]
+fn reject_tolerating_a_stale_build_without_a_recorded_failure() {
+    assert!(production::tolerates(production::freshness(true, false), None));
+}
+#[kani::proof]
+fn reject_refusing_a_matching_failed_reinstall() {
+    let deferral = production::Deferral { same_checkout: true, same_content: true, same_build: true };
+    assert!(!production::tolerates(production::freshness(true, false), Some(deferral)));
+}
 '''
 
 [[obligation]]
