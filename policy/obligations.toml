@@ -322,8 +322,21 @@ fn reject_ignoring_observed_growth_or_an_unknown_capacity() {
 verifier = "kani"
 source = "crates/rules/src/resource_rules.rs"
 probes = '''
-use production::{Allocation, COMPONENTS, Inodes, Refusal, admission, required};
+use production::{Allocation, COMPONENTS, Inodes, Refusal, admission, reported_inodes, required};
 const PLAN: [Allocation; COMPONENTS] = [Allocation { bytes: 10, inodes: 2 }; COMPONENTS];
+#[kani::proof]
+#[kani::unwind(7)]
+fn reject_admitting_a_fixed_table_shortfall() {
+    assert!(admission(PLAN, Some(60), reported_inodes(100, 11)).is_ok());
+}
+#[kani::proof]
+fn reject_reading_an_exhausted_fixed_table_as_tableless() {
+    assert_eq!(reported_inodes(12, 0), Inodes::NotApplicable);
+}
+#[kani::proof]
+fn reject_trusting_more_free_inodes_than_the_total() {
+    assert_eq!(reported_inodes(0, 12), Inodes::NotApplicable);
+}
 #[kani::proof]
 #[kani::unwind(7)]
 fn reject_omitting_the_competing_allocation() {

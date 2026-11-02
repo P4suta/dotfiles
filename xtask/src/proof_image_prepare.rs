@@ -452,7 +452,7 @@ impl Observation {
                         "observed inodes crossed the protected floor or declared allocation"
                     );
                 }
-                (Inodes::NotApplicable, Inodes::NotApplicable) if cfg!(windows) => {}
+                (Inodes::NotApplicable, Inodes::NotApplicable) => {}
                 _ => anyhow::bail!("current inode observation is unknown"),
             }
         }
@@ -1215,10 +1215,8 @@ impl Docker {
         )?
         .checked_mul(KIB_BYTES)
         .context("guest capacity overflow")?;
-        let guest_inodes = Inodes::Available(df_available(
-            &self.guest("guest-inodes", owned, GUEST_DF, &["-Pi", state])?,
-            "IFree",
-        )?);
+        let guest_inodes =
+            df_inodes(&self.guest("guest-inodes", owned, GUEST_DF, &["-Pi", state])?)?;
         let host_memory = self.call("host-memory", platform::process::command(VM_STAT), None)?;
         let host_memory_available = mac_free_memory(&Self::text(&host_memory)?)?;
         let guest_memory_available =
@@ -1616,6 +1614,14 @@ fn df_available(text: &str, heading: &str) -> Result<u64> {
         minimum = Some(minimum.map_or(value, |previous: u64| previous.min(value)));
     }
     minimum.context("capacity output has no measured row")
+}
+
+/// The inode capacity of a Linux `df -Pi` report, which names the inode total of each row.
+fn df_inodes(text: &str) -> Result<Inodes> {
+    Ok(resource_rules::reported_inodes(
+        df_available(text, "Inodes")?,
+        df_available(text, "IFree")?,
+    ))
 }
 
 fn memory_available(text: &str) -> Result<u64> {
@@ -2142,6 +2148,30 @@ mod tests {
         assert!(df_available("Filesystem Available\nx not-a-count", "Available").is_err());
         assert!(load_admitted("18\n{ NaN 0 0 }", "0 0 0 1/1 1", 8).is_err());
         assert!(!load_admitted("18\n{ 17 0 0 }", "0 0 0 1/1 1", 8)?);
+        Ok(())
+    }
+
+    #[test]
+    fn a_guest_without_an_inode_table_is_admitted_and_a_fixed_table_keeps_its_shortfall()
+    -> Result<()> {
+        let header = "Filesystem     Inodes IUsed IFree IUse% Mounted on";
+        let tableless = format!("{header}\noverlay             0     0     0     - /");
+        assert_eq!(df_inodes(&tableless)?, Inodes::NotApplicable);
+        let short = format!("{header}\n/dev/vda1     3300000 1 3299999   1% /");
+        assert_eq!(df_inodes(&short)?, Inodes::Available(3_299_999));
+        let inconsistent = format!("{header}\noverlay             0     0     5     - /");
+        assert_eq!(df_inodes(&inconsistent)?, Inodes::Unmeasured);
+        assert!(df_inodes("Filesystem IFree\noverlay 0").is_err());
+        let mut current = observation()?;
+        current.capacity.guest_inodes = df_inodes(&tableless)?;
+        current.admit()?;
+        let initial = observation()?;
+        let mut tableless_initial = observation()?;
+        tableless_initial.capacity.guest_inodes = Inodes::NotApplicable;
+        current.continuing(&tableless_initial)?;
+        assert!(current.continuing(&initial).is_err());
+        current.capacity.guest_inodes = df_inodes(&short)?;
+        assert!(current.admit().is_err());
         Ok(())
     }
 
