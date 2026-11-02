@@ -20,8 +20,6 @@ const CHANGE_LINE: u8 = 0;
 const HUNK_START: u8 = 1;
 /// The most commits a live PR head may hold beyond its local branch and base before the source check stops looking.
 const MAX_HELD_COMMITS: usize = 64;
-/// The exit status of `git merge-base --is-ancestor` for a commit that isn't an ancestor.
-const GIT_NOT_ANCESTOR: i32 = 1;
 /// Starts the line that once carried a signed assessment in a PR body, which a published document now refuses.
 pub(super) const PACKET_PREFIX: &str = "<!-- pr-review-assessment:";
 const MAX_ASSESSMENT_BYTES: usize = 16 * 1024;
@@ -1750,7 +1748,7 @@ fn held_commits(
     for commit in commits.iter().take(MAX_HELD_COMMITS) {
         let parents = commit.get(1..).unwrap_or_default();
         let merges_base = match parents {
-            [_, second] => contains(root, second, &binding.base)?,
+            [_, second] => platform::signed_git::is_ancestor(root, second, &binding.base)?,
             _ => false,
         };
         held.push(rules::pr_merge_rules::HeldCommit {
@@ -1762,29 +1760,6 @@ fn held_commits(
         });
     }
     Ok((held, commits.len() <= MAX_HELD_COMMITS))
-}
-
-/// Whether `descendant` contains `ancestor`.
-pub(super) fn contains(root: &Path, ancestor: &str, descendant: &str) -> Result<bool> {
-    let output = platform::tool::Tool::Git
-        .command()
-        .current_dir(root)
-        .args([
-            "--no-replace-objects",
-            "merge-base",
-            "--is-ancestor",
-            ancestor,
-            descendant,
-        ])
-        .output()?;
-    match output.status.code() {
-        Some(0) => Ok(true),
-        Some(GIT_NOT_ANCESTOR) => Ok(false),
-        _ => anyhow::bail!(
-            "could not compare {ancestor} with {descendant}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ),
-    }
 }
 
 pub(super) fn admit_ready(

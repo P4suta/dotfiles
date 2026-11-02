@@ -351,7 +351,14 @@ fn current(root: &Path, selection: &Selection) -> Result<()> {
             git(root, &["rev-parse", &format!("{head}^{{tree}}")], None)?.trim() == tree,
             "local issue source tree differs"
         );
-        git(root, &["merge-base", "--is-ancestor", head, "HEAD"], None)?;
+        if !context::is_ancestor(root, head, "HEAD")? {
+            let current = git(root, &["rev-parse", "--verify", "HEAD"], None)?;
+            anyhow::bail!(
+                "local issue source {head} is not an ancestor of {} at {}; restore it in the branch history, or select the issue on a new branch",
+                selection.branch,
+                current.trim()
+            );
+        }
     } else {
         source(root)?;
     }

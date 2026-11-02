@@ -1,6 +1,6 @@
-use super::review_policy::contains;
 use super::{Github, Target, branch, command, evidence, git_output};
 use anyhow::{Context, Result, ensure};
+use platform::signed_git::is_ancestor;
 pub(super) use rules::wip_rules::Operation;
 use rules::wip_rules::{
     Carry, InvalidLink, LinkFacts, StackMember, StaleStart, StoredStart, Workload, admits_creation,
@@ -584,7 +584,9 @@ fn pending(
         {
             StoredStart::OtherWork
         }
-        Some(record) if contains(&std::env::current_dir()?, &record.started_at, prepared_at)? => {
+        Some(record)
+            if is_ancestor(&std::env::current_dir()?, &record.started_at, prepared_at)? =>
+        {
             StoredStart::Descendant
         }
         Some(_) => StoredStart::LeftHistory,
@@ -614,7 +616,7 @@ fn require_tip(
         "the open stack tip belongs to another checkout source"
     );
     git_output(&["fetch", "--quiet", "origin", &tip.head.sha])?;
-    if !contains(&std::env::current_dir()?, &tip.head.sha, current)? {
+    if !is_ancestor(&std::env::current_dir()?, &tip.head.sha, current)? {
         return Err(super::Refusal::new(
             "pr.stack-tip",
             format!(

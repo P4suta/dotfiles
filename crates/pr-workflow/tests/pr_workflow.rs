@@ -1209,8 +1209,14 @@ fn a_new_local_project_prepares_unborn_scoped_work_without_github() -> Result<()
         ],
     )?;
     git(root, &["update-ref", "refs/heads/main", &unrelated])?;
+    let lost = platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home.path())
+        .expect_err("an unrelated head must refuse the local issue edit");
+    let lost = format!("{lost:#}");
     assert!(
-        platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home.path()).is_err()
+        lost.contains(&format!(
+            "local issue source {first_head} is not an ancestor of main at {unrelated}"
+        )) && !lost.contains("signed-evidence Git failed"),
+        "{lost}"
     );
     git(root, &["update-ref", "refs/heads/main", &first_head])?;
     platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home.path())?;
@@ -2856,6 +2862,76 @@ fn every_worktree_of_a_repository_finds_the_context_of_its_branch() -> Result<()
         )
         .is_err(),
         "the parking branch of the first worktree has no context"
+    );
+    Ok(())
+}
+
+#[test]
+fn an_amended_start_commit_names_the_recorded_commit_and_a_working_recovery() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let root = platform::issue_context::checkout(fixture.directory.path())?;
+    let paths = [PathBuf::from("body.md")];
+    let mut start = fixture.personal_command("start")?;
+    start.args(["--issue", "23"]);
+    let variables: Vec<_> = start
+        .get_envs()
+        .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value.to_owned())))
+        .collect();
+    let started = start.output()?;
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let recorded = fixture.head.clone();
+    git(
+        &root,
+        &[
+            "commit",
+            "--quiet",
+            "--amend",
+            "--allow-empty",
+            "-m",
+            "amended",
+        ],
+    )?;
+    let amended = git(&root, &["rev-parse", "HEAD"])?;
+    fs::write(root.join("body.md"), "Work in progress.\n")?;
+    let named = |text: &str| {
+        text.contains(&format!(
+            "issue-context start commit {recorded} is not an ancestor of feature at {amended}"
+        )) && text.contains(&format!("git reset --soft {recorded}"))
+            && text.contains("start the issue on a new branch")
+            && !text.contains("signed-evidence Git failed")
+    };
+    let guarded = platform::issue_context::guard_for(&root, &paths, fixture.context_home.path())
+        .expect_err("an amended start commit must refuse the edit");
+    assert!(named(&format!("{guarded:#}")), "{guarded:#}");
+    let restarted = fixture
+        .personal_command("start")?
+        .args(["--issue", "23"])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&restarted.stderr);
+    assert!(!restarted.status.success() && named(&stderr), "{stderr}");
+    git(&root, &["add", "body.md"])?;
+    let checked = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), &root)
+        .current_dir(&root)
+        .envs(variables.iter().cloned())
+        .args(["change-check", "--staged"])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&checked.stderr);
+    assert!(!checked.status.success() && named(&stderr), "{stderr}");
+    git(&root, &["reset", "--soft", &recorded])?;
+    platform::issue_context::guard_for(&root, &paths, fixture.context_home.path())?;
+    let recovered = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), &root)
+        .current_dir(&root)
+        .envs(variables.iter().cloned())
+        .args(["change-check", "--staged"])
+        .output()?;
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
     );
     Ok(())
 }
