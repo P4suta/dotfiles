@@ -352,16 +352,9 @@ mod proofs {
     #[cfg(kani)]
     #[kani::proof]
     #[kani::unwind(12)]
-    fn the_empty_graph_matches_parent_path_validation() {
-        let result = spec_workload(&[]);
-        assert!(result.is_ok_and(|work| work.units() == 0 && work.tip().is_none()));
-        kani::cover!(result.is_ok());
-    }
-
-    #[cfg(kani)]
-    #[kani::proof]
-    #[kani::unwind(12)]
-    fn every_graph_of_one_member_matches_parent_path_validation() {
+    fn every_graph_of_at_most_one_member_matches_parent_path_validation() {
+        let empty = spec_workload(&[]);
+        assert!(empty.is_ok_and(|work| work.units() == 0 && work.tip().is_none()));
         let members: [StackMember; 1] = kani::any();
         let result = spec_workload(&members);
         kani::cover!(result.is_ok());
