@@ -2895,6 +2895,36 @@ fn reject_linking_members_outside_the_owned_open_inventory() {
     let facts = production::LinkFacts { members: 2, distinct: true, owned_open: false };
     assert!(production::link_admission(facts).is_ok());
 }
+#[kani::proof]
+fn reject_a_start_refresh_that_ignores_its_own_declaration() {
+    use production::{Carry, Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::Start, StoredStart::Descendant) == Ok(Carry::Undeclared));
+}
+#[kani::proof]
+fn reject_a_start_refresh_that_carries_a_declaration_for_other_work() {
+    use production::{Carry, Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::Start, StoredStart::OtherWork) == Ok(Carry::Declared));
+}
+#[kani::proof]
+fn reject_a_start_refresh_that_carries_a_declaration_from_another_history() {
+    use production::{Carry, Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::Start, StoredStart::LeftHistory) == Ok(Carry::Declared));
+}
+#[kani::proof]
+fn reject_a_creation_from_a_declaration_for_other_work() {
+    use production::{Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::Create, StoredStart::OtherWork).is_ok());
+}
+#[kani::proof]
+fn reject_a_creation_from_a_declaration_from_another_history() {
+    use production::{Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::Create, StoredStart::LeftHistory).is_ok());
+}
+#[kani::proof]
+fn reject_a_stack_member_that_carries_a_start_declaration() {
+    use production::{Carry, Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::StackCreate, StoredStart::Descendant) == Ok(Carry::Declared));
+}
 '''
 
 # `pr-workflow ready` while other hosts push and CI reports, which the model checker visits state by state and the replay test in crates/pr-workflow runs through `pr_ready_rules`.
