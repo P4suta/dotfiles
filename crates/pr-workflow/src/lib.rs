@@ -2082,6 +2082,10 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
         } => {
             target.conventional_required()?;
             let github = Github::connect()?;
+            let open = open_prs(&target)?;
+            for &pr in &prs {
+                require_unstacked(&target, &open, pr)?;
+            }
             for pr in prs {
                 merge_independent(&github, &target, pr, polling, rerun)?;
             }
@@ -2516,6 +2520,54 @@ fn open_prs(target: &Target) -> Result<Vec<OpenPr>> {
         .into_iter()
         .filter(|pr| !pr.is_cross_repository)
         .collect())
+}
+
+/// `merge` lands a stack of one.
+/// GitHub merges a member of a longer stack only through its asynchronous endpoint, which `stack merge` uses with the members below it.
+fn require_unstacked(target: &Target, open: &[OpenPr], pr: u64) -> Result<()> {
+    let Some(member) = open.iter().find(|open| open.number == pr) else {
+        return Ok(());
+    };
+    let related: Vec<_> = open
+        .iter()
+        .filter_map(|other| {
+            if other.head_ref_name == member.base_ref_name {
+                Some(format!(
+                    "parent #{} ({})",
+                    other.number, other.head_ref_name
+                ))
+            } else if other.base_ref_name == member.head_ref_name {
+                Some(format!("child #{} ({})", other.number, other.head_ref_name))
+            } else {
+                None
+            }
+        })
+        .collect();
+    if related.is_empty() {
+        return Ok(());
+    }
+    let mut refusal = Refusal::new(
+        "pr.stack",
+        format!(
+            "#{pr} belongs to an open stack; `stack merge` lands it with the members below it through GitHub's asynchronous merge"
+        ),
+        command(&[
+            "pr-workflow",
+            "stack",
+            "merge",
+            "--repo",
+            &target.repo,
+            "--pr",
+            &pr.to_string(),
+        ]),
+    );
+    for relation in related {
+        refusal = refusal.evidence(format!(
+            "#{pr} ({}) on {} has {relation}",
+            member.head_ref_name, member.base_ref_name
+        ));
+    }
+    Err(refusal.into())
 }
 
 /// Returns the open PRs from the trunk up to the one whose head matches `head`, bottom first, and the trunk below them.
