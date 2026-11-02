@@ -123,6 +123,171 @@ pub(super) fn start(
     Ok(())
 }
 
+/// An issue context of a local stack branch, with what that branch held before a leased restack.
+pub(super) struct Restacking {
+    receipt: Receipt,
+    head: String,
+    was_current: bool,
+    base: String,
+    change: String,
+}
+
+/// The local head of `branch`, if the branch exists.
+fn branch_head(root: &Path, branch: &str) -> Option<String> {
+    state::git(
+        root,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}^{{commit}}"),
+        ],
+        None,
+    )
+    .ok()
+    .map(|head| head.trim().to_owned())
+}
+
+/// The commit a stack member's base names: the remote trunk, or the local head of a parent member.
+fn base_head(root: &Path, base: &str, trunk: &str) -> Result<String> {
+    let reference = if base == trunk {
+        format!("refs/remotes/origin/{trunk}")
+    } else if branch_head(root, base).is_some() {
+        format!("refs/heads/{base}")
+    } else {
+        format!("refs/remotes/origin/{base}")
+    };
+    Ok(state::git(
+        root,
+        &["rev-parse", "--verify", &format!("{reference}^{{commit}}")],
+        None,
+    )?
+    .trim()
+    .to_owned())
+}
+
+/// The issue contexts of branches that exist in this clone.
+pub(super) fn local_contexts(root: &Path) -> Result<Vec<Receipt>> {
+    let Some(manifest) = state::optional_local(root)? else {
+        return Ok(Vec::new());
+    };
+    Ok(manifest
+        .receipts
+        .into_iter()
+        .filter(|receipt| branch_head(root, &receipt.context.branch).is_some())
+        .collect())
+}
+
+/// Records each open stack member's context, head, and change before a leased restack rewrites it.
+pub(super) fn before_restack(
+    root: &Path,
+    contexts: Vec<Receipt>,
+    open: &[super::OpenPr],
+    trunk: &str,
+) -> Result<Vec<Restacking>> {
+    let mut restacking = Vec::new();
+    for receipt in contexts {
+        let branch = &receipt.context.branch;
+        let (Some(head), Some(member)) = (
+            branch_head(root, branch),
+            open.iter().find(|pr| pr.head_ref_name == *branch),
+        ) else {
+            continue;
+        };
+        let base = member.base_ref_name.clone();
+        let change =
+            super::review_policy::change_identity(root, &base_head(root, &base, trunk)?, &head)?;
+        restacking.push(Restacking {
+            was_current: state::is_ancestor(root, &receipt.context.head, &head)?,
+            receipt,
+            head,
+            base,
+            change,
+        });
+    }
+    Ok(restacking)
+}
+
+/// Moves each context whose branch the restack rewrote without changing its own change, and names each context it leaves behind.
+pub(super) fn after_restack(
+    github: &Github,
+    root: &Path,
+    repository: &str,
+    trunk: &str,
+    restacking: Vec<Restacking>,
+) -> Result<()> {
+    use rules::restack_rules::{Carry, Movement, carry};
+    for entry in restacking {
+        let context = &entry.receipt.context;
+        let Some(head) = branch_head(root, &context.branch) else {
+            continue;
+        };
+        let movement = if head == entry.head {
+            Movement::Unmoved
+        } else if state::is_ancestor(root, &context.head, &head)? {
+            Movement::StillCurrent
+        } else {
+            Movement::Rewritten
+        };
+        let same_change = movement == Movement::Rewritten
+            && entry.was_current
+            && super::review_policy::change_identity(
+                root,
+                &base_head(root, &entry.base, trunk)?,
+                &head,
+            )? == entry.change;
+        match carry(movement, entry.was_current, same_change) {
+            Carry::Unchanged => {}
+            Carry::Left => println!(
+                "Left the issue context of {} at {}: the restack changed its own change or it no longer held; start the issue again on that branch",
+                context.branch, context.head
+            ),
+            Carry::Carried if context.adopted => println!(
+                "Left the issue context of {} at {}: an adopted baseline needs a new start after a restack",
+                context.branch, context.head
+            ),
+            Carry::Carried => {
+                carry_context(github, root, repository, &entry.receipt, &head)?;
+                println!(
+                    "Carried the issue context of {} to {head}: the restack kept its own change",
+                    context.branch
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Records `receipt`'s context again at the rewritten `head`, after authenticating the receipt it replaces.
+fn carry_context(
+    github: &Github,
+    root: &Path,
+    repository: &str,
+    receipt: &Receipt,
+    head: &str,
+) -> Result<()> {
+    let tree = state::git(root, &["rev-parse", &format!("{head}^{{tree}}")], None)?;
+    let context = state::Context {
+        head: head.to_owned(),
+        tree: tree.trim().to_owned(),
+        ..receipt.context.clone()
+    };
+    let carried = if receipt.object.is_empty() {
+        Receipt {
+            context,
+            object: String::new(),
+            signed_commit: String::new(),
+        }
+    } else {
+        let signers = signers(github, repository)?;
+        state::authenticate(root, receipt, signers.path())?;
+        let carried = state::signed(root, context)?;
+        state::authenticate(root, &carried, signers.path())?;
+        carried
+    };
+    state::persist(root, carried, &state::binding(root)?)
+}
+
 fn identity(root: &Path) -> Result<(String, String)> {
     let url = state::git(root, &["remote", "get-url", "origin"], None)?;
     Ok((

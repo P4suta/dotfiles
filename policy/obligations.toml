@@ -1250,6 +1250,33 @@ fn reject_reporting_an_unchanged_skill() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/restack_rules.rs"
+probes = '''
+use production::{Carry, Movement, carry};
+#[kani::proof]
+fn reject_carrying_a_rewrite_that_changed_the_branch() {
+    assert!(carry(Movement::Rewritten, true, false) == Carry::Carried);
+}
+#[kani::proof]
+fn reject_carrying_a_context_that_no_longer_held() {
+    assert!(carry(Movement::Rewritten, false, true) == Carry::Carried);
+}
+#[kani::proof]
+fn reject_leaving_an_unchanged_rewrite_behind() {
+    assert!(carry(Movement::Rewritten, true, true) == Carry::Left);
+}
+#[kani::proof]
+fn reject_carrying_an_unmoved_branch() {
+    assert!(carry(Movement::Unmoved, true, true) == Carry::Carried);
+}
+#[kani::proof]
+fn reject_leaving_a_context_that_still_holds() {
+    assert!(carry(Movement::StillCurrent, true, false) == Carry::Left);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/source_sync_rules.rs"
 probes = '''
 use production::{Checkout, Decision, Remote, SkipReason, decide, preflight};

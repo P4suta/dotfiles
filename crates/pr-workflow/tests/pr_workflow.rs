@@ -8316,6 +8316,161 @@ fn prune_merged_deletes_only_branches_that_merged() -> Result<()> {
     Ok(())
 }
 
+/// The open stack of `stack_checkout`, bottom first.
+const RESTACKED_PULLS: &str = r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":11,"headRefName":"prior-topic","baseRefName":"parent"},{"number":17,"headRefName":"topic","baseRefName":"prior-topic"}]"#;
+
+/// Replays `commit` onto `parent` and returns the rebased commit, leaving `topic` checked out.
+fn replay(
+    checkout: &std::path::Path,
+    scope: &std::path::Path,
+    commit: &str,
+    parent: &str,
+) -> String {
+    scoped_git(checkout, scope, &["switch", "--quiet", "--detach", parent]);
+    scoped_git(checkout, scope, &["cherry-pick", commit]);
+    let replayed = scoped_git(checkout, scope, &["rev-parse", "HEAD"]);
+    scoped_git(checkout, scope, &["switch", "--quiet", "topic"]);
+    replayed
+}
+
+/// Starts issue 23 for `body.md` on `topic` inside the stack checkout and returns the environment of that start.
+fn start_in_stack(
+    fixture: &Fixture,
+    checkout: &std::path::Path,
+) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>> {
+    let key = fixture.signing_key()?;
+    for (name, value) in [
+        ("gpg.format", "ssh"),
+        (
+            "user.signingkey",
+            key.to_str().context("fixture signing key path")?,
+        ),
+        (
+            "url.https://github.com/P4suta/project.git.insteadOf",
+            "https://github.com/P4suta/project.git",
+        ),
+    ] {
+        scoped_git(
+            checkout,
+            fixture.directory.path(),
+            &["config", "--local", name, value],
+        );
+    }
+    let mut start = fixture.personal_command("start")?;
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("GIT_") {
+            start.env_remove(name);
+        }
+    }
+    start
+        .current_dir(checkout)
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            fixture.directory.path().join("gitconfig"),
+        )
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .args(["--issue", "23"]);
+    let variables = start
+        .get_envs()
+        .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value.to_owned())))
+        .collect();
+    let started = start.output()?;
+    anyhow::ensure!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    Ok(variables)
+}
+
+#[test]
+fn a_leased_restack_carries_the_issue_context_of_an_unchanged_branch() -> Result<()> {
+    for (action, keeps_change) in [("sync", true), ("rebase", true), ("sync", false)] {
+        let fixture = Fixture::new(BODY)?;
+        let scope = fixture.directory.path();
+        let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+        let variables = start_in_stack(&fixture, &checkout)?;
+        let topic = git(&checkout, &["rev-parse", "topic"])?;
+        let prior = git(&checkout, &["rev-parse", "prior-topic"])?;
+        let parent = git(&checkout, &["rev-parse", "parent"])?;
+        scoped_git(
+            &checkout,
+            scope,
+            &["switch", "--quiet", "--detach", &parent],
+        );
+        fs::write(checkout.join("upstream.txt"), "Updated parent.\n")?;
+        scoped_git(&checkout, scope, &["add", "upstream.txt"]);
+        scoped_git(
+            &checkout,
+            scope,
+            &["commit", "--quiet", "-m", "updated parent"],
+        );
+        let new_parent = scoped_git(&checkout, scope, &["rev-parse", "HEAD"]);
+        scoped_git(&checkout, scope, &["switch", "--quiet", "topic"]);
+        let new_prior = replay(&checkout, scope, &prior, &new_parent);
+        let new_topic = if keeps_change {
+            replay(&checkout, scope, &topic, &new_prior)
+        } else {
+            scoped_git(
+                &checkout,
+                scope,
+                &["switch", "--quiet", "--detach", &new_prior],
+            );
+            fs::write(checkout.join("topic.txt"), "A different topic change.\n")?;
+            scoped_git(
+                &checkout,
+                scope,
+                &["commit", "--quiet", "-am", "different topic"],
+            );
+            let changed = scoped_git(&checkout, scope, &["rev-parse", "HEAD"]);
+            scoped_git(&checkout, scope, &["switch", "--quiet", "topic"]);
+            changed
+        };
+        let output = fixture
+            .stack_command(&checkout, &lease, &[action])?
+            .env("HOME", fixture.context_home.path())
+            .env("USERPROFILE", fixture.context_home.path())
+            .env("GH_FIXTURE_LIST", RESTACKED_PULLS)
+            .env(
+                "GH_STACK_FIXTURE_REWRITE",
+                format!("parent={new_parent}\nprior-topic={new_prior}\ntopic={new_topic}"),
+            )
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{action}, keeps change {keeps_change}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(git(&checkout, &["rev-parse", "HEAD"])?, new_topic);
+        let root = platform::issue_context::checkout(&checkout)?;
+        let paths = [PathBuf::from("body.md")];
+        let guarded =
+            platform::issue_context::guard_for(&root, &paths, fixture.context_home.path());
+        if !keeps_change {
+            let error = guarded.expect_err("a changed restack must leave the context behind");
+            assert!(
+                format!("{error:#}").contains(&format!("issue-context start commit {topic}")),
+                "{error:#}"
+            );
+            continue;
+        }
+        guarded?;
+        fs::write(checkout.join("body.md"), "Work after the restack.\n")?;
+        scoped_git(&checkout, scope, &["add", "body.md"]);
+        let checked = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), &checkout)
+            .current_dir(&checkout)
+            .envs(variables.iter().cloned())
+            .args(["change-check", "--staged"])
+            .output()?;
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn stack_sync_and_rebase_run_gh_stack_under_the_lease_and_release_it() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
