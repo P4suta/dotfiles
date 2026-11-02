@@ -1765,7 +1765,7 @@ fn held_commits(
 }
 
 /// Whether `descendant` contains `ancestor`.
-fn contains(root: &Path, ancestor: &str, descendant: &str) -> Result<bool> {
+pub(super) fn contains(root: &Path, ancestor: &str, descendant: &str) -> Result<bool> {
     let output = platform::tool::Tool::Git
         .command()
         .current_dir(root)
@@ -1781,7 +1781,7 @@ fn contains(root: &Path, ancestor: &str, descendant: &str) -> Result<bool> {
         Some(0) => Ok(true),
         Some(GIT_NOT_ANCESTOR) => Ok(false),
         _ => anyhow::bail!(
-            "could not compare the PR head with its base: {}",
+            "could not compare {ancestor} with {descendant}: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ),
     }

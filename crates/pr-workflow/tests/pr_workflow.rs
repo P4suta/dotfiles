@@ -7556,9 +7556,8 @@ fn existing_pr_start_rejects_foreign_and_invalid_subjects() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn start_requires_the_open_stack_tip_or_an_independent_declaration() -> Result<()> {
-    let fixture = Fixture::new(BODY)?;
+/// Opens owned PR #4 on a branch that `feature` doesn't include, and returns its head and the open PR listing.
+fn divergent_tip(fixture: &Fixture) -> Result<(String, serde_json::Value)> {
     git(
         fixture.directory.path(),
         &[
@@ -7587,11 +7586,49 @@ fn start_requires_the_open_stack_tip_or_an_independent_declaration() -> Result<(
         &parent,
         "owner/project"
     )]);
+    Ok((parent, pulls))
+}
+
+/// The independent work records `start` keeps for the fixture repository, with their paths.
+fn independent_records(fixture: &Fixture) -> Result<Vec<(PathBuf, serde_json::Value)>> {
+    let directory = fixture
+        .context_home
+        .path()
+        .join(".local/state/pr-workflow/independent/owner__project");
+    if !directory.try_exists()? {
+        return Ok(Vec::new());
+    }
+    fs::read_dir(directory)?
+        .map(|entry| {
+            let path = entry?.path();
+            let record = serde_json::from_slice(&fs::read(&path)?)?;
+            Ok((path, record))
+        })
+        .collect()
+}
+
+#[test]
+fn start_requires_the_open_stack_tip_or_an_independent_declaration() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let (parent, pulls) = divergent_tip(&fixture)?;
     let output = fixture
         .command("start")?
         .env("GH_FIXTURE_PULLS", pulls.to_string())
         .output()?;
-    assert_eq!(refusal(&output)["rule"], "pr.stack-tip");
+    let refused = refusal(&output);
+    assert_eq!(refused["rule"], "pr.stack-tip");
+    assert_eq!(
+        refused["cause"],
+        "feature must include open stack tip #4 (divergent-parent) before new work starts; merge the tip for related work, or declare unrelated work with --independent <reason>"
+    );
+    assert_eq!(refused["next"], format!("git merge --no-edit {parent}"));
+    assert_eq!(
+        refused["evidence"],
+        serde_json::json!([format!(
+            "open stack tip #4 (divergent-parent) at {parent} is not an ancestor of feature at {}",
+            fixture.head
+        )])
+    );
     let independent = fixture
         .command("start")?
         .env("GH_FIXTURE_PULLS", pulls.to_string())
@@ -7605,6 +7642,192 @@ fn start_requires_the_open_stack_tip_or_an_independent_declaration() -> Result<(
         "{}",
         String::from_utf8_lossy(&independent.stderr)
     );
+    Ok(())
+}
+
+#[test]
+fn a_start_refresh_keeps_its_independent_declaration_on_the_same_and_descendant_commits()
+-> Result<()> {
+    let mut fixture = Fixture::new(BODY)?;
+    let (_, pulls) = divergent_tip(&fixture)?;
+    let reason = "Urgent correction unrelated to the divergent parent";
+    let declared = fixture
+        .command("start")?
+        .env("GH_FIXTURE_PULLS", pulls.to_string())
+        .args(["--independent", reason])
+        .output()?;
+    assert!(
+        declared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&declared.stderr)
+    );
+    let started_at = fixture.head.clone();
+    for descendant in [false, true] {
+        if descendant {
+            fs::write(
+                fixture.directory.path().join("work.txt"),
+                "Independent change.\n",
+            )?;
+            git(fixture.directory.path(), &["add", "work.txt"])?;
+            git(
+                fixture.directory.path(),
+                &["commit", "--quiet", "-m", "work"],
+            )?;
+            fixture.head = git(fixture.directory.path(), &["rev-parse", "HEAD"])?;
+        }
+        let refreshed = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", pulls.to_string())
+            .output()?;
+        assert!(
+            refreshed.status.success(),
+            "descendant {descendant}: {}",
+            String::from_utf8_lossy(&refreshed.stderr)
+        );
+        let records = independent_records(&fixture)?;
+        assert_eq!(records.len(), 1, "descendant {descendant}");
+        let (_, record) = &records[0];
+        assert_eq!(record["reason"], reason);
+        assert_eq!(record["started_at"], started_at.as_str());
+        assert!(record["pr"].is_null());
+    }
+    Ok(())
+}
+
+/// The record field a refresh must match, or the head move that leaves the declared history.
+#[derive(Clone, Copy, Debug)]
+enum OtherWork {
+    Login,
+    Destination,
+    SourceId,
+    SourceName,
+    Branch,
+    Issue,
+    History,
+}
+
+impl OtherWork {
+    const ALL: [Self; 7] = [
+        Self::Login,
+        Self::Destination,
+        Self::SourceId,
+        Self::SourceName,
+        Self::Branch,
+        Self::Issue,
+        Self::History,
+    ];
+
+    /// Rewrites the fixture's one independent record, or moves `feature` off its starting commit, and returns the record path.
+    fn apply(self, fixture: &mut Fixture) -> Result<PathBuf> {
+        let records = independent_records(fixture)?;
+        anyhow::ensure!(records.len() == 1, "{self:?}: {records:?}");
+        let (path, mut record) = records.into_iter().next().context("record")?;
+        match self {
+            Self::Login => record["login"] = "someone-else".into(),
+            Self::Destination => record["repository_id"] = 38.into(),
+            Self::SourceId => record["source_id"] = 38.into(),
+            Self::SourceName => record["source"] = "other/project".into(),
+            Self::Branch => record["branch"] = "other".into(),
+            Self::Issue => record["issue"] = 99.into(),
+            Self::History => {
+                let sibling = fixture.sibling_head("sibling")?;
+                git(
+                    fixture.directory.path(),
+                    &["update-ref", "refs/heads/feature", &sibling],
+                )?;
+                fixture.head = sibling;
+            }
+        }
+        fs::write(&path, serde_json::to_vec(&record)?)?;
+        Ok(path)
+    }
+}
+
+#[test]
+fn a_start_refresh_for_other_work_still_needs_its_own_declaration() -> Result<()> {
+    for other in OtherWork::ALL {
+        let mut fixture = Fixture::new(BODY)?;
+        let (_, pulls) = divergent_tip(&fixture)?;
+        let declared = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", pulls.to_string())
+            .args(["--independent", "Urgent correction for other work"])
+            .output()?;
+        assert!(
+            declared.status.success(),
+            "{other:?}: {}",
+            String::from_utf8_lossy(&declared.stderr)
+        );
+        let path = other.apply(&mut fixture)?;
+        let stored = fs::read(&path)?;
+        let refreshed = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", pulls.to_string())
+            .output()?;
+        assert_eq!(refusal(&refreshed)["rule"], "pr.stack-tip", "{other:?}");
+        assert_eq!(fs::read(&path)?, stored, "{other:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_start_refresh_without_open_work_still_drops_a_declaration_for_other_work() -> Result<()> {
+    for other in OtherWork::ALL {
+        let mut fixture = Fixture::new(BODY)?;
+        let declared = fixture
+            .command("start")?
+            .args(["--independent", "Urgent correction for other work"])
+            .output()?;
+        assert!(
+            declared.status.success(),
+            "{other:?}: {}",
+            String::from_utf8_lossy(&declared.stderr)
+        );
+        other.apply(&mut fixture)?;
+        let refreshed = fixture.command("start")?.output()?;
+        assert!(
+            refreshed.status.success(),
+            "{other:?}: {}",
+            String::from_utf8_lossy(&refreshed.stderr)
+        );
+        assert!(independent_records(&fixture)?.is_empty(), "{other:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_creation_refuses_a_start_declaration_for_other_work() -> Result<()> {
+    for other in OtherWork::ALL {
+        let mut fixture = Fixture::new(BODY)?;
+        let declared = fixture
+            .command("start")?
+            .args(["--independent", "Urgent correction for other work"])
+            .output()?;
+        assert!(
+            declared.status.success(),
+            "{other:?}: {}",
+            String::from_utf8_lossy(&declared.stderr)
+        );
+        other.apply(&mut fixture)?;
+        let created = fixture
+            .command("create")?
+            .env("HOME", fixture.context_home.path())
+            .env("USERPROFILE", fixture.context_home.path())
+            .args(["--title", "fix: preserve edits", "--body-file"])
+            .arg(&fixture.body)
+            .args(["--head", "feature"])
+            .output()?;
+        let expected = match other {
+            OtherWork::History => "feature no longer descends from its independent start",
+            _ => "independent start belongs to another source or issue",
+        };
+        let stderr = String::from_utf8_lossy(&created.stderr);
+        assert!(
+            !created.status.success() && stderr.contains(expected),
+            "{other:?}: {stderr}"
+        );
+        assert!(!fixture.log()?.contains("\ncreate\n"), "{other:?}");
+    }
     Ok(())
 }
 

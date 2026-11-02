@@ -1,7 +1,10 @@
+use super::review_policy::contains;
 use super::{Github, Target, branch, command, evidence, git_output};
 use anyhow::{Context, Result, ensure};
+pub(super) use rules::wip_rules::Operation;
 use rules::wip_rules::{
-    InvalidLink, LinkFacts, StackMember, Workload, admits_creation, link_admission, workload,
+    Carry, InvalidLink, LinkFacts, StackMember, StaleStart, StoredStart, Workload, admits_creation,
+    carried_start, link_admission, workload,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -64,13 +67,6 @@ struct Declaration {
     started_at: String,
     pr: Option<u64>,
     reason: String,
-}
-
-#[derive(Clone, Copy)]
-pub(super) enum Operation {
-    Start,
-    Create,
-    StackCreate,
 }
 
 pub(super) struct Plan {
@@ -575,28 +571,34 @@ fn pending(
             reason: reason.to_owned(),
         }));
     }
-    if matches!(operation, Operation::Create)
-        && let Some(record) = stored
-        && record.pr.is_none()
-    {
-        ensure!(
-            record.repository_id == repository_id
+    let stored = stored.filter(|record| record.pr.is_none());
+    let relation = match &stored {
+        None => StoredStart::Absent,
+        Some(record)
+            if !(record.repository_id == repository_id
                 && record.login.eq_ignore_ascii_case(&github.login)
                 && record.source_id == origin.id
                 && record.source.eq_ignore_ascii_case(&origin.full_name)
                 && record.branch == head
-                && record.issue == target.issue,
+                && record.issue == target.issue) =>
+        {
+            StoredStart::OtherWork
+        }
+        Some(record) if contains(&std::env::current_dir()?, &record.started_at, prepared_at)? => {
+            StoredStart::Descendant
+        }
+        Some(_) => StoredStart::LeftHistory,
+    };
+    match carried_start(operation, relation) {
+        Ok(Carry::Declared) => Ok(stored),
+        Ok(Carry::Undeclared) => Ok(None),
+        Err(StaleStart::OtherWork) => anyhow::bail!(
             "independent start belongs to another source or issue; run start again for this work"
-        );
-        git_output(&[
-            "merge-base",
-            "--is-ancestor",
-            &record.started_at,
-            prepared_at,
-        ])?;
-        return Ok(Some(record));
+        ),
+        Err(StaleStart::LeftHistory) => anyhow::bail!(
+            "{head} no longer descends from its independent start; run start again for this work"
+        ),
     }
-    Ok(None)
 }
 
 fn require_tip(
@@ -612,24 +614,18 @@ fn require_tip(
         "the open stack tip belongs to another checkout source"
     );
     git_output(&["fetch", "--quiet", "origin", &tip.head.sha])?;
-    let output = super::Tool::Git
-        .command()
-        .args(["merge-base", "--is-ancestor", &tip.head.sha, current])
-        .output()?;
-    if !output.status.success() {
+    if !contains(&std::env::current_dir()?, &tip.head.sha, current)? {
         return Err(super::Refusal::new(
             "pr.stack-tip",
             format!(
-                "{head} must include open stack tip #{} ({}) before new work starts",
+                "{head} must include open stack tip #{} ({}) before new work starts; merge the tip for related work, or declare unrelated work with --independent <reason>",
                 tip.number, tip.head.name
             ),
             command(&["git", "merge", "--no-edit", &tip.head.sha]),
         )
         .evidence(format!(
-            "tip {} against {head} at {current}; {}: {}",
-            tip.head.sha,
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
+            "open stack tip #{} ({}) at {} is not an ancestor of {head} at {current}",
+            tip.number, tip.head.name, tip.head.sha
         ))
         .into());
     }
