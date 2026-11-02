@@ -359,27 +359,7 @@ fn capture_source(
     let head = object(&root, head)?;
     let base = git(&root, &["merge-base", &object(&root, base)?, &head])?;
     let tree = git(&root, &["rev-parse", &format!("{head}^{{tree}}")])?;
-    let diff = platform::tool::Tool::Git
-        .command()
-        .current_dir(&root)
-        .args([
-            "--no-replace-objects",
-            "--no-pager",
-            "diff",
-            "--binary",
-            "--full-index",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-renames",
-            &base,
-            &head,
-            "--",
-        ])
-        .output()?;
-    ensure!(
-        diff.status.success(),
-        "could not capture the exact review diff"
-    );
+    let diff = exact_diff(&root, &base, &head)?;
     let paths = platform::signed_git::git(
         &root,
         &[
@@ -404,14 +384,47 @@ fn capture_source(
         tree,
         changed,
         source,
-        change_sha256: change_digest(&diff.stdout),
+        change_sha256: change_digest(&diff),
         binding: Binding {
             repository: repository.into(),
             base,
             head,
-            diff_sha256: platform::build_inputs::hex(&Sha256::digest(&diff.stdout)),
+            diff_sha256: platform::build_inputs::hex(&Sha256::digest(&diff)),
         },
     })
+}
+
+/// The exact binary diff from `base` to `head`.
+fn exact_diff(root: &Path, base: &str, head: &str) -> Result<Vec<u8>> {
+    let diff = platform::tool::Tool::Git
+        .command()
+        .current_dir(root)
+        .args([
+            "--no-replace-objects",
+            "--no-pager",
+            "diff",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            base,
+            head,
+            "--",
+        ])
+        .output()?;
+    ensure!(
+        diff.status.success(),
+        "could not capture the exact review diff"
+    );
+    Ok(diff.stdout)
+}
+
+/// The change that `head` makes over its merge base with `base`, by the digest that carries an assessment through a base update.
+pub(super) fn change_identity(root: &Path, base: &str, head: &str) -> Result<String> {
+    let head = object(root, head)?;
+    let base = git(root, &["merge-base", &object(root, base)?, &head])?;
+    Ok(change_digest(&exact_diff(root, &base, &head)?))
 }
 
 /// Digests every line of `patch` that `patch_line` classifies as part of the change, and marks where each hunk starts.

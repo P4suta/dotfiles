@@ -28,5 +28,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(code) = std::env::var("GH_STACK_FIXTURE_EXIT") {
         std::process::exit(code.parse()?);
     }
+    // A restack rewrites each listed branch to its rebased commit, as `branch=commit` lines name them.
+    if args.first().is_some_and(|arg| arg == "sync")
+        && let Ok(rewrites) = std::env::var("GH_STACK_FIXTURE_REWRITE")
+    {
+        let git = std::env::var_os("PWF_FIXTURE_REAL_GIT").ok_or("real Git missing")?;
+        for line in rewrites.lines() {
+            let (branch, commit) = line.split_once('=').ok_or("malformed rewrite")?;
+            let status = std::process::Command::new(&git)
+                .args(["update-ref", &format!("refs/heads/{branch}"), commit])
+                .status()?;
+            if !status.success() {
+                return Err("fixture rewrite failed".into());
+            }
+        }
+        let status = std::process::Command::new(&git)
+            .args(["reset", "--quiet", "--hard", "HEAD"])
+            .status()?;
+        if !status.success() {
+            return Err("fixture checkout refresh failed".into());
+        }
+    }
     Ok(())
 }

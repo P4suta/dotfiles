@@ -3115,6 +3115,24 @@ fn prune_merged(target: &Target, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
+/// Runs a leased `restack` and carries the issue context of each local stack branch whose own change it kept.
+fn restack(target: &Target, restack: impl FnOnce() -> Result<()>) -> Result<()> {
+    require_checkout(target)?;
+    let root = platform::issue_context::checkout(&std::env::current_dir()?)?;
+    let contexts = context::local_contexts(&root)?;
+    if contexts.is_empty() {
+        return restack();
+    }
+    let github = Github::connect()?;
+    let trunk = github
+        .repository(&target.repo)?
+        .default_branch
+        .context("the repository reports no default branch")?;
+    let restacking = context::before_restack(&root, contexts, &open_prs(target)?, &trunk)?;
+    restack()?;
+    context::after_restack(&github, &root, &target.repo, &trunk, restacking)
+}
+
 /// Restacks the checked-out stack under the lease, pushing it with explicit leases.
 fn sync_stack(target: &Target) -> Result<()> {
     require_checkout(target)?;
@@ -3524,7 +3542,7 @@ fn stack(action: StackAction, rerun: &str) -> Result<()> {
         } => create_stacked(document, &head, &base, rerun)?,
         StackAction::Sync { target } => {
             target.conventional_required()?;
-            sync_stack(&target)?;
+            restack(&target, || sync_stack(&target))?;
         }
         StackAction::Rebase {
             target,
@@ -3533,18 +3551,26 @@ fn stack(action: StackAction, rerun: &str) -> Result<()> {
         } => {
             target.conventional_required()?;
             require_checkout(&target)?;
-            let lease = Lease::acquire()?;
-            let mut args = vec!["rebase"];
-            if resume {
-                args.push("--continue");
-            }
+            let rebase = || {
+                let lease = Lease::acquire()?;
+                let mut args = vec!["rebase"];
+                if resume {
+                    args.push("--continue");
+                }
+                if abort {
+                    args.push("--abort");
+                }
+                gh_stack(&target, Some(&lease), &args)?;
+                if !abort {
+                    drop(lease);
+                    sync_stack(&target)?;
+                }
+                Ok(())
+            };
             if abort {
-                args.push("--abort");
-            }
-            gh_stack(&target, Some(&lease), &args)?;
-            if !abort {
-                drop(lease);
-                sync_stack(&target)?;
+                rebase()?;
+            } else {
+                restack(&target, rebase)?;
             }
         }
         StackAction::Merge {

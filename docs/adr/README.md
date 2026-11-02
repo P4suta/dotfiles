@@ -63,7 +63,7 @@
 | [2026-10-12 Bind acquisition plans to pinned inputs and reusable material identities](pinned-acquisition-plans-and-content-addressed-materials.md) | proposed |  |
 | [2026-10-13 Admit native work from a complete resource plan](admit-native-work-from-a-complete-resource-plan.md) | proposed |  |
 | [2026-10-13 Assess a pinned mutation engine before adoption](assess-pinned-mutation-engine-before-adoption.md) | proposed |  |
-| [2026-10-13 Authenticate issue context at edit and integration boundaries](authenticate-issue-context-at-edit-and-integration-boundaries.md) | amended | [2026-10-20](keep-workflow-evidence-local.md) |
+| [2026-10-13 Authenticate issue context at edit and integration boundaries](authenticate-issue-context-at-edit-and-integration-boundaries.md) | amended | [2026-10-20](keep-workflow-evidence-local.md), [2026-11-03](carry-issue-contexts-through-leased-restacks.md) |
 | [2026-10-13 Bind private verifier phase evidence](bind-private-verifier-phase-evidence.md) | proposed |  |
 | [2026-10-13 Enable experimental skill maintenance only through explicit local opt-in](experimental-skill-maintenance-by-explicit-opt-in.md) | accepted |  |
 | [2026-10-13 Keep local issue authority separate from remote publication](keep-local-issue-authority-separate-from-remote-publication.md) | amended | [2026-10-26](import-unborn-artifacts-after-same-issue-selections.md) |
@@ -126,4 +126,5 @@
 | [2026-10-29 Check agent-written comments at write time](check-agent-written-comments-at-write-time.md) | proposed |  |
 | [2026-10-30 Bind official tarballs to verified update records](bind-official-tarballs-to-verified-update-records.md) | proposed |  |
 | [2026-11-02 Carry assessments through base update merges that keep the hunks](carry-assessments-through-base-update-merges.md) | accepted |  |
+| [2026-11-03 Carry issue contexts through leased restacks](carry-issue-contexts-through-leased-restacks.md) | accepted |  |
 | [2026-11-03 Keep the previous build running after a failed reinstall](keep-the-previous-build-running-after-a-failed-reinstall.md) | accepted |  |

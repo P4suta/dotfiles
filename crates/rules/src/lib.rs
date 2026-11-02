@@ -86,6 +86,7 @@ pub mod reaper_rules;
 pub mod reply_language_rules;
 pub mod repository_rules;
 pub mod resource_rules;
+pub mod restack_rules;
 pub mod review_completion_rules;
 pub mod review_routing_rules;
 pub mod review_rules;
