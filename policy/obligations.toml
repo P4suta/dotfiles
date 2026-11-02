@@ -1911,6 +1911,24 @@ fn reject_a_different_merged_head() {
 fn reject_waiting_after_queue_ejection() {
     assert_eq!(production::settlement(true, production::Lifecycle::Open, production::Queue::Removed, false), production::Settlement::Waiting);
 }
+#[kani::proof]
+fn reject_dropping_an_added_line() {
+    assert_eq!(production::patch_line(b"+index x", Some(b"--- a")), production::PatchLine::TextBlobs);
+}
+#[kani::proof]
+fn reject_dropping_the_blob_names_of_a_binary_file() {
+    assert_eq!(production::patch_line(b"index a..b", Some(b"GIT binary patch")), production::PatchLine::TextBlobs);
+}
+#[kani::proof]
+fn reject_a_plain_commit_as_a_base_update() {
+    let commit = production::HeldCommit { merge: false, follows_branch: true, merges_base: false };
+    assert_eq!(production::live_head(false, &[commit], true), production::LiveHead::BaseUpdate);
+}
+#[kani::proof]
+fn reject_an_incomplete_walk_as_a_base_update() {
+    let commit = production::HeldCommit { merge: true, follows_branch: true, merges_base: true };
+    assert_eq!(production::live_head(false, &[commit], false), production::LiveHead::BaseUpdate);
+}
 '''
 
 [[obligation]]
