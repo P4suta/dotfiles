@@ -1,6 +1,6 @@
 //! Checked issue contexts, kept only in owner-local state that every worktree of a repository shares.
 
-pub use crate::signed_git::git;
+pub use crate::signed_git::{git, is_ancestor};
 use anyhow::{Context as _, Result, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -241,18 +241,9 @@ fn split_paths(output: &str) -> Result<Vec<String>> {
 fn upstream_merge(root: &Path) -> Option<String> {
     let merged = git(root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], None).ok()?;
     let merged = merged.trim().to_owned();
-    git(
-        root,
-        &[
-            "merge-base",
-            "--is-ancestor",
-            &merged,
-            "refs/remotes/origin/HEAD",
-        ],
-        None,
-    )
-    .ok()?;
-    Some(merged)
+    is_ancestor(root, &merged, "refs/remotes/origin/HEAD")
+        .ok()?
+        .then_some(merged)
 }
 
 /// # Errors
@@ -747,11 +738,15 @@ fn current_at(
         "issue-context destination differs"
     );
     ensure!(context.branch == branch, "issue-context branch differs");
-    git(
-        root,
-        &["merge-base", "--is-ancestor", &context.head, head],
-        None,
-    )?;
+    if !is_ancestor(root, &context.head, head)? {
+        let current = git(root, &["rev-parse", "--verify", head], None)?;
+        anyhow::bail!(
+            "issue-context start commit {} is not an ancestor of {branch} at {}; restore it in the branch history, such as with `git reset --soft {}` after an amend, or start the issue on a new branch",
+            context.head,
+            current.trim(),
+            context.head
+        );
+    }
     Ok(())
 }
 

@@ -1147,6 +1147,29 @@ fn reject_requiring_a_context_in_a_scratch_repository() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/ancestry_rules.rs"
+probes = '''
+use production::{Ancestry, ancestry};
+#[kani::proof]
+fn reject_reporting_a_missing_ancestor_as_a_git_failure() {
+    assert!(ancestry(Some(1)) == Ancestry::Failed);
+}
+#[kani::proof]
+fn reject_reporting_an_ancestor_as_missing() {
+    assert!(ancestry(Some(0)) == Ancestry::NotAncestor);
+}
+#[kani::proof]
+fn reject_answering_for_an_unknown_object() {
+    assert!(ancestry(Some(128)) == Ancestry::NotAncestor);
+}
+#[kani::proof]
+fn reject_answering_for_a_git_process_that_a_signal_ended() {
+    assert!(ancestry(None) == Ancestry::NotAncestor);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/source_sync_rules.rs"
 probes = '''
 use production::{Checkout, Decision, Remote, SkipReason, decide, preflight};
