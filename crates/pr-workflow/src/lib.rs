@@ -1465,6 +1465,11 @@ impl Github {
 
 /// Recognize a closing reference in visible Markdown outside examples and comments.
 fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
+    closing_references(body, repo).contains(&issue)
+}
+
+/// The issues of `repo` that visible Markdown outside examples and comments closes, in document order.
+fn closing_references(body: &str, repo: &str) -> Vec<u64> {
     let visible = prose(&without_comments(body));
     let mut text = String::new();
     let mut quoted = 0;
@@ -1482,26 +1487,69 @@ fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
             _ => {}
         }
     }
-    let short = format!("#{issue}");
-    let url = format!("{GITHUB}/{repo}/issues/{issue}");
+    let url = format!("{GITHUB}/{repo}/issues/");
     let words: Vec<_> = text
         .split_whitespace()
         .map(|word| word.trim_matches([',', '.', ':', ';', '!', '(', ')', '[', ']']))
         .collect();
-    words.windows(CLOSING_REFERENCE_WORDS).any(|pair| {
-        matches!(
-            pair[0].to_ascii_lowercase().as_str(),
-            "close"
-                | "closes"
-                | "closed"
-                | "fix"
-                | "fixes"
-                | "fixed"
-                | "resolve"
-                | "resolves"
-                | "resolved"
-        ) && (pair[1] == short || pair[1].eq_ignore_ascii_case(&url))
-    })
+    words
+        .windows(CLOSING_REFERENCE_WORDS)
+        .filter(|pair| {
+            matches!(
+                pair[0].to_ascii_lowercase().as_str(),
+                "close"
+                    | "closes"
+                    | "closed"
+                    | "fix"
+                    | "fixes"
+                    | "fixed"
+                    | "resolve"
+                    | "resolves"
+                    | "resolved"
+            )
+        })
+        .filter_map(|pair| {
+            let digits = pair[1].strip_prefix('#').or_else(|| {
+                pair[1]
+                    .get(..url.len())
+                    .filter(|prefix| prefix.eq_ignore_ascii_case(&url))
+                    .and_then(|_| pair[1].get(url.len()..))
+            })?;
+            let issue: u64 = digits.parse().ok()?;
+            (issue.to_string() == digits).then_some(issue)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod closing_reference_parsing {
+    use super::{closing_references, references_issue};
+
+    const REPO: &str = "P4suta/project";
+
+    #[test]
+    fn visible_references_keep_their_document_order() {
+        let body = "Fixes #56.\n\nAlso resolves https://GitHub.com/p4suta/PROJECT/issues/12 and closes #57.\n";
+        assert_eq!(closing_references(body, REPO), [56, 12, 57]);
+        assert!(references_issue(body, REPO, 12));
+        assert!(!references_issue(body, REPO, 5));
+    }
+
+    #[test]
+    fn noncanonical_foreign_quoted_and_commented_references_close_nothing() {
+        for body in [
+            "Closes #023.",
+            "Closes #+5.",
+            "Closes #.",
+            "Closes other/project#5.",
+            "Closes https://github.com/other/project/issues/5.",
+            "> Closes #5.",
+            "<!-- Closes #5. -->",
+            "See #5.",
+        ] {
+            assert_eq!(closing_references(body, REPO), Vec::<u64>::new(), "{body}");
+        }
+    }
 }
 
 /// Where a checked PR body lives, so a refusal names the edit that changes it.
@@ -2669,13 +2717,21 @@ fn add_pause_lines(target: &Target, pr: u64, view: &MergeView) -> Result<()> {
 }
 
 /// The target of one PR's ready transition: its own closing issue unless the command named one.
+/// GitHub reports no closing reference for a PR whose base isn't the default branch, so the visible body supplies it then.
 fn ready_target(target: &Target, view: &MergeView) -> Target {
     let mut target = target.clone();
-    target.issue = target.issue.or_else(|| {
-        view.closing_issues_references
-            .first()
-            .map(|issue| issue.number)
-    });
+    target.issue = target
+        .issue
+        .or_else(|| {
+            view.closing_issues_references
+                .first()
+                .map(|issue| issue.number)
+        })
+        .or_else(|| {
+            closing_references(&view.body, &target.repo)
+                .first()
+                .copied()
+        });
     target
 }
 
