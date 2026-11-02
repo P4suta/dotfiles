@@ -157,6 +157,7 @@ pub const fn settlement(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Lifecycle {
     Open,
     Merged,
@@ -164,6 +165,7 @@ pub enum Lifecycle {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Queue {
     NotRequested,
     Present,
@@ -307,14 +309,14 @@ mod proofs {
         kani::cover!(update == BaseUpdate::Restack);
     }
 
+    /// The longest settlement key, `head_changed`, has 12 bytes, so the bound covers every key comparison.
     #[cfg(kani)]
     #[kani::proof]
+    #[kani::unwind(13)]
     fn merge_settlement_never_credits_a_different_head_or_a_queue_acknowledgement() {
         let [head, expired] = kani::any();
-        let lifecycle = [Lifecycle::Open, Lifecycle::Merged, Lifecycle::Closed]
-            [usize::from(kani::any::<u8>() % 3)];
-        let queue = [Queue::NotRequested, Queue::Present, Queue::Removed]
-            [usize::from(kani::any::<u8>() % 3)];
+        let lifecycle: Lifecycle = kani::any();
+        let queue: Queue = kani::any();
         spec_settlement(head, lifecycle, queue, expired);
         let result = settlement(head, lifecycle, queue, expired);
         kani::cover!(result == Settlement::Merged);
