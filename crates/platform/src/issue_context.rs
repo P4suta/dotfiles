@@ -639,12 +639,33 @@ pub fn persist(root: &Path, receipt: Receipt, expected: &Binding) -> Result<()> 
             || previous.context.destination == receipt.context.destination
                 && previous.context.issue != receipt.context.issue
     });
+    let repository = receipt.context.destination.repository.clone();
     local.manifest.receipts.push(receipt);
-    ensure!(
-        local.manifest.receipts.len() <= MAX_CONTEXTS,
-        "too many active issue contexts"
-    );
+    if local.manifest.receipts.len() > MAX_CONTEXTS {
+        return Err(context_limit(local.manifest.receipts.len(), &repository).into());
+    }
     write(&state, &local)
+}
+
+/// The refusal at the context limit, whose next action lists the merged branches that hold contexts.
+fn context_limit(contexts: usize, repository: &str) -> crate::refusal::Refusal {
+    crate::refusal::Refusal::new(
+        "pr.issue-context-limit",
+        format!(
+            "too many active issue contexts: {contexts} local branches keep one, above the limit of {MAX_CONTEXTS}"
+        ),
+        crate::refusal::command(&[
+            "pr-workflow",
+            "prune-merged",
+            "--repo",
+            repository,
+            "--dry-run",
+        ]),
+    )
+    .evidence("a context stays active while its local branch exists")
+    .evidence(
+        "the dry run lists the branches whose pull request merged at their head, and the same command without --dry-run deletes them",
+    )
 }
 
 fn require_scope_retention(previous: &Manifest, requested: &Context) -> Result<()> {
@@ -1243,6 +1264,55 @@ mod tests {
         Ok(())
     }
 
+    fn capacity_contract(root: &Path) -> Result<()> {
+        snapshot_lineage_contract(root)?;
+        let head = git(root, &["rev-parse", "HEAD"], None)?.trim().to_owned();
+        let home = crate::home::home().context("fixture home")?;
+        let state = state_for(root, &home)?;
+        let expected = binding(root)?;
+        let mut receipts = Vec::new();
+        for index in 0..MAX_CONTEXTS {
+            let branch = format!("held-{index}");
+            git(
+                root,
+                &["update-ref", &format!("refs/heads/{branch}"), &head],
+                None,
+            )?;
+            let mut kept = context(FIRST_SOURCE, &["alpha"]);
+            kept.branch = branch;
+            receipts.push(receipt(kept, &format!("{index:040}")));
+        }
+        write(
+            &state,
+            &Local {
+                checkout: expected.checkout.clone(),
+                common_git: expected.common_git.clone(),
+                origin: expected.origin.clone(),
+                manifest: Manifest {
+                    schema: SCHEMA,
+                    receipts,
+                },
+            },
+        )?;
+        let before = fs::read(&state)?;
+        let error = persist(
+            root,
+            receipt(context(FIRST_SOURCE, &["alpha"]), OTHER_OBJECT),
+            &expected,
+        )
+        .unwrap_err();
+        let refusal = error
+            .downcast_ref::<crate::refusal::Refusal>()
+            .context("the context limit refuses with a route")?;
+        assert!(refusal.cause.contains("too many active issue contexts"));
+        assert_eq!(
+            refusal.next.as_deref(),
+            Some("pr-workflow prune-merged --repo fixture/context --dry-run")
+        );
+        assert_eq!(fs::read(&state)?, before);
+        Ok(())
+    }
+
     fn fixture_test(name: &str, contract: fn(&Path) -> Result<()>) -> Result<()> {
         if let Some(root) = std::env::var_os(CHILD_ROOT) {
             return contract(Path::new(&root));
@@ -1284,6 +1354,14 @@ mod tests {
         fixture_test(
             "issue_context::tests::replacing_a_context_preserves_scopes_before_any_state_or_history_write",
             replacement_contract,
+        )
+    }
+
+    #[test]
+    fn the_context_limit_names_a_dry_run_prune_without_changing_state() -> Result<()> {
+        fixture_test(
+            "issue_context::tests::the_context_limit_names_a_dry_run_prune_without_changing_state",
+            capacity_contract,
         )
     }
 
