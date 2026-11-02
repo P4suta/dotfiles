@@ -277,9 +277,10 @@ mod proofs {
         kani::cover!(role == PatchLine::Change && length == line.len());
     }
 
+    /// Generating the nine flags unrolls nine iterations, so the bound covers that loop and the three-commit walks after it.
     #[cfg(kani)]
     #[kani::proof]
-    #[kani::unwind(5)]
+    #[kani::unwind(10)]
     fn a_live_head_off_the_branch_needs_a_complete_walk_of_base_update_merges() {
         let flags: [bool; 9] = kani::any();
         let commits = [0, 3, 6].map(|start| HeldCommit {
