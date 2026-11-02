@@ -45,6 +45,7 @@ pub mod env_expansion_rules;
 pub mod eol_rules;
 pub mod freshness_rules;
 pub mod gate_rules;
+pub mod gh_read_rules;
 pub mod git_ref_rules;
 pub mod guard_rules;
 pub mod herdr_rules;
