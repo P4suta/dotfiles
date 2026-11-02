@@ -1227,6 +1227,29 @@ fn reject_refusing_an_explicit_get() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/skill_catalog_rules.rs"
+probes = '''
+use production::{Difference, difference};
+#[kani::proof]
+fn reject_hiding_a_changed_skill() {
+    assert!(difference(true, true, false).is_none());
+}
+#[kani::proof]
+fn reject_reporting_a_removed_skill_as_changed() {
+    assert!(difference(true, false, false) == Some(Difference::Changed));
+}
+#[kani::proof]
+fn reject_reporting_an_added_skill_as_removed() {
+    assert!(difference(false, true, false) == Some(Difference::Removed));
+}
+#[kani::proof]
+fn reject_reporting_an_unchanged_skill() {
+    assert!(difference(true, true, true).is_some());
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/source_sync_rules.rs"
 probes = '''
 use production::{Checkout, Decision, Remote, SkipReason, decide, preflight};

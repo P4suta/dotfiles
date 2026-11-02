@@ -3616,6 +3616,65 @@ pub fn install_binary(
     platform::freshness::record_installation(user_directory, source, built)
 }
 
+/// The refusal of an installation whose unrelated managed skills differ from the approved catalog.
+/// It names each difference and the review command.
+/// The skill this command installs isn't unrelated, so a difference in it doesn't appear.
+fn changed_skills(
+    skills: &std::path::Path,
+    retained: &skill_ops::Catalog,
+    capture: Option<anyhow::Error>,
+) -> Result<Refusal> {
+    use skill_ops::skill_catalog_rules::Difference;
+    let differences = match skill_ops::catalog_differences(skills, retained) {
+        Ok(differences) => differences,
+        Err(error) => return Err(capture.unwrap_or(error)),
+    };
+    let differences: Vec<_> = differences
+        .into_iter()
+        .filter(|(name, _)| name != "pull-request")
+        .collect();
+    let mut review = vec!["chezmoi".to_owned(), "diff".to_owned()];
+    let mut evidence = Vec::new();
+    for (name, difference) in &differences {
+        let path = skills.join(name);
+        let (state, blocks) = match difference {
+            Difference::Changed => ("changed since its approved revision", true),
+            Difference::Removed => ("removed though the approved catalog names it", true),
+            Difference::Added => (
+                "added outside the approved catalog, which leaves installation unaffected",
+                false,
+            ),
+        };
+        evidence.push(format!("{name}: {state} ({})", path.display()));
+        if blocks {
+            review.push(path.to_string_lossy().into_owned());
+        }
+    }
+    if review.len() == 2 {
+        review.push(skills.to_string_lossy().into_owned());
+        evidence.push(
+            "no unrelated managed skill differs in its files, description, or size; their approved references differ"
+                .to_owned(),
+        );
+    }
+    if let Some(error) = capture {
+        evidence.push(format!("capture: {error:#}"));
+    }
+    evidence.push(
+        "after review, `mise x -- cargo xtask install` in the dotfiles checkout reinstalls the source skills and records their approval"
+            .to_owned(),
+    );
+    let mut refusal = Refusal::new(
+        "pr.managed-skills",
+        "unrelated installed managed skills have changed; preserve and review them before installation",
+        command(&review),
+    );
+    for line in evidence {
+        refusal = refusal.evidence(line);
+    }
+    Ok(refusal)
+}
+
 /// Installs the checked PR skill through `apply` and the `pr-workflow` binary under `user_directory`, then records the new catalog.
 /// Experimental decision checks require the machine's opt-in.
 ///
@@ -3645,10 +3704,14 @@ pub fn deploy(
     for skill in retained.skills.values_mut() {
         skill.references.remove("pull-request");
     }
-    ensure!(
-        ops::catalog_owned(&user_directory.join(".agents/skills"), &retained)? == retained,
-        "unrelated installed managed skills have changed; preserve and review them before installation"
-    );
+    let skills = user_directory.join(".agents/skills");
+    let installed = ops::catalog_owned(&skills, &retained);
+    if !installed
+        .as_ref()
+        .is_ok_and(|installed| *installed == retained)
+    {
+        return Err(changed_skills(&skills, &retained, installed.err())?.into());
+    }
     let policy: ops::Policy =
         ops::read_json(&user_directory.join(".config/skill-ops/policy.json"))?;
     ensure!(

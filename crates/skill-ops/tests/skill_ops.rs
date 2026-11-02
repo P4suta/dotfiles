@@ -479,6 +479,38 @@ fn refusal(result: Result<()>) -> String {
 }
 
 #[test]
+fn catalog_differences_name_each_added_removed_and_changed_skill() -> Result<()> {
+    use skill_ops::skill_catalog_rules::Difference;
+    let (root, catalog, _) = fixture()?;
+    assert_eq!(skill_ops::catalog_differences(root.path(), &catalog)?, []);
+    fs::write(
+        root.path().join("alpha/SKILL.md"),
+        "---\nname: alpha\ndescription: Inspect the alpha contract.\n---\n# Contract\nChanged.\n",
+    )?;
+    fs::remove_dir_all(root.path().join("beta"))?;
+    fs::create_dir(root.path().join("gamma"))?;
+    fs::write(
+        root.path().join("gamma/SKILL.md"),
+        "---\nname: gamma\ndescription: Inspect the gamma contract.\n---\n# Contract\nAdded.\n",
+    )?;
+    fs::write(root.path().join("notes.txt"), "Not a skill.\n")?;
+    assert_eq!(
+        skill_ops::catalog_differences(root.path(), &catalog)?,
+        [
+            ("alpha".to_owned(), Difference::Changed),
+            ("beta".to_owned(), Difference::Removed),
+            ("gamma".to_owned(), Difference::Added),
+        ]
+    );
+    fs::write(root.path().join("alpha/SKILL.md"), "No frontmatter.\n")?;
+    assert_eq!(
+        skill_ops::catalog_differences(root.path(), &catalog)?.first(),
+        Some(&("alpha".to_owned(), Difference::Changed))
+    );
+    Ok(())
+}
+
+#[test]
 fn each_skill_is_bound_to_its_own_revision_and_refusals_name_the_draft_command() -> Result<()> {
     let (root, catalog, policy) = fixture()?;
     let decisions = current_decisions(&catalog);
