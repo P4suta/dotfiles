@@ -6564,6 +6564,207 @@ fn merge_carries_the_signed_assessment_after_an_update_only_when_the_diff_matche
     Ok(())
 }
 
+/// How the head of PR 17 changes after `gh pr update-branch`.
+#[derive(Clone, Copy, Debug)]
+enum HeadUpdate {
+    /// An update merge of a base that adds another file.
+    OtherFile,
+    /// An update merge of a base that edits a region of the shared file outside the PR hunk's context.
+    DistantRegion,
+    /// An update merge of a base that edits a line inside the PR hunk's context.
+    HunkContext,
+    /// A plain commit with the same tree on top of the local branch.
+    PlainCommit,
+}
+
+/// One read of PR 17 with the head source fields that `gh pr view` returns.
+fn sourced_read(head: &str, body: &str, merge: &str) -> String {
+    format!(
+        "17={}",
+        serde_json::json!({
+            "title":"fix: preserve edits","body":body,
+            "state":if merge == "MERGED" {"MERGED"} else {"OPEN"},"isDraft":false,
+            "headRefOid":head,"baseRefName":"main",
+            "mergeable":"MERGEABLE","mergeStateStatus":merge,
+            "statusCheckRollup":serde_json::from_str::<serde_json::Value>(PASSING).unwrap(),
+            "closingIssuesReferences":[{"number":23}],
+            "headRefName":"feature","headRepository":{"name":"project"},
+            "headRepositoryOwner":{"login":"P4suta"},"isCrossRepository":false
+        })
+    )
+}
+
+/// Commits `file` with `contents` on the checked-out branch and returns the new commit.
+fn commit_file(
+    root: &std::path::Path,
+    file: &str,
+    contents: &str,
+    message: &str,
+) -> Result<String> {
+    fs::write(root.join(file), contents)?;
+    git(root, &["add", file])?;
+    git(root, &["commit", "--quiet", "-m", message])?;
+    git(root, &["rev-parse", "HEAD"])
+}
+
+/// Twenty numbered lines with the listed lines replaced.
+fn numbered(replaced: &[(usize, &str)]) -> String {
+    (1..=20)
+        .map(|number| {
+            replaced
+                .iter()
+                .find(|(line, _)| *line == number)
+                .map_or_else(
+                    || format!("line {number}\n"),
+                    |(_, text)| format!("{text}\n"),
+                )
+        })
+        .collect()
+}
+
+/// The commits of PR 17 around one update: its base, the local branch head, the base GitHub merges in, and the live head.
+struct UpdatedHistory {
+    base: String,
+    local: String,
+    advanced: String,
+    head: String,
+}
+
+impl UpdatedHistory {
+    /// Commits a twenty-line file on the base, edits its line 15 on `feature`, and builds the live head that `update` describes.
+    /// `feature` stays checked out at the edit.
+    fn new(fixture: &Fixture, update: HeadUpdate) -> Result<Self> {
+        let root = fixture.directory.path();
+        git(
+            root,
+            &["checkout", "--quiet", "-B", "feature", &fixture.base],
+        )?;
+        let base = commit_file(root, "shared.txt", &numbered(&[]), "shared base")?;
+        let edited = [(15, "line 15 from the pull request")];
+        let local = commit_file(root, "shared.txt", &numbered(&edited), "pull request edit")?;
+        git(root, &["checkout", "--quiet", "-b", "trunk", &base])?;
+        let advanced = match update {
+            HeadUpdate::PlainCommit => None,
+            HeadUpdate::OtherFile => Some(commit_file(root, "other.txt", "Other.\n", "other")?),
+            HeadUpdate::DistantRegion => {
+                // The inserted line moves the PR hunk down by one line.
+                let text = numbered(&[(3, "line 3 from main\nline 3a from main")]);
+                Some(commit_file(root, "shared.txt", &text, "distant main edit")?)
+            }
+            HeadUpdate::HunkContext => {
+                let text = numbered(&[(12, "line 12 from main")]);
+                Some(commit_file(root, "shared.txt", &text, "nearby main edit")?)
+            }
+        };
+        git(root, &["checkout", "--quiet", "feature"])?;
+        let (advanced, head) = if let Some(advanced) = advanced {
+            let tree = git(root, &["merge-tree", "--write-tree", &local, &advanced])?;
+            let message = "Merge branch 'main' into feature";
+            let arguments = [
+                "commit-tree",
+                &tree,
+                "-p",
+                &local,
+                "-p",
+                &advanced,
+                "-m",
+                message,
+            ];
+            let head = git(root, &arguments)?;
+            (advanced, head)
+        } else {
+            let tree = git(root, &["rev-parse", &format!("{local}^{{tree}}")])?;
+            let head = git(root, &["commit-tree", &tree, "-p", &local, "-m", "plain"])?;
+            (base.clone(), head)
+        };
+        Ok(Self {
+            base,
+            local,
+            advanced,
+            head,
+        })
+    }
+}
+
+#[test]
+fn merge_carries_the_assessment_through_an_update_merge_that_keeps_the_hunks() -> Result<()> {
+    for update in [
+        HeadUpdate::DistantRegion,
+        HeadUpdate::OtherFile,
+        HeadUpdate::HunkContext,
+        HeadUpdate::PlainCommit,
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let root = fixture.directory.path();
+        let UpdatedHistory {
+            base,
+            local,
+            advanced,
+            head,
+        } = UpdatedHistory::new(&fixture, update)?;
+        let mut command = fixture.personal_command("merge")?;
+        fixture.assessment(root, "P4suta/project", &base, &local)?;
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let output = command
+            .args(["--pr", "17", "--interval", "0"])
+            .env("GH_FIXTURE_BEHIND", &local)
+            .env(
+                "GH_FIXTURE_BASES",
+                format!("{local}={base}\n{head}={advanced}"),
+            )
+            .env(
+                "GH_FIXTURE_VIEWS",
+                [
+                    sourced_read(&local, &body, "BEHIND"),
+                    sourced_read(&head, &body, "CLEAN"),
+                    sourced_read(&head, &body, "MERGED"),
+                ]
+                .join("\n"),
+            )
+            .output()?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let log = fixture.log().unwrap_or_default();
+        assert!(!log.is_empty(), "{update:?}: {stderr}");
+        assert_eq!(git(root, &["rev-parse", "refs/heads/feature"])?, local);
+        match update {
+            HeadUpdate::OtherFile | HeadUpdate::DistantRegion => {
+                assert!(output.status.success(), "{update:?}: {stderr}");
+                assert_eq!(mutations(&log), ["update-branch", "merge"], "{update:?}");
+                assert!(log.contains(&format!("--match-head-commit\n{head}\n")));
+                let directory = root.join(".local/state/pr-workflow/assessments/p4suta__project");
+                let carried = fs::read_dir(directory)?
+                    .filter_map(Result::ok)
+                    .find(|entry| entry.file_name().to_string_lossy().starts_with(&head))
+                    .context("the updated head needs its own signed assessment")?;
+                let packet: serde_json::Value = serde_json::from_slice(&fs::read(carried.path())?)?;
+                let raw = packet["raw"].as_str().context("signed raw commit")?;
+                let statement: serde_json::Value =
+                    serde_json::from_str(raw.split_once("\n\n").context("signed payload")?.1)?;
+                assert_eq!(statement["binding"]["head"], head.as_str());
+                assert_eq!(statement["binding"]["base"], advanced.as_str());
+            }
+            HeadUpdate::HunkContext => {
+                assert!(!output.status.success(), "{update:?}");
+                assert!(!mutations(&log).contains(&"merge".into()));
+                assert!(
+                    stderr.contains("assessment is missing"),
+                    "{update:?}: {stderr}"
+                );
+            }
+            HeadUpdate::PlainCommit => {
+                assert!(!output.status.success(), "{update:?}");
+                assert!(!mutations(&log).contains(&"merge".into()));
+                assert!(
+                    stderr
+                        .contains("actual PR head branch differs from the locally assessed source"),
+                    "{update:?}: {stderr}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn merge_waits_for_running_and_missing_required_checks_before_ready() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
