@@ -6,7 +6,8 @@ mod tree;
 pub use platform::paths::canonical;
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
 pub use rules::{
-    incident_rules, proof_budget_rules, skill_gate_rules, skill_plan_rules, skill_rules,
+    incident_rules, proof_budget_rules, skill_catalog_rules, skill_gate_rules, skill_plan_rules,
+    skill_rules,
 };
 pub(crate) use tree::collect;
 pub use tree::{
@@ -872,6 +873,55 @@ pub fn catalog(tree: &Path) -> Result<Catalog> {
 /// Returns an error when a managed skill or resource doesn't exist, fails reading or validation, or escapes its skill, or a skill changes during capture.
 pub fn catalog_owned(tree: &Path, scope: &Catalog) -> Result<Catalog> {
     capture_catalog(tree, Some(scope))
+}
+
+/// Names each skill whose installed state in `tree` differs from `scope`, in name order.
+/// A skill counts as changed when its scoped files no longer capture or capture to another revision, description, size, or file list.
+///
+/// # Errors
+///
+/// Returns an error when reading `tree` fails or it holds a non-UTF-8 name.
+pub fn catalog_differences(
+    tree: &Path,
+    scope: &Catalog,
+) -> Result<Vec<(String, skill_catalog_rules::Difference)>> {
+    let tree = crate::canonical(tree)?;
+    let mut installed = BTreeSet::new();
+    for entry in fs::read_dir(&tree)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            installed.insert(
+                entry
+                    .file_name()
+                    .into_string()
+                    .map_err(|_| anyhow::anyhow!("non-UTF-8 skill name"))?,
+            );
+        }
+    }
+    let names: BTreeSet<&String> = scope.skills.keys().chain(&installed).collect();
+    let mut differences = Vec::new();
+    for name in names {
+        let approved = scope.skills.get(name);
+        let present = installed.contains(name);
+        let same = approved.filter(|_| present).is_some_and(|skill| {
+            let single = Catalog {
+                skills: BTreeMap::from([(name.clone(), skill.clone())]),
+            };
+            capture_catalog(&tree, Some(&single)).is_ok_and(|captured| {
+                captured.skills.get(name).is_some_and(|found| {
+                    found.revision == skill.revision
+                        && found.description == skill.description
+                        && found.entry_words == skill.entry_words
+                        && found.files == skill.files
+                })
+            })
+        });
+        if let Some(difference) = skill_catalog_rules::difference(approved.is_some(), present, same)
+        {
+            differences.push((name.clone(), difference));
+        }
+    }
+    Ok(differences)
 }
 
 fn capture_catalog(tree: &Path, scope: Option<&Catalog>) -> Result<Catalog> {
