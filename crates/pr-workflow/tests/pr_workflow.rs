@@ -8286,7 +8286,7 @@ fn stack_resolves_the_owner_installation_and_refuses_an_unexpected_version() -> 
 
 #[test]
 fn stack_merge_refuses_a_ready_member_without_its_own_open_issue_before_merging() -> Result<()> {
-    for issue in [None, Some(24)] {
+    for (issue, reported) in [(None, false), (Some(24), true), (Some(24), false)] {
         let fixture = Fixture::new(BODY)?;
         let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
         let parent = git(&checkout, &["rev-parse", "parent"])?;
@@ -8304,6 +8304,7 @@ fn stack_merge_refuses_a_ready_member_without_its_own_open_issue_before_merging(
         )?;
         member["closingIssuesReferences"] = serde_json::json!(
             issue
+                .filter(|_| reported)
                 .map(|number| serde_json::json!({"number":number}))
                 .into_iter()
                 .collect::<Vec<_>>()
@@ -8333,6 +8334,12 @@ fn stack_merge_refuses_a_ready_member_without_its_own_open_issue_before_merging(
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("stack member #17"), "{stderr}");
+        if let Some(number) = issue {
+            assert!(
+                stderr.contains(&format!("#{number}: state closed")),
+                "reported {reported}: {stderr}"
+            );
+        }
         assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());
         assert!(!fixture.log()?.contains("/merge-async"));
     }
@@ -8341,7 +8348,8 @@ fn stack_merge_refuses_a_ready_member_without_its_own_open_issue_before_merging(
 
 #[test]
 fn stack_merge_checks_three_members_own_issues_or_the_explicit_common_issue() -> Result<()> {
-    for common in [false, true] {
+    // GitHub reports no closing reference for a PR whose base isn't the default branch, so upper members rely on their bodies.
+    for (common, reported) in [(false, true), (true, true), (false, false), (true, false)] {
         let fixture = Fixture::new(BODY)?;
         let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
         let trunk = git(&checkout, &["rev-parse", "origin/main"])?;
@@ -8363,7 +8371,11 @@ fn stack_merge_checks_three_members_own_issues_or_the_explicit_common_issue() ->
                 let mut document: serde_json::Value =
                     serde_json::from_str(response.split_once('=').unwrap().1)?;
                 document["baseRefName"] = serde_json::json!(base);
-                document["closingIssuesReferences"] = serde_json::json!([{"number":issue}]);
+                document["closingIssuesReferences"] = if reported || base == "main" {
+                    serde_json::json!([{"number":issue}])
+                } else {
+                    serde_json::json!([])
+                };
                 views.push(format!("{pr}={document}"));
             }
         }
@@ -8385,14 +8397,15 @@ fn stack_merge_checks_three_members_own_issues_or_the_explicit_common_issue() ->
         let output = command.output()?;
         assert!(
             output.status.success(),
-            "{}",
+            "common {common}, reported {reported}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         let log = fixture.log()?;
         for number in [23, 24, 25] {
             assert_eq!(
                 log.contains(&format!("\nrepos/P4suta/project/issues/{number}\n")),
-                !common || number == 23
+                !common || number == 23,
+                "common {common}, reported {reported}, issue {number}"
             );
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
