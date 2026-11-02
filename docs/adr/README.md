@@ -25,7 +25,7 @@
 | [0019 Recommend the next workflow step from inspected state](0019-state-inspecting-next-action.md) | accepted |  |
 | [0020 Require a passing gate on every operating system family before push](0020-os-family-push-evidence.md) | amended | [2026-10-11](profile-evidence-scope.md), [2026-10-11](source-bound-push-validation.md), [2026-10-19](optional-native-verification-before-publication.md) |
 | [0021 Check that every agent instruction line has a class](0021-checked-agent-instruction-audit.md) | accepted |  |
-| [0022 Refuse installed tools built from stale sources](0022-refuse-tools-built-from-stale-sources.md) | amended | [2026-10-11](source-bound-push-validation.md) |
+| [0022 Refuse installed tools built from stale sources](0022-refuse-tools-built-from-stale-sources.md) | amended | [2026-10-11](source-bound-push-validation.md), [2026-11-03](keep-the-previous-build-running-after-a-failed-reinstall.md) |
 | [0023 Give the repository a layout that shows what it manages](0023-repository-layout-and-target-architecture.md) | accepted |  |
 | [2026-10-05 Reuse the `gh` login for the remote GitHub tool server](github-mcp-uses-the-github-cli-login.md) | accepted |  |
 | [2026-10-06 Report every gate refusal as one structured record](structured-gate-refusals.md) | accepted |  |
@@ -126,3 +126,4 @@
 | [2026-10-29 Check agent-written comments at write time](check-agent-written-comments-at-write-time.md) | proposed |  |
 | [2026-10-30 Bind official tarballs to verified update records](bind-official-tarballs-to-verified-update-records.md) | proposed |  |
 | [2026-11-02 Carry assessments through base update merges that keep the hunks](carry-assessments-through-base-update-merges.md) | accepted |  |
+| [2026-11-03 Keep the previous build running after a failed reinstall](keep-the-previous-build-running-after-a-failed-reinstall.md) | accepted |  |

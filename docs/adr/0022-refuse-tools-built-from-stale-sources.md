@@ -1,6 +1,6 @@
 ---
 status: amended
-changed_by: [source-bound-push-validation.md]
+changed_by: [source-bound-push-validation.md, keep-the-previous-build-running-after-a-failed-reinstall.md]
 ---
 # Refuse installed tools built from stale sources
 

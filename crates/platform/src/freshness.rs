@@ -5,7 +5,7 @@
 
 use crate::build_inputs::content_hash;
 use crate::refusal::Refusal;
-use crate::stale_rules::{Origin, delegates, freshness, origin, reinstalls, runs};
+use crate::stale_rules::{Origin, delegates, freshness, origin, reinstalls, runs, tolerates};
 use crate::tool::Tool;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -16,8 +16,10 @@ use std::process::Stdio;
 
 pub const BUILD_IDENTITY_ARGUMENT: &str = "--dotfiles-build-identity";
 const INSTALLATION_SCHEMA: u32 = 1;
+const DEFERRAL_SCHEMA: u32 = 1;
 const HASH_DIGITS: usize = 64;
 const RECORD_DIRECTORY: &str = ".local/state/dotfiles/installed";
+const DEFERRAL_DIRECTORY: &str = ".local/state/dotfiles/deferred";
 
 /// Names the dotfiles checkout to compare with.
 /// Runs outside any checkout and fixtures use it.
@@ -191,15 +193,47 @@ pub fn verify(
     explicit: Option<&Path>,
     start: Option<&Path>,
 ) -> Result<()> {
+    verify_in(
+        crate::home::home().as_deref(),
+        built,
+        stamp,
+        explicit,
+        start,
+    )
+}
+
+/// Refuses like [`verify`], but reads a failed reinstall from `home` instead of the process's home.
+///
+/// # Errors
+///
+/// Returns a `tool.stale` refusal when the build lags the located checkout and no matching failed reinstall stays recorded, or an error when it can't hash that checkout.
+pub fn verify_in(
+    home: Option<&Path>,
+    built: Built,
+    stamp: &Embedded,
+    explicit: Option<&Path>,
+    start: Option<&Path>,
+) -> Result<()> {
     let located = locate(explicit, start, &stamp.root);
-    let matching = match &located {
-        Some((_, root)) => content_hash(root)? == stamp.hash,
-        None => false,
+    let current = match &located {
+        Some((_, root)) => Some(content_hash(root)?),
+        None => None,
     };
-    if runs(freshness(located.is_some(), matching)) {
+    let state = freshness(located.is_some(), current.as_deref() == Some(&stamp.hash));
+    if runs(state) {
         return Ok(());
     }
     let (origin, root) = located.context("a stale build always has a checkout")?;
+    if tolerated(
+        home,
+        built,
+        state,
+        &root,
+        current.as_deref().unwrap_or_default(),
+        stamp,
+    ) {
+        return Ok(());
+    }
     Err(stale(built, stamp, origin, &root).into())
 }
 
@@ -236,11 +270,11 @@ pub fn start(built: Built) -> Result<Start> {
     let start = std::env::current_dir().ok();
     let stamp = embedded();
     let located = locate(explicit.as_deref(), start.as_deref(), &stamp.root);
-    let matching = match &located {
-        Some((_, root)) => content_hash(root)? == stamp.hash,
-        None => false,
+    let current = match &located {
+        Some((_, root)) => Some(content_hash(root)?),
+        None => None,
     };
-    let state = freshness(located.is_some(), matching);
+    let state = freshness(located.is_some(), current.as_deref() == Some(&stamp.hash));
     if runs(state) {
         return Ok(Start::Run);
     }
@@ -251,6 +285,16 @@ pub fn start(built: Built) -> Result<Start> {
         std::env::var_os(DELEGATED_VARIABLE).is_some(),
     ) {
         return run_checkout_build(built, &root).map(Start::Delegated);
+    }
+    if tolerated(
+        crate::home::home().as_deref(),
+        built,
+        state,
+        &root,
+        current.as_deref().unwrap_or_default(),
+        &stamp,
+    ) {
+        return Ok(Start::Run);
     }
     Err(stale(built, &stamp, origin, &root).into())
 }
@@ -304,6 +348,87 @@ fn run_checkout_build(built: Built, root: &Path) -> Result<i32> {
 
 fn record_path(home: &Path, built: Built) -> PathBuf {
     home.join(RECORD_DIRECTORY).join(built.binary())
+}
+
+fn deferral_path(home: &Path, built: Built) -> PathBuf {
+    home.join(DEFERRAL_DIRECTORY).join(built.binary())
+}
+
+/// A reinstall that failed, recorded so the previous build keeps running until the checkout changes again.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Deferral {
+    schema: u32,
+    root: PathBuf,
+    content_hash: String,
+    installed_hash: String,
+    failure: String,
+}
+
+fn record_deferral(home: &Path, built: Built, deferral: &Deferral) -> Result<()> {
+    let path = deferral_path(home, built);
+    let directory = path.parent().context("deferral directory")?;
+    fs::create_dir_all(directory)?;
+    let mut file = tempfile::NamedTempFile::new_in(directory)?;
+    serde_json::to_writer(&mut file, deferral)?;
+    file.write_all(b"\n")?;
+    file.persist(&path)
+        .with_context(|| format!("record the failed {} reinstall", built.binary()))?;
+    Ok(())
+}
+
+fn clear_deferral(home: &Path, built: Built) {
+    let path = deferral_path(home, built);
+    if path.exists() {
+        crate::cleanup::remove_file(&path);
+    }
+}
+
+/// The recorded failed reinstall of `built`, compared with a run that checks `root` at `current` with `stamp`.
+/// A missing or malformed record supplies nothing, so the stale build refuses.
+fn deferral(
+    home: Option<&Path>,
+    built: Built,
+    root: &Path,
+    current: &str,
+    stamp: &Embedded,
+) -> Option<(crate::stale_rules::Deferral, Deferral)> {
+    let bytes = fs::read(deferral_path(home?, built)).ok()?;
+    let record: Deferral = serde_json::from_slice(&bytes).ok()?;
+    if record.schema != DEFERRAL_SCHEMA {
+        return None;
+    }
+    let facts = crate::stale_rules::Deferral {
+        same_checkout: crate::paths::canonical(root).is_ok_and(|root| root == record.root),
+        same_content: record.content_hash == current,
+        same_build: record.installed_hash == stamp.hash,
+    };
+    Some((facts, record))
+}
+
+/// Admits a stale build while its failed reinstall stays recorded, and warns which install task to run.
+fn tolerated(
+    home: Option<&Path>,
+    built: Built,
+    state: crate::stale_rules::Freshness,
+    root: &Path,
+    current: &str,
+    stamp: &Embedded,
+) -> bool {
+    let found = deferral(home, built, root, current, stamp);
+    if !tolerates(state, found.as_ref().map(|(facts, _)| *facts)) {
+        return false;
+    }
+    if let Some((_, record)) = found {
+        eprintln!(
+            "Warning: {} runs a build older than {} because `just {}` failed there: {}; run that install task again once the cause is fixed",
+            built.binary(),
+            root.display(),
+            built.install_task(),
+            record.failure
+        );
+    }
+    true
 }
 
 #[derive(Deserialize, Serialize)]
@@ -426,6 +551,7 @@ fn write_installation(home: &Path, built: Built, stamp: Embedded) -> Result<()> 
     file.write_all(b"\n")?;
     file.persist(&path)
         .with_context(|| format!("record the {} installation", built.binary()))?;
+    clear_deferral(home, built);
     Ok(())
 }
 
@@ -516,13 +642,9 @@ pub fn lagging(home: &Path, root: &Path) -> Result<Vec<Built>> {
 ///
 /// # Errors
 ///
-/// Returns an error when it can't hash the checkout, or an install task fails or can't start.
+/// Returns an error when it can't hash the checkout, or when an install task fails or can't start.
 pub fn reinstall_lagging(home: &Path, root: &Path) -> Result<()> {
-    for built in lagging(home, root)? {
-        println!(
-            "Reinstalling {}: its sources changed since it was installed",
-            built.binary()
-        );
+    reinstall_lagging_with(home, root, |built| {
         let status = Tool::Just
             .command()
             .current_dir(root)
@@ -534,7 +656,53 @@ pub fn reinstall_lagging(home: &Path, root: &Path) -> Result<()> {
             "just {} failed with {status}",
             built.install_task()
         );
+        Ok(())
+    })
+}
+
+/// Runs `install` for each recorded installation whose sources in `root` changed, and attempts every one even after a failure.
+/// A failed install records the failure, so the previous build keeps running with a warning until the sources change again.
+///
+/// # Errors
+///
+/// Returns an error when it can't hash the checkout or record a failure, or that names every install that failed.
+pub fn reinstall_lagging_with(
+    home: &Path,
+    root: &Path,
+    mut install: impl FnMut(Built) -> Result<()>,
+) -> Result<()> {
+    let checkout = crate::paths::canonical(root)?;
+    let mut failed = Vec::new();
+    for built in lagging(home, &checkout)? {
+        println!(
+            "Reinstalling {}: its sources changed since it was installed",
+            built.binary()
+        );
+        match install(built) {
+            Ok(()) => clear_deferral(home, built),
+            Err(error) => {
+                let installed = installation(home, built)?
+                    .context("a lagging tool keeps its installation record")?;
+                record_deferral(
+                    home,
+                    built,
+                    &Deferral {
+                        schema: DEFERRAL_SCHEMA,
+                        root: checkout.clone(),
+                        content_hash: content_hash(&checkout)?,
+                        installed_hash: installed.build.hash,
+                        failure: format!("{error:#}"),
+                    },
+                )?;
+                failed.push(format!("{}: {error:#}", built.binary()));
+            }
+        }
     }
+    ensure!(
+        failed.is_empty(),
+        "each tool whose reinstall failed keeps running its previous build with a warning until the checkout changes again or its install task succeeds; {}",
+        failed.join("; ")
+    );
     Ok(())
 }
 
