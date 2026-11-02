@@ -38,8 +38,12 @@ const SHA256_LENGTH: usize = 64;
 const BUILDER_PREFIX: &str = "dotfiles-proof-156-";
 const LINUX_AMD64: &str = "linux/amd64";
 const BUILDKIT_IMAGE: &str = "docker.io/moby/buildkit@sha256:3ad6bb9bc8c78c0069d03247adb9a59b3b43d68e55353e876e558b888c6c1768";
+/// The image ID of the pinned BuildKit under Docker's classic image store, which names the image configuration.
 const BUILDKIT_CONFIG: &str =
     "sha256:f27f9c00a3aca2c219642d1500610eade3ddcb6b873ea8847852ab156663d32f";
+/// The image ID of the same pin under the containerd image store, which names the pinned manifest.
+const BUILDKIT_DIGEST: &str =
+    "sha256:3ad6bb9bc8c78c0069d03247adb9a59b3b43d68e55353e876e558b888c6c1768";
 const RESTART_POLICY: &str = "no";
 const BUILD_INODES: u64 = 2_000_000;
 const FLOOR_INODES: u64 = 100_000;
@@ -291,7 +295,7 @@ impl CapturedBuildKit {
     fn require_limits(&self) -> Result<()> {
         let server = &self.server;
         ensure!(
-            server.image == BUILDKIT_CONFIG && server.running,
+            [BUILDKIT_CONFIG, BUILDKIT_DIGEST].contains(&server.image.as_str()) && server.running,
             "BuildKit image or initial state is unexpected"
         );
         ensure!(
@@ -1617,11 +1621,11 @@ fn df_available(text: &str, heading: &str) -> Result<u64> {
 }
 
 /// The inode capacity of a Linux `df -Pi` report, which names the inode total of each row.
+/// The coreutils df heads the free count `IFree`, and the BusyBox df inside BuildKit heads it `Available`.
 fn df_inodes(text: &str) -> Result<Inodes> {
-    Ok(resource_rules::reported_inodes(
-        df_available(text, "Inodes")?,
-        df_available(text, "IFree")?,
-    ))
+    let total = df_available(text, "Inodes")?;
+    let free = df_available(text, "IFree").or_else(|_| df_available(text, "Available"))?;
+    Ok(resource_rules::reported_inodes(total, free))
 }
 
 fn memory_available(text: &str) -> Result<u64> {
@@ -2162,6 +2166,14 @@ mod tests {
         let inconsistent = format!("{header}\noverlay             0     0     5     - /");
         assert_eq!(df_inodes(&inconsistent)?, Inodes::Unmeasured);
         assert!(df_inodes("Filesystem IFree\noverlay 0").is_err());
+        let busybox = "Filesystem              Inodes      Used Available Capacity Mounted on";
+        let builder = format!(
+            "{busybox}\n/dev/vdb1                    0         0         0   0% /etc/hostname"
+        );
+        assert_eq!(df_inodes(&builder)?, Inodes::NotApplicable);
+        let fixed = format!("{busybox}\n/dev/vdb1              4000000    100000   3900000   3% /");
+        assert_eq!(df_inodes(&fixed)?, Inodes::Available(3_900_000));
+        assert!(df_inodes("Filesystem Inodes Used\n/dev/vdb1 0 0").is_err());
         let mut current = observation()?;
         current.capacity.guest_inodes = df_inodes(&tableless)?;
         current.admit()?;
@@ -2172,6 +2184,29 @@ mod tests {
         assert!(current.continuing(&initial).is_err());
         current.capacity.guest_inodes = df_inodes(&short)?;
         assert!(current.admit().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn buildkit_identity_accepts_only_the_pinned_config_or_manifest_digest() -> Result<()> {
+        assert_eq!(
+            BUILDKIT_IMAGE.rsplit_once('@').map(|(_, digest)| digest),
+            Some(BUILDKIT_DIGEST)
+        );
+        for (image, admitted) in [
+            (BUILDKIT_CONFIG, true),
+            (BUILDKIT_DIGEST, true),
+            (
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                false,
+            ),
+            ("", false),
+        ] {
+            let mut current = server(&PendingBuilder::new(NONCE)?);
+            current.image = image.to_owned();
+            let owned = PendingBuilder::new(NONCE)?.capture_identity(current)?;
+            assert_eq!(owned.require_limits().is_ok(), admitted, "{image}");
+        }
         Ok(())
     }
 
