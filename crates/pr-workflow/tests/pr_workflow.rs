@@ -6548,6 +6548,7 @@ fn independent_prs_merge_in_order_through_update_checks_ready_and_the_verified_h
     let output = fixture
         .personal_command("merge")?
         .args(["--pr", "17", "--pr", "18", "--interval", "0"])
+        .env("GH_FIXTURE_LIST", r#"[{"number":17,"headRefName":"feature","baseRefName":"main"},{"number":18,"headRefName":"second","baseRefName":"main"},{"number":30,"headRefName":"unrelated","baseRefName":"main"}]"#)
         .env("GH_FIXTURE_VIEWS", views)
         .env("GH_FIXTURE_ASSESSMENTS", records)
         .env("GH_FIXTURE_BEHIND", &old)
@@ -6570,6 +6571,47 @@ fn independent_prs_merge_in_order_through_update_checks_ready_and_the_verified_h
         "\nmerge\n--repo\nP4suta/project\n18\n--squash\n--match-head-commit\n{other}\n"
     )));
     assert!(!log.contains(PAUSE_MARKER));
+    Ok(())
+}
+
+#[test]
+fn merge_sends_a_stack_member_to_stack_merge_before_any_github_mutation() -> Result<()> {
+    let list = r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":17,"headRefName":"topic","baseRefName":"parent"},{"number":30,"headRefName":"unrelated","baseRefName":"main"}]"#;
+    let body = format!("{BODY}\nCloses #23.\n\n@coderabbitai ignore\n");
+    for (pr, relation) in [(17, "parent #5 (parent)"), (5, "child #17 (topic)")] {
+        let fixture = Fixture::new(BODY)?;
+        let head = fixture.head.as_str();
+        let records = fixture.assessment_records(
+            fixture.directory.path(),
+            "P4suta/project",
+            &[(head, "origin/main")],
+        )?;
+        // GitHub refuses the synchronous merge of a stack member, as the injected failure stands for.
+        let output = fixture
+            .personal_command("merge")?
+            .args(["--pr", &pr.to_string(), "--interval", "0"])
+            .env("GH_FIXTURE_LIST", list)
+            .env(
+                "GH_FIXTURE_VIEWS",
+                read(pr, head, false, &body, PASSING, "CLEAN"),
+            )
+            .env("GH_FIXTURE_ASSESSMENTS", records)
+            .env("GH_FIXTURE_FAILURE", "merge")
+            .output()?;
+        let refused = refusal(&output);
+        assert_eq!(refused["rule"], "pr.stack", "#{pr}: {refused}");
+        assert_eq!(
+            refused["next"],
+            format!("pr-workflow stack merge --repo P4suta/project --pr {pr}")
+        );
+        assert!(
+            refused["evidence"].to_string().contains(relation),
+            "#{pr}: {refused}"
+        );
+        let log = fixture.log()?;
+        assert_eq!(mutations(&log), Vec::<String>::new(), "#{pr}");
+        assert!(!log.contains("merge-async"), "#{pr}");
+    }
     Ok(())
 }
 
