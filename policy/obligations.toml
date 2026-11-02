@@ -1170,6 +1170,63 @@ fn reject_answering_for_a_git_process_that_a_signal_ended() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/gh_read_rules.rs"
+probes = '''
+use production::{Verdict, verdict};
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_an_api_post() {
+    assert!(verdict(&["api", "-X", "POST", "repos/o/r/issues"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_an_attached_method_in_a_flag_cluster() {
+    assert!(verdict(&["api", "-iXDELETE", "repos/o/r"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_long_method_override() {
+    assert!(verdict(&["api", "--method=PATCH", "repos/o/r"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_raw_field() {
+    assert!(verdict(&["api", "repos/o/r/issues", "-f", "title=x"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_typed_field_with_an_attached_value() {
+    assert!(verdict(&["api", "repos/o/r/issues", "-Fbody=@file"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_request_body_from_input() {
+    assert!(verdict(&["api", "repos/o/r/issues", "--input=-"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_pull_request_merge() {
+    assert!(verdict(&["pr", "merge", "17"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_variable_write() {
+    assert!(verdict(&["variable", "set", "NAME"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_refusing_a_workflow_run_read() {
+    assert!(verdict(&["run", "view", "1", "--json", "conclusion"]) == Verdict::Refuse);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_refusing_an_explicit_get() {
+    assert!(verdict(&["api", "-X", "get", "repos/o/r/pulls"]) == Verdict::Refuse);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/source_sync_rules.rs"
 probes = '''
 use production::{Checkout, Decision, Remote, SkipReason, decide, preflight};
