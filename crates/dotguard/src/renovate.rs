@@ -239,6 +239,13 @@ fn gate_ref(remote: &str, input: &str) -> i32 {
         Ok(integrated) => integrated,
         Err(cause) => return unavailable(&cause),
     };
+    // A merged push blocks only updates of its own manifest changes, so one that leaves every manifest as the default branch has it needs no lookup.
+    if integrated
+        .as_ref()
+        .is_some_and(|scope| scope.changed_files.is_empty())
+    {
+        return 0;
+    }
 
     if locate::which("docker").is_none() {
         return unavailable("required tool docker is missing");
@@ -824,6 +831,32 @@ pub struct RunConfig {
     pub gid: u32,
     pub dedicated_token: Option<String>,
     pub passthrough: Vec<String>,
+    /// The host folder that keeps Renovate's registry responses between runs, or `None` for a cache on the container's tmpfs.
+    pub cache: Option<PathBuf>,
+}
+
+/// Where the lookup cache lives under the user's cache folder.
+const LOOKUP_CACHE: &str = "dotguard/renovate";
+
+/// The lookup cache path inside the container.
+const CONTAINER_CACHE: &str = "/cache";
+
+/// The lookup cache admits its owner alone.
+#[cfg(unix)]
+const PRIVATE_FOLDER: u32 = 0o700;
+
+/// The lookup cache under the user's cache folder, created private to the user.
+/// Renovate expires each registry response by its own lifetimes, so a reused response is one that Renovate itself would trust.
+fn lookup_cache() -> Option<PathBuf> {
+    let directory = platform::home::cache_home(&platform::home::home()?).join(LOOKUP_CACHE);
+    std::fs::create_dir_all(&directory).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(PRIVATE_FOLDER))
+            .ok()?;
+    }
+    Some(directory)
 }
 
 const DEFAULT_IMAGE: &str = "renovate/renovate:44.169.0@sha256:99c305024372fe8fc928a187dccfa276ebfd3e6911b967cb7b8667376ed6c046";
@@ -912,6 +945,13 @@ fn docker_plan(c: &RunConfig) -> (Vec<String>, Vec<&'static str>) {
         args.push("RENOVATE_CONFIG_FILE=/repo/renovate.local.json5".into());
     }
 
+    if let Some(cache) = &c.cache {
+        args.push("--env".into());
+        args.push(format!("RENOVATE_CACHE_DIR={CONTAINER_CACHE}"));
+        args.push("--volume".into());
+        args.push(format!("{}:{CONTAINER_CACHE}:rw", cache.display()));
+    }
+
     args.push("--volume".into());
     args.push(format!("{}:/repo:ro", c.snapshot.display()));
     args.push("--workdir".into());
@@ -971,6 +1011,7 @@ fn prepare(offered: Option<&str>, passthrough: &[String]) -> Option<RunConfig> {
             .filter(|s| !s.is_empty())
             .or_else(doppler_token),
         passthrough: passthrough.to_vec(),
+        cache: lookup_cache(),
     })
 }
 
@@ -1156,7 +1197,27 @@ mod run_tests {
             gid: 20,
             dedicated_token: dedicated_token.map(str::to_owned),
             passthrough: vec![],
+            cache: None,
         }
+    }
+
+    #[test]
+    fn a_lookup_cache_mounts_writable_at_the_renovate_cache_folder() {
+        let without = argv(&cfg(None, None));
+        assert!(!without.iter().any(|arg| arg.contains("/cache")));
+        let mut c = cfg(None, None);
+        c.cache = Some(PathBuf::from("/home/owner/.cache/dotguard/renovate"));
+        let a = argv(&c);
+        let volume = "/home/owner/.cache/dotguard/renovate:/cache:rw".to_owned();
+        let mount = a.iter().position(|arg| *arg == volume);
+        assert_eq!(mount.map(|i| a[i - 1].as_str()), Some("--volume"));
+        let variable = a.iter().position(|arg| arg == "RENOVATE_CACHE_DIR=/cache");
+        assert_eq!(variable.map(|i| a[i - 1].as_str()), Some("--env"));
+        assert!(
+            a.iter()
+                .position(|arg| arg.starts_with("renovate/renovate:"))
+                > mount
+        );
     }
 
     fn argv(c: &RunConfig) -> Vec<String> {
