@@ -568,7 +568,7 @@
     {"mode":"0755","path":".local/bin/ghostty-nu","sha256":"1e9ed08844110cdf645625a448de3dc0bf88f13719f6bfbc11a207f445185f6c","type":"file"},
     {"mode":"0755","path":".local/bin/git","sha256":"7053afbde0b294f6917b44c99d67daaa5aeeb649e78688c0c1598c4df45a48a7","type":"file"},
     {"mode":"0755","path":".ssh","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".ssh/config","sha256":"57084d70237c9fe3c7b36d0d645fe99afc00ba3194ebeda765a25b8502b4dff3","type":"file"},
+    {"mode":"0644","path":".ssh/config","sha256":"56fd356cf1bfa4b85a032554fe13206b937aac3bb6773a33ca02399b9e57354e","type":"file"},
     {"mode":"0644","path":".zprofile","sha256":"715fba02441e7221f2de0cbb9ed3f2f9994869d3a438094061edb6d1553376f0","type":"file"},
     {"mode":"0644","path":".zshrc","sha256":"bd3b3338053e25647c5f3f5eba03a6054095c27fb3a10d1a3b801b02d43644db","type":"file"},
     {"mode":"0755","path":"Library","sha256":null,"type":"dir"},

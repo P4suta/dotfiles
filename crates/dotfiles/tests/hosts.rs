@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, ensure};
 use dotfiles::hosts::{
-    Managed, Peer, Tailnet, evidence, hub_user, label_family, managed, outcome, pinned, push_gate,
-    remote_gate, render, require_admission, require_publication_admission, required, scanned,
-    select, tailnet, wrap,
+    Login, Managed, Peer, RequestedUsers, Tailnet, evidence, hub_user, label_family, managed,
+    outcome, pinned, push_gate, remote_gate, render, requested_users, require_admission,
+    require_publication_admission, required, scanned, select, tailnet, user_for, wrap,
 };
 use dotfiles::hosts_rules::{Evidence, Family};
 use std::fmt::Write as _;
@@ -1955,25 +1955,53 @@ fn the_tailnet_supplies_one_host_per_other_family() -> Result<()> {
     Ok(())
 }
 
+fn logins(aliases: &[&str], user: &str) -> Vec<Login> {
+    aliases
+        .iter()
+        .map(|alias| Login {
+            alias: (*alias).to_owned(),
+            user: user.to_owned(),
+        })
+        .collect()
+}
+
 #[test]
 fn managed_files_round_trip_and_keys_come_only_from_key_lines() {
     let text = render(
-        &["home".into(), "mac".into()],
-        "owner",
+        &[
+            Login {
+                alias: "home".into(),
+                user: "owner".into(),
+            },
+            Login {
+                alias: "pc".into(),
+                user: "desk".into(),
+            },
+        ],
         Path::new("C:\\state\\known_hosts"),
     );
-    assert!(text.contains("UserKnownHostsFile C:/state/known_hosts"));
-    assert!(text.contains(
-        "StrictHostKeyChecking yes
-  ForwardAgent no
-"
-    ));
+    assert!(text.contains("Host home\n  User owner\n  UserKnownHostsFile C:/state/known_hosts\n"));
+    assert!(text.contains("Host pc\n  User desk\n"));
+    assert_eq!(
+        text.matches("StrictHostKeyChecking yes\n  ForwardAgent no\n")
+            .count(),
+        2
+    );
     assert_eq!(
         managed(&text),
         Managed {
-            aliases: vec!["home".into(), "mac".into()],
-            user: Some("owner".into())
+            aliases: vec!["home".into(), "pc".into()],
+            users: [("home", "owner"), ("pc", "desk")]
+                .map(|(alias, user)| (alias.to_owned(), user.to_owned()))
+                .into()
         }
+    );
+    assert_eq!(
+        managed("Host home pc\n  User owner\n").users,
+        [("home", "owner"), ("pc", "owner")]
+            .map(|(alias, user)| (alias.to_owned(), user.to_owned()))
+            .into(),
+        "the combined block of earlier releases gives its user to every alias"
     );
     let known = "home,home.ts.net,100.64.0.2 100.64.0.2:22 SSH-2.0-Tailscale\nhome,home.ts.net,100.64.0.2 ssh-ed25519 AAAA\n";
     assert_eq!(
@@ -1988,6 +2016,55 @@ fn managed_files_round_trip_and_keys_come_only_from_key_lines() {
     let remotes = "origin\tgit@github.com:owner/project.git (fetch)\nhub\tssh://owner@mac/~/git/project.git (push)\n";
     assert_eq!(hub_user(remotes, &["mac".into()]).as_deref(), Some("owner"));
     assert_eq!(hub_user(remotes, &["home".into()]), None);
+}
+
+#[test]
+fn each_host_takes_its_own_requested_then_shared_then_managed_then_hub_user() -> Result<()> {
+    let previous = managed("Host home\n  User keeper\nHost pc\n  User desk\n");
+    let remotes = "hub\tssh://owner@mac/~/git/project.git (push)\n";
+    let requested = requested_users(&["pc=livec".into()])?;
+    assert_eq!(
+        user_for("pc", &requested, &previous, remotes).as_deref(),
+        Some("livec")
+    );
+    assert_eq!(
+        user_for("home", &requested, &previous, remotes).as_deref(),
+        Some("keeper")
+    );
+    assert_eq!(
+        user_for("mac", &requested, &previous, remotes).as_deref(),
+        Some("owner")
+    );
+    assert_eq!(user_for("box", &requested, &previous, remotes), None);
+    let shared = requested_users(&["owner".into(), "pc=livec".into()])?;
+    assert_eq!(
+        user_for("home", &shared, &previous, remotes).as_deref(),
+        Some("owner"),
+        "a user requested for every host replaces the managed one"
+    );
+    assert_eq!(
+        user_for("pc", &shared, &previous, remotes).as_deref(),
+        Some("livec"),
+        "a user requested for one host wins over the shared one"
+    );
+    assert_eq!(
+        requested_users(&[])?,
+        RequestedUsers::default(),
+        "no --user leaves every host to its managed or hub user"
+    );
+    for refused in [
+        vec!["a".into(), "b".into()],
+        vec!["pc=a".into(), "pc=b".into()],
+        vec!["=a".into()],
+        vec!["pc=".into()],
+        vec![String::new()],
+    ] {
+        ensure!(
+            requested_users(&refused).is_err(),
+            "accepted --user {refused:?}"
+        );
+    }
+    Ok(())
 }
 
 #[test]
@@ -2055,7 +2132,7 @@ fn prepare_host_check_project(root: &Path, home: &Path) -> Result<()> {
     fs::create_dir_all(home.join(".local/state/hosts"))?;
     fs::write(
         home.join(".local/state/hosts/ssh_config"),
-        render(&["box".into()], "owner", &home.join("known_hosts")),
+        render(&logins(&["box"], "owner"), &home.join("known_hosts")),
     )?;
     fs::write(
         root.join("gitconfig"),
@@ -2497,8 +2574,7 @@ fn one_interrupted_family_does_not_prevent_other_pending_families_from_recording
     fs::write(
         fixture.home.join(".local/state/hosts/ssh_config"),
         render(
-            &["box".into(), "mac".into(), "pc".into()],
-            "owner",
+            &logins(&["box", "mac", "pc"], "owner"),
             &fixture.home.join("known_hosts"),
         ),
     )?;
@@ -3439,8 +3515,7 @@ fn one_head_reports_every_failing_host_and_stage() -> Result<()> {
     fs::write(
         home.join(".local/state/hosts/ssh_config"),
         render(
-            &["box".into(), "mac".into(), "pc".into()],
-            "owner",
+            &logins(&["box", "mac", "pc"], "owner"),
             &home.join("known_hosts"),
         ),
     )?;

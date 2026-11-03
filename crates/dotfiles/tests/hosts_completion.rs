@@ -1,5 +1,5 @@
 use anyhow::{Result, ensure};
-use dotfiles::hosts::{NOTES, evidence, render};
+use dotfiles::hosts::{Login, NOTES, evidence, render};
 use dotfiles::hosts_rules::Evidence;
 use std::fs;
 use std::path::Path;
@@ -53,8 +53,10 @@ fn prepare(root: &Path, home: &Path, bin: &Path) -> Result<()> {
     fs::write(
         home.join(".local/state/hosts/ssh_config"),
         render(
-            &["box".into(), "mac".into(), "pc".into()],
-            "fixture",
+            &["box", "mac", "pc"].map(|alias| Login {
+                alias: alias.to_owned(),
+                user: "fixture".to_owned(),
+            }),
             &home.join("known_hosts"),
         ),
     )?;

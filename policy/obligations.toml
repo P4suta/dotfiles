@@ -50,6 +50,14 @@ fn reject_dropping_an_ssh_host_directive() {
     assert!(production::ssh_config_preserved("Host local", production::SSH_INCLUDE));
 }
 #[kani::proof]
+#[kani::unwind(128)]
+fn reject_host_logins_after_the_agent_include() {
+    assert!(production::ssh_config_preserved(
+        "Host local",
+        "Include ~/.config/dotfiles/ssh-agent.conf\nInclude ~/.local/state/hosts/ssh_config\nHost local"
+    ));
+}
+#[kani::proof]
 fn reject_routing_to_an_empty_agent() {
     assert!(production::route(production::Context::Local, production::Agent::Empty) == production::Route::Herdr);
 }

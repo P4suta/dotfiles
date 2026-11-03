@@ -1591,7 +1591,8 @@ y = 2
 #[test]
 fn herdr_ssh_merging_preserves_host_directives_and_order() -> anyhow::Result<()> {
     let current = "Include ~/.orbstack/ssh/config\nHost fixture\n  HostName fixture.invalid\nHost *\n  IdentityAgent /old/agent.sock\n";
-    let include = "Include ~/.config/dotfiles/ssh-agent.conf\n";
+    let include =
+        "Include ~/.local/state/hosts/ssh_config\nInclude ~/.config/dotfiles/ssh-agent.conf\n";
     let rendered = current.replace("Host fixture", &format!("{include}Host fixture"));
     assert!(profiles::keeps_host_keys(
         ".ssh/config",
