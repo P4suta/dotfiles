@@ -1,7 +1,7 @@
 {
-  "revision": "df1efeb5572af89cc96700626320e38b3a1782d15dd51a283cf377c2a992e27f",
+  "revision": "6ddbbe5bc09191b8c515e37022e62a9233f40e3d91dab9d86f49f87bc506f6f6",
   "outcome": "implemented",
-  "reason": "The skill tool inventory now pins mise 2026.10.19. Trust, execution, bootstrap checksum handling, and verification behavior remain unchanged, and native bootstrap verification is still pending.",
+  "reason": "The skill tool inventory now pins mise 2026.10.24. Trust, execution, bootstrap checksum handling, and verification behavior remain unchanged. This release reports a tool requested by a v-prefixed tag under its version without the prefix, and the code environment admits that form. Native bootstrap verification is still pending.",
   "evidence": [
     "home/dot_agents/skills/mise/SKILL.md",
     "home/dot_agents/skills/mise/tools.toml",
