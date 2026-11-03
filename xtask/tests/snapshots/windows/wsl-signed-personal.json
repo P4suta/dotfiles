@@ -72,7 +72,7 @@
     {"mode":"0755","path":".agents/skills/gcp","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/gcp/SKILL.md","sha256":"05a06c02699217dcc21176f7bf7b76b08253a1c0b3f8c8f2f30287d8192f8fc3","type":"file"},
     {"mode":"0755","path":".agents/skills/gcp/references","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/gcp/references/clients.md","sha256":"0697b97bd45939b4c1c8e7da46018f860921ad751610361861b442217f0ff71d","type":"file"},
+    {"mode":"0644","path":".agents/skills/gcp/references/clients.md","sha256":"de0d8995e94df20401a4eb751bc9d8751d44e985fb0aff733bed7e4e439353db","type":"file"},
     {"mode":"0644","path":".agents/skills/gcp/tools.toml","sha256":"3ab9ee73fb242b92a2287e88bf5779181c0dd6516dd346824f8a7c7a5ff214a6","type":"file"},
     {"mode":"0755","path":".agents/skills/github-repository","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/github-repository/SKILL.md","sha256":"cb1666c3836ae7ec6af6f4871e2e2ac8d5e5dc371f6dc0e95eaca6ce06ecdb62","type":"file"},
