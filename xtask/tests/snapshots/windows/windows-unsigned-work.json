@@ -336,7 +336,7 @@
     {"mode":"0644","path":".config/lefthook/global.yml","sha256":"a52fa7ffa7ddac882c454bbc7a2669ce3b61daaa4b181a75a8ce777e2107ec19","type":"file"},
     {"mode":"0755","path":".config/mise","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/mise/config.njutest.toml","sha256":"4f6fb2e394a7d0ee9725b496ee3d50b55312a3092c639ba30ddd9a7dac36e349","type":"file"},
-    {"mode":"0644","path":".config/mise/config.toml","sha256":"0d9807422c01a4dfc63e5b06b87a5a0024e191ca22cd14bd54e90a6f7b71b946","type":"file"},
+    {"mode":"0644","path":".config/mise/config.toml","sha256":"95562036149279fdc25026018f6e7626bffa661270023f62636018463f9d7df3","type":"file"},
     {"mode":"0755","path":".config/ocomment","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/ocomment/config.toml","sha256":"2248dbc390a2b96c5236fb23095899c19b72372fcd61a70fb8bf403898f48ecd","type":"file"},
     {"mode":"0755","path":".config/opencode","sha256":null,"type":"dir"},
@@ -538,12 +538,12 @@
     {"mode":"0644","path":"Documents/PowerShell/Microsoft.PowerShell_profile.ps1","sha256":"9d00714270b46bd7d45ebd927cfc95d74f1b69b367027b6a0d5694f0259ac825","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"fa65b8eec5919040fce5febbae5c7c4ef831ee7c216251c3fd43c3c9639f0546","target":".chezmoiscripts/windows/00-mise.ps1"},
+    {"condition":"always","phase":"before","position":0,"sha256":"ddfdeeaa6742aac8ba01759ea1410d9287eec960926df8c78116d2a7fe13a793","target":".chezmoiscripts/windows/00-mise.ps1"},
     {"condition":"always","phase":"before","position":1,"sha256":"f5334a942e3c04f9cba32d64e7fa51743418eb0e1bcac5703dbf74413ed3a7eb","target":".chezmoiscripts/windows/01-runtime.ps1"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"8e3c9a045236db83c0194a87a800dcf592baefa5051327c0d75dfa04a7187589","target":".chezmoiscripts/windows/02-github.ps1"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"0ee49ae7c147fb41ae9ea2954b703a5d4cdace839d587661098d8fb2b881ecf0","target":".chezmoiscripts/windows/03-scoop.ps1"},
     {"condition":"always","phase":"after","position":4,"sha256":"73fc99662509aa7cfed0e0d3691faf5bd5c764017fb769ea0d5176063cf62024","target":".chezmoiscripts/windows/04-winget.ps1"},
-    {"condition":"onchange","phase":"after","position":5,"sha256":"2f9dd326b5963578c0aadef0e15e2e95b64492ba2fd9a5c713d55bc857d7752a","target":".chezmoiscripts/windows/05-tools.ps1"},
+    {"condition":"onchange","phase":"after","position":5,"sha256":"ecbb4416911b53b8dead6e6ec9fecf5b5037e1c51def027453f8d05e254ec70a","target":".chezmoiscripts/windows/05-tools.ps1"},
     {"condition":"always","phase":"after","position":6,"sha256":"a42655a9e269a6fdee96409161d4aa8b96a12c3c4aa353f4727df1da82ff06df","target":".chezmoiscripts/windows/06-wezterm.ps1"},
     {"condition":"onchange","phase":"after","position":7,"sha256":"b9dc7a6dd17ededb8e47d001e55df1bacc50b35e74901547975e2a280daa3565","target":".chezmoiscripts/windows/07-herdr.ps1"},
     {"condition":"always","phase":"after","position":8,"sha256":"73f6aae07e75a700dd1a5435a98e946b11adf49858bab539a6fef58e5b93907c","target":".chezmoiscripts/windows/08-integrations.ps1"},

@@ -10,11 +10,11 @@
 version = "2026.10.24"
 
 [mise.sha256]
-linux-arm64 = "4a4ca53b28e5433c527f4f73fac1f98f992a17cf32ca136a58e2e375f790f627"
-linux-x64 = "3162760f40b6b5f706c60641e4ef5ee7322bc6c54f72fc26a7111b337aa18d9d"
-macos-arm64 = "7dc61dfa71abbcda1c40d18440bc556b5d58b80e6042bc4f95fd106fa1bb3c66"
-macos-x64 = "8d5e1591811143f15334f690373cefb58c13bd6cbd0292008748fd777f6c99d8"
-windows-x64 = "a8c7423f9a6ec4dbda2c2b9dd534827846322930e28bbfe5139f71576d470743"
+linux-arm64 = "ae1151a87d70146119f68f7378001a12f09d2a38853087ed6139b7527a55f148"
+linux-x64 = "be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d"
+macos-arm64 = "ac0ee145cb145affe3ea60623a4abdb253e5ad1f938def299e633e816c0b8523"
+macos-x64 = "399e46f059f8ffa3f5a4321513996f13100f2bc2513e5464ba666ed4c117039a"
+windows-x64 = "cfffec40ded67f1d04039eb388827ad8de0a0089d5c9d9abc57c6c85c0aedc71"
 
 # The versions of the shared tools on every profile, unless a profile's own `tool_versions` names another.
 [shared_tools.versions]
