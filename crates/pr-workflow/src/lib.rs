@@ -2652,7 +2652,7 @@ fn merge_state(
         )?;
         review_policy::admit_publication(&reviewed, &view.body)?;
         review_policy::remember(&reviewed, target, github, pr)?;
-        review_policy::validate_live_source(&reviewed, &view.source)?;
+        review_policy::validate_live_source(&reviewed, &view.source, carry)?;
         review_policy::labels(&reviewed, &view.labels)?;
         if lifecycle == Lifecycle::Ready
             && (stacked || requirements.queue || !behind)
@@ -3487,7 +3487,7 @@ fn link_stack(target: &Target, numbers: &[u64], base: &str) -> Result<()> {
             &member.head,
             Some(&member.base),
         )?;
-        review_policy::validate_live_source(&checked, &live.source)?;
+        review_policy::validate_live_source(&checked, &live.source, None)?;
         review_policy::admit_publication(&checked, &live.body)?;
         review_policy::labels(&checked, &live.labels)?;
         admit_review_request(
