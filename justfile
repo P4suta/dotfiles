@@ -46,6 +46,11 @@ profiles: trust
 profiles-linux: trust
     mise x -- cargo xtask profiles-linux
 
+# Writes this host family's profile manifests and prints each change, as the manifests workflow does on hosted runners.
+profile-manifests: trust
+    mise x -- cargo xtask profile-snapshots --write
+    git --no-pager diff --no-color --no-ext-diff -- xtask/tests/snapshots
+
 proofs *args: trust
     mise x -- cargo xtask proofs {{ args }}
 

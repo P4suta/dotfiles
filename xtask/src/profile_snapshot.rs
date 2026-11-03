@@ -516,7 +516,7 @@ pub fn check(root: &Path) -> Result<()> {
     }
     ensure!(
         changed.is_empty(),
-        "rendered profiles differ from the committed manifests in {DIRECTORY}/{}; review each change, then run `cargo xtask profile-snapshots --write` on a Windows and a Unix host and commit both manifest sets:\n{}",
+        "rendered profiles differ from the committed manifests in {DIRECTORY}/{}; review each change, then run `just profile-manifests` on a Windows and a Unix host, or dispatch the manifests workflow for the pushed branch with `gh workflow run manifests.yml -f ref=BRANCH` and apply the changes it prints, and commit both manifest sets:\n{}",
         family(),
         changed.join("\n")
     );
