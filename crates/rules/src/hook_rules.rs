@@ -67,6 +67,45 @@ pub enum Gate {
     Storage,
 }
 
+/// Every gate, in the order the plans can run them.
+pub const GATES: [Gate; 14] = [
+    Gate::PushHold,
+    Gate::Health,
+    Gate::ReadInput,
+    Gate::StagedTree,
+    Gate::Dotguard,
+    Gate::PushHosts,
+    Gate::Verification,
+    Gate::CommitProse,
+    Gate::GlobalLefthook,
+    Gate::RepositoryLefthook,
+    Gate::StagedTreeCheck,
+    Gate::Renovate,
+    Gate::Reinstall,
+    Gate::Storage,
+];
+
+/// The gate's name in the command timing history.
+#[must_use]
+pub const fn gate_name(gate: Gate) -> &'static str {
+    match gate {
+        Gate::PushHold => "push-hold",
+        Gate::Health => "health",
+        Gate::ReadInput => "read-input",
+        Gate::StagedTree => "staged-tree",
+        Gate::Dotguard => "dotguard",
+        Gate::PushHosts => "push-hosts",
+        Gate::Verification => "verification",
+        Gate::CommitProse => "commit-prose",
+        Gate::GlobalLefthook => "global-lefthook",
+        Gate::RepositoryLefthook => "repository-lefthook",
+        Gate::StagedTreeCheck => "staged-tree-check",
+        Gate::Renovate => "renovate",
+        Gate::Reinstall => "reinstall",
+        Gate::Storage => "storage",
+    }
+}
+
 /// What the hook found before it plans, none of which needs a gate to run.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[expect(
@@ -349,9 +388,37 @@ mod proofs {
         same
     }
 
+    /// Equal timing names identify the same gate.
+    /// Every name uses kebab case.
+    pub fn spec_gate_name(left: Gate, right: Gate) -> bool {
+        let same = gate_name(left) == gate_name(right);
+        assert_eq!(same, left == right);
+        assert!(
+            !gate_name(left).is_empty()
+                && gate_name(left)
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+        );
+        same
+    }
+
     #[cfg(kani)]
     fn any_hook() -> Hook {
         HOOKS[usize::from(kani::any::<u8>() % 7)]
+    }
+
+    #[cfg(kani)]
+    fn any_gate() -> Gate {
+        GATES[usize::from(kani::any::<u8>()) % GATES.len()]
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(24)]
+    fn every_gate_has_its_own_timing_name() {
+        let same = spec_gate_name(any_gate(), any_gate());
+        kani::cover!(same);
+        kani::cover!(!same);
     }
 
     #[cfg(kani)]
@@ -390,6 +457,15 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_gate_has_its_own_timing_name() {
+        for left in GATES {
+            for right in GATES {
+                proofs::spec_gate_name(left, right);
+            }
+        }
+    }
 
     #[test]
     fn a_commit_refreshes_recorded_tools_after_the_signing_gate() {
