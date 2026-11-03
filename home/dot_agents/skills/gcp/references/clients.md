@@ -10,9 +10,11 @@ Install a reviewed version into a shared user directory with npm's exact-version
 npm install --prefix "$HOME/.local/share/gcloud-mcp" --save-exact --omit=dev --no-audit --no-fund @google-cloud/gcloud-mcp@0.5.3
 ```
 
-Resolve the absolute Node executable and `node_modules/@google-cloud/gcloud-mcp/dist/bundle.js` path.
+Use the `latest` link that mise keeps under its Node installations as the Node executable, such as `$HOME/.local/share/mise/installs/node/latest/bin/node` on Mac and Linux.
+A versioned installation path breaks when mise upgrades and removes that release, while the link follows the newest installation.
+Resolve the absolute `node_modules/@google-cloud/gcloud-mcp/dist/bundle.js` path.
 Launch Node directly with the bundle as its argument.
-Give the server a PATH that includes gcloud and required system tools.
+Give the server a PATH that includes gcloud, the `bin` directory of the same Node link, and required system tools.
 Set `CLOUDSDK_CORE_DISABLE_PROMPTS=1` for noninteractive resource operations.
 Keep authentication outside MCP and preserve unrelated client settings when updating configuration.
 

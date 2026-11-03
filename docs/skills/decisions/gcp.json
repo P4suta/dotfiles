@@ -1,7 +1,7 @@
 {
-  "revision": "24ae14be71728b3573de7091c46c61d685e3aff7194fd15acfa091f77fd29f94",
+  "revision": "6b5221227aa57d9b388dfbb4fd526f3c67a97f3f35935e169649d5a9e5c77aab",
   "outcome": "implemented",
-  "reason": "Keep explicit project, location, and paid resource decisions separate from generic remote execution.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
+  "reason": "Keep explicit project, location, and paid resource decisions separate from generic remote execution.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.\nEvery client starts the gcloud MCP server through the latest Node link of mise, because a versioned installation path broke Claude Code and Codex after mise removed Node 26.10.0.",
   "evidence": [
     "home/dot_agents/skills/gcp/SKILL.md",
     "docs/adr/0003-local-skill-operations.md",
