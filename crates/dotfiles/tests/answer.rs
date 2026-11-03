@@ -18,11 +18,24 @@ fn an_unverified_argument_cannot_create_answer_evidence() {
         .output()
         .unwrap();
     assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("answer request"), "{stderr}");
     assert!(
-        String::from_utf8_lossy(&output.stderr).contains("answer request"),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
+        stderr.contains(dotfiles::answer::EVIDENCE_FORMAT),
+        "a refusal names the evidence format reference: {stderr}"
     );
+}
+
+#[test]
+fn the_check_help_names_the_evidence_format_reference() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), directory.path())
+        .args(["answer", "check", "--help"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("references/evidence-format.md"), "{stdout}");
 }
 use std::io::Write as _;
 use std::path::Path;
