@@ -442,7 +442,16 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     };
     let configured = run.configured()?;
     for gate in hook_rules::plan(hook.rule(), configured).gates() {
-        if let Err(error) = run.gate(*gate) {
+        let started = std::time::Instant::now();
+        let result = run.gate(*gate);
+        crate::claude_timing::record_gate(
+            &run.native.home,
+            hook.name(),
+            hook_rules::gate_name(*gate),
+            started.elapsed(),
+            result.is_ok(),
+        );
+        if let Err(error) = result {
             if !hook_rules::notification(*gate) {
                 return Err(error);
             }
