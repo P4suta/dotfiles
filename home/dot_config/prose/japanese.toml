@@ -47,3 +47,9 @@ tokens = [
 [rules."Dotfiles.Hedging"]
 message = "State the fact or its condition without the hedge."
 tokens = ["かもしれません", "かもしれない", "と思います", "と思われます", "おそらく", "たぶん", "多分", "気がします"]
+
+# The conjunction that begins with this particle, and its longer form, are words of their own.
+[rules."Dotfiles.Restriction"]
+message = "State the scope itself affirmatively, such as what the statement covers, instead of narrowing it with だけ."
+tokens = ["だけ"]
+except = ["だけど", "だけれど"]

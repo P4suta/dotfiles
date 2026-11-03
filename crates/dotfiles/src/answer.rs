@@ -888,6 +888,12 @@ fn check_at(home: &Path, session: &str, draft: &Path, evidence: &Path, cwd: &Pat
             .collect::<Vec<_>>()
             .join("\n")
     );
+    let words = crate::assure::japanese_word_reasons(&draft);
+    ensure!(
+        words.is_empty(),
+        "answer draft breaks the Japanese word rules, which the Stop hook also applies:\n{}",
+        words.join("\n")
+    );
     let Plan {
         document,
         proof,

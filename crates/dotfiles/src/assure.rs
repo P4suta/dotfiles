@@ -1946,6 +1946,9 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                         hit.line, hit.ch, hit.ch as u32, hit.kind
                     ));
                 }
+                reasons.extend(japanese_word_reasons(
+                    input.last_assistant_message.as_deref().unwrap_or_default(),
+                ));
             }
             if let Some(language) = language
                 && reply_language_rules::check(
@@ -1980,6 +1983,28 @@ struct StopInput {
     #[serde(default)]
     stop_hook_active: bool,
     last_assistant_message: Option<String>,
+}
+
+/// The refusals of the installed Japanese word rules for a Japanese reply.
+/// A host without the prose configuration reports that on standard error and refuses nothing for it.
+#[must_use]
+pub fn japanese_word_reasons(reply: &str) -> Vec<String> {
+    match prose::Bundle::installed().and_then(|bundle| prose::japanese::WordRules::read(&bundle)) {
+        Ok(rules) => rules
+            .findings("reply", reply)
+            .into_iter()
+            .map(|finding| {
+                format!(
+                    "Reply line {}: {}: {}",
+                    finding.line, finding.rule, finding.message
+                )
+            })
+            .collect(),
+        Err(error) => {
+            eprintln!("dotfiles: the Japanese word rules are unavailable: {error:#}");
+            Vec::new()
+        }
+    }
 }
 
 /// The client's stop hook answer: block once with the reason, and end the turn incomplete when the agent already continued once.
