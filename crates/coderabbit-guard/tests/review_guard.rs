@@ -529,7 +529,12 @@ fn each_pause_scope_is_reported_and_only_cli_scopes_block_the_guard() {
                 .unwrap()
         };
         let output = run(&["--guard-status", "--json"]);
-        assert!(output.status.success());
+        assert!(
+            output.status.success(),
+            "pause scope {scope}: {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
         let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(status["schema"], 1);
         assert_eq!(status["pause"], scope);
