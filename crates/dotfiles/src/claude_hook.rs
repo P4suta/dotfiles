@@ -931,12 +931,13 @@ mod tests {
             "tool_input":{"command":["pwsh","-NoProfile","-Command",format!("Set-Location -LiteralPath '{target}'; bash check.sh")]}
         });
         let findings = policy_refusals_with(&event.to_string(), test_bundle)?;
+        assert!(findings.iter().any(
+            |finding| finding.rule == LEGACY && finding.message.contains("execution directory")
+        ));
         assert!(
-            findings.iter().any(|finding| finding.rule == INSPECTION
-                && finding.message.contains("execution directory"))
+            !findings.iter().any(|finding| finding.rule == INSPECTION),
+            "an unresolved directory refuses the command without a hook failure"
         );
-        assert!(findings.iter().any(|finding| finding.rule == "hook.lint"
-            && finding.message.contains("execution directory")));
         assert!(
             !findings
                 .iter()
@@ -1051,10 +1052,10 @@ mod tests {
             let findings = policy_refusals_with(&event.to_string(), test_bundle)?;
             assert!(
                 findings.iter().any(|finding| {
-                    finding.rule == "hook.lint"
+                    finding.rule == LEGACY
                         && finding
                             .message
-                            .contains("known absolute execution directory")
+                            .contains("cannot resolve the execution directory")
                 }),
                 "{event}"
             );
@@ -1612,6 +1613,29 @@ mod tests {
                 && finding
                     .message
                     .contains("rejected this command's bash syntax")),
+            "{messages}"
+        );
+        assert!(
+            !findings.iter().any(|finding| finding.rule == INSPECTION),
+            "{messages}"
+        );
+    }
+
+    #[test]
+    fn a_relative_script_from_an_unknown_directory_is_refused_without_a_hook_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let event = json!({"tool_name": "Bash", "cwd": directory.path(), "tool_input": {"command": "cd \"$WORK\" && ./probe"}}).to_string();
+        let findings = policy_refusals(&event).unwrap();
+        let messages = findings
+            .iter()
+            .map(|finding| format!("{}: {}", finding.rule, finding.message))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            findings.iter().any(|finding| finding.rule == LEGACY
+                && finding.message.contains(
+                    "cannot resolve the execution directory of the relative script ./probe"
+                )),
             "{messages}"
         );
         assert!(

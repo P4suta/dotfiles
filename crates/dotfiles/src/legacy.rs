@@ -526,6 +526,9 @@ impl Findings {
                     )));
                 }
             }
+        } else if Path::new(path).is_relative() && !context.directory.is_some_and(Path::is_absolute)
+        {
+            self.refusals.push(format!("Refused: cannot resolve the execution directory of the relative script {path}.\nNext action: run the script by its absolute path."));
         } else {
             match script_refusal(
                 path,
@@ -1161,7 +1164,9 @@ mod tests {
                 "{command}: {report:?}"
             );
             assert!(
-                !report.unavailable.is_empty() || !report.wrapper_refusals.is_empty(),
+                !report.unavailable.is_empty()
+                    || !report.wrapper_refusals.is_empty()
+                    || !report.refusals.is_empty(),
                 "{command}: {report:?}"
             );
         }
@@ -1220,6 +1225,7 @@ mod tests {
                     .unavailable
                     .iter()
                     .chain(&report.wrapper_refusals)
+                    .chain(&report.refusals)
                     .any(|message| message.contains("execution directory")),
                 "{command}: {report:?}"
             );
@@ -1254,6 +1260,7 @@ mod tests {
                 report
                     .unavailable
                     .iter()
+                    .chain(&report.refusals)
                     .any(|message| message.contains("execution directory")),
                 "{prefix}: {report:?}"
             );
@@ -1380,6 +1387,7 @@ mod tests {
                 report
                     .unavailable
                     .iter()
+                    .chain(&report.refusals)
                     .any(|message| message.contains("execution directory")),
                 "{command}: {report:?}"
             );
@@ -1419,6 +1427,7 @@ mod tests {
             report
                 .unavailable
                 .iter()
+                .chain(&report.refusals)
                 .any(|message| message.contains("execution directory")),
             "{command}: {report:?}"
         );
@@ -1486,6 +1495,7 @@ mod tests {
                 || report
                     .unavailable
                     .iter()
+                    .chain(&report.refusals)
                     .any(|message| message.contains("execution directory")),
             "{report:?}"
         );
@@ -1499,6 +1509,7 @@ mod tests {
             report
                 .unavailable
                 .iter()
+                .chain(&report.refusals)
                 .any(|message| message.contains("execution directory")),
             "{report:?}"
         );
@@ -1541,6 +1552,7 @@ mod tests {
                 || report
                     .unavailable
                     .iter()
+                    .chain(&report.refusals)
                     .any(|message| message.contains("execution directory")),
             "{report:?}"
         );
