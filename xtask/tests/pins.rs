@@ -55,6 +55,14 @@ fn every_file_that_names_the_rust_toolchain_names_the_pinned_release() {
 }
 
 #[test]
+fn every_skill_lists_the_releases_that_the_hosts_install() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    if let Err(error) = xtask::inventory::check(&root) {
+        panic!("{error:#}");
+    }
+}
+
+#[test]
 fn the_hosted_gate_installs_the_pinned_mise_release() {
     let mise = &table(VERSIONS)["mise"];
     let version = mise["version"].as_str().unwrap();

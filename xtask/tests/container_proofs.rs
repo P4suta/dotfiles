@@ -889,18 +889,19 @@ fn the_container_verifier_matches_the_native_pin() {
 
 #[test]
 fn the_quint_image_pins_quint_its_apalache_and_every_base_by_digest() {
-    use xtask::quint::{APALACHE_VERSION, QUINT_VERSION};
+    let quint = xtask::quint::quint_version();
+    let apalache = xtask::quint::apalache_version();
     let definition = include_str!("../proofs/quint/Dockerfile");
     let package = include_str!("../proofs/quint/package.json");
     let lock: serde_json::Value =
         serde_json::from_str(include_str!("../proofs/quint/package-lock.json")).unwrap();
-    assert!(package.contains(&format!("\"@informalsystems/quint\": \"{QUINT_VERSION}\"")));
+    assert!(package.contains(&format!("\"@informalsystems/quint\": \"{quint}\"")));
     assert_eq!(
-        lock["packages"]["node_modules/@informalsystems/quint"]["version"],
-        QUINT_VERSION
+        lock["packages"]["node_modules/@informalsystems/quint"]["version"], quint,
+        "the lockfile installs the Quint release that package.json pins"
     );
     assert!(lock["packages"]["node_modules/@informalsystems/quint"]["integrity"].is_string());
-    assert!(definition.contains(&format!("ARG APALACHE_VERSION={APALACHE_VERSION}\n")));
+    assert!(definition.contains(&format!("ARG APALACHE_VERSION={apalache}\n")));
     assert!(definition.contains("ADD --checksum=sha256:${APALACHE_SHA256}"));
     assert!(definition.contains("sha256sum.txt"));
     assert!(definition.contains(&format!("ENV QUINT_HOME={}\n", xtask::quint::QUINT_HOME)));
