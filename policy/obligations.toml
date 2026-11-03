@@ -2228,6 +2228,14 @@ fn reject_checking_a_pr_already_conflicting_with_its_base() {
 fn reject_skipping_an_ordinary_pr_with_unknown_mergeability() {
     assert!(production::dependency_skip("contributor", Some("User"), false, Some("UNKNOWN")).is_some());
 }
+#[kani::proof]
+fn reject_absence_while_a_declared_check_can_still_report() {
+    assert!(production::head_checks(0, 0, 0, true) == production::HeadChecks::Absent);
+}
+#[kani::proof]
+fn reject_waiting_when_no_check_can_ever_report() {
+    assert!(production::head_checks(0, 0, 0, false) == production::HeadChecks::Pending);
+}
 '''
 
 [[obligation]]
