@@ -12,7 +12,7 @@ fn repository(path: &str) -> String {
 }
 
 const POLICY: &str = "[ruleset.main]\nrequired_status_checks = [\"required\"]\n";
-const WORKFLOW: &str = r#"name: ci
+const WORKFLOW_TEMPLATE: &str = r#"name: ci
 on:
   pull_request:
   merge_group:
@@ -59,8 +59,8 @@ jobs:
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
         with:
-          version: v2026.10.24
-          sha256: be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d
+          version: v{mise_version}
+          sha256: {mise_sha256}
           install_args: rust just
           cache: false
       - name: Check tool locks for every host OS
@@ -86,6 +86,19 @@ jobs:
           [[ "$RESULTS" =~ ^success( success)*$ ]]
 "#;
 
+/// The workflow fixture with the mise release and digest that every host installs.
+fn workflow() -> String {
+    let versions: toml::Table =
+        toml::from_str(&repository("home/.chezmoidata/versions.toml")).unwrap();
+    let mise = &versions["mise"];
+    WORKFLOW_TEMPLATE
+        .replace("{mise_version}", mise["version"].as_str().unwrap())
+        .replace(
+            "{mise_sha256}",
+            mise["sha256"]["linux-x64"].as_str().unwrap(),
+        )
+}
+
 #[test]
 fn pre_push_uses_the_canonical_candidate_publication_gate() {
     let hook = repository("lefthook.yml");
@@ -105,7 +118,7 @@ fn pre_push_uses_the_canonical_candidate_publication_gate() {
 
 #[test]
 fn lightweight_ci_reports_source_and_keeps_all_native_families_available() {
-    for workflow in [repository(".github/workflows/ci.yml"), WORKFLOW.into()] {
+    for workflow in [repository(".github/workflows/ci.yml"), workflow()] {
         assert_eq!(
             workflow_findings(&workflow, POLICY).unwrap(),
             Vec::<String>::new()
@@ -170,10 +183,8 @@ fn lightweight_ci_refuses_missing_reports_heavy_work_and_suppressed_failures() {
             "jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde",
             "jdx/mise-action@v5",
         ),
-        (
-            "          sha256: be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d\n",
-            "",
-        ),
+        ("          sha256: ", "          # sha256: "),
+        ("          version: v", "          version: v1"),
         ("cache: false", "cache: true"),
         (
             "run: just dependency-gate",
@@ -208,8 +219,9 @@ fn lightweight_ci_refuses_missing_reports_heavy_work_and_suppressed_failures() {
             "  extra:\n    runs-on: ubuntu-latest\n    steps:\n      - run: just proofs\n  required:\n",
         ),
     ] {
-        let changed = WORKFLOW.replacen(from, to, 1);
-        assert_ne!(changed, WORKFLOW, "missing fixture input: {from}");
+        let workflow = workflow();
+        let changed = workflow.replacen(from, to, 1);
+        assert_ne!(changed, workflow, "missing fixture input: {from}");
         assert_ne!(
             workflow_findings(&changed, POLICY).unwrap(),
             Vec::<String>::new(),
@@ -219,19 +231,47 @@ fn lightweight_ci_refuses_missing_reports_heavy_work_and_suppressed_failures() {
 }
 
 #[test]
+fn lightweight_ci_follows_a_renovate_commit_update_of_its_actions() {
+    let moved = workflow()
+        .replace(
+            "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+            "actions/checkout@0123456789abcdef0123456789abcdef01234567",
+        )
+        .replace(
+            "jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde",
+            "jdx/mise-action@89abcdef0123456789abcdef0123456789abcdef",
+        );
+    assert_eq!(
+        workflow_findings(&moved, POLICY).unwrap(),
+        Vec::<String>::new()
+    );
+    let split = workflow().replacen(
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "actions/checkout@0123456789abcdef0123456789abcdef01234567",
+        1,
+    );
+    assert_ne!(
+        workflow_findings(&split, POLICY).unwrap(),
+        Vec::<String>::new(),
+        "two jobs pin different checkout commits"
+    );
+}
+
+#[test]
 fn lightweight_ci_refuses_lock_bypasses_and_budget_or_order_changes() {
+    let workflow = workflow();
     for changed in [
-        WORKFLOW.replace("run: just tool-locks", "run: true"),
-        WORKFLOW.replace(
+        workflow.replace("run: just tool-locks", "run: true"),
+        workflow.replace(
             "      - name: Check tool locks for every host OS\n        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner\n",
             "      - name: Check tool locks for every host OS\n",
         ),
-        WORKFLOW.replacen("    timeout-minutes: 5", "    timeout-minutes: 20", 1),
-        WORKFLOW
+        workflow.replacen("    timeout-minutes: 5", "    timeout-minutes: 20", 1),
+        workflow
             .replace("run: just dependency-gate", "run: just tool-locks")
             .replacen("run: just tool-locks", "run: just dependency-gate", 1),
     ] {
-        assert_ne!(changed, WORKFLOW);
+        assert_ne!(changed, workflow);
         assert_ne!(
             workflow_findings(&changed, POLICY).unwrap(),
             Vec::<String>::new()

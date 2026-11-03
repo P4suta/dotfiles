@@ -224,7 +224,7 @@ fn dump_with(runner: &impl Runner, model: &QuintModel) -> Result<Graph> {
     let jar = format!(
         "{}/apalache-dist-{}/apalache/lib/apalache.jar",
         quint::QUINT_HOME,
-        quint::APALACHE_VERSION
+        quint::apalache_version()
     );
     let base = format!("{}/{main}", quint::OUTPUT);
     let module = format!("{base}.tla");
