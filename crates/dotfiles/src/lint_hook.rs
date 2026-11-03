@@ -1196,14 +1196,16 @@ mod tests {
         for directory in [None, Some(Path::new("."))] {
             let report =
                 crate::legacy::findings("bash test/vulnerability_scan.sh", directory).unwrap();
-            let findings = scripts(&report.scripts);
-            assert_eq!(findings.len(), 1, "{directory:?}: {report:?}");
-            assert!(findings[0].contains("known absolute execution directory"));
-            assert_eq!(report.unavailable.len(), 1, "{directory:?}: {report:?}");
             assert!(
-                report.unavailable[0].contains("execution directory"),
+                scripts(&report.scripts).is_empty(),
+                "{directory:?}: {report:?}"
+            );
+            assert!(report.unavailable.is_empty(), "{directory:?}: {report:?}");
+            assert_eq!(report.refusals.len(), 1, "{directory:?}: {report:?}");
+            assert!(
+                report.refusals[0].contains("execution directory"),
                 "{directory:?}: {}",
-                report.unavailable[0]
+                report.refusals[0]
             );
         }
     }

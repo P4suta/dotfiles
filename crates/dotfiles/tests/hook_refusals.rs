@@ -367,10 +367,11 @@ fn a_repository_with_its_own_lefthook_configuration_has_its_mise_configuration_t
         trusted_already.display(),
         parent.display(),
     );
+    // mise names a configuration under the home directory with a leading `~`, as the first report does.
     fs::write(
         &report,
         format!(
-            "{configuration_line}: untrusted\n{kept_line}: trusted\n{parent_line}: untrusted\n---\n\
+            "~/../repository/mise.toml: untrusted\n{kept_line}: trusted\n{parent_line}: untrusted\n---\n\
              {idiomatic_line}: untrusted\n{configuration_line}: trusted\n{kept_line}: trusted\n{parent_line}: untrusted\n---\n\
              {idiomatic_line}: trusted\n{configuration_line}: trusted\n{kept_line}: trusted\n{parent_line}: untrusted\n"
         ),

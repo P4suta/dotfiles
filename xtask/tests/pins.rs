@@ -77,12 +77,15 @@ fn every_hosted_runner_installs_the_mise_release_of_its_platform() {
     let mise = &table(VERSIONS)["mise"];
     let version = mise["version"].as_str().unwrap();
     let digest = |platform: &str| mise["sha256"][platform].as_str().unwrap().to_owned();
-    for (path, workflow, platforms) in [
-        (".github/workflows/ci.yml", WORKFLOW, &["linux-x64"][..]),
+    // On Windows, mise-action checks the extracted mise.exe, whose digest versions.toml doesn't record.
+    // The Windows job names that digest as one more full digest, and a dispatch refuses a stale one.
+    for (path, workflow, platforms, binaries) in [
+        (".github/workflows/ci.yml", WORKFLOW, &["linux-x64"][..], 0),
         (
             ".github/workflows/manifests.yml",
             MANIFESTS,
-            &["linux-x64", "windows-x64"][..],
+            &["linux-x64"][..],
+            1,
         ),
     ] {
         assert!(
@@ -95,7 +98,25 @@ fn every_hosted_runner_installs_the_mise_release_of_its_platform() {
             .filter(|value| !value.starts_with("${{"))
             .collect();
         let expected: Vec<String> = platforms.iter().map(|platform| digest(platform)).collect();
-        assert_eq!(named, expected, "{path} names other mise digests");
+        assert_eq!(
+            named.len(),
+            platforms.len() + binaries,
+            "{path} names other mise digests"
+        );
+        assert_eq!(
+            named[..platforms.len()],
+            expected,
+            "{path} names other mise digests"
+        );
+        for binary in &named[platforms.len()..] {
+            assert!(
+                binary.len() == 64
+                    && binary
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+                "{path} names a malformed binary digest {binary}"
+            );
+        }
     }
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/workflows");
     for entry in std::fs::read_dir(root).unwrap() {

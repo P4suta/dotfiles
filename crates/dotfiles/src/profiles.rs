@@ -559,6 +559,7 @@ pub fn operate(
         .then(|| application_root(root, config))
         .transpose()?;
     let root = application_root.as_deref().unwrap_or(root);
+    require_chezmoi_release(root)?;
     let scope = tempfile::tempdir()?;
     let bytes = output(
         chezmoi(root, scope.path(), config, destination).args(["data", "--format", "json"]),
@@ -785,8 +786,67 @@ impl Drop for StateLock {
     }
 }
 
+/// Refuses a chezmoi older than the source's `.chezmoiversion` before any render.
+/// chezmoi's own refusal of an old release first reports a changed configuration template, which points at the wrong fix.
+fn require_chezmoi_release(root: &Path) -> Result<()> {
+    let source = fs::read_to_string(root.join(".chezmoiroot"))
+        .map_or_else(|_| root.to_path_buf(), |name| root.join(name.trim()));
+    let pin = source.join(".chezmoiversion");
+    let Ok(required) = fs::read_to_string(&pin) else {
+        return Ok(());
+    };
+    let required = required.trim();
+    let reply = Tool::chezmoi_in(root)
+        .arg("--version")
+        .output()
+        .context("start chezmoi")?;
+    let text = String::from_utf8_lossy(&reply.stdout);
+    let found = reported_release(&text);
+    ensure!(
+        found.is_some_and(|found| release_at_least(found, required)),
+        "the chezmoi on PATH reports {}, and {} requires {required} or later; update that chezmoi, then run the upgrade again",
+        found.unwrap_or("no release"),
+        pin.display()
+    );
+    Ok(())
+}
+
+/// The release in `chezmoi version v2.73.3, commit …`.
+fn reported_release(text: &str) -> Option<&str> {
+    text.split_whitespace().find_map(|word| {
+        word.strip_prefix('v')
+            .filter(|rest| rest.starts_with(|character: char| character.is_ascii_digit()))
+            .map(|rest| rest.trim_end_matches(','))
+    })
+}
+
+/// Whether the dotted numeric release `found` is `required` or later.
+fn release_at_least(found: &str, required: &str) -> bool {
+    let parts = |release: &str| -> Option<Vec<u64>> {
+        release.split('.').map(|part| part.parse().ok()).collect()
+    };
+    matches!((parts(found), parts(required)), (Some(found), Some(required)) if found >= required)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_older_chezmoi_than_the_source_pin_is_refused() {
+        assert_eq!(
+            super::reported_release(
+                "chezmoi version v2.70.3, commit ff6317e, built at 2026-05-07T20:57:18Z, built by goreleaser\n"
+            ),
+            Some("2.70.3")
+        );
+        assert_eq!(super::reported_release("chezmoi version dev\n"), None);
+        assert!(super::release_at_least("2.74.0", "2.73.3"));
+        assert!(super::release_at_least("2.73.3", "2.73.3"));
+        assert!(super::release_at_least("3.0.0", "2.73.3"));
+        assert!(!super::release_at_least("2.70.3", "2.73.3"));
+        assert!(!super::release_at_least("2.73.2", "2.73.3"));
+        assert!(!super::release_at_least("dev", "2.73.3"));
+    }
+
     use super::*;
 
     #[test]

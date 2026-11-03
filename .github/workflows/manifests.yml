@@ -23,7 +23,8 @@ jobs:
           - os: ubuntu-latest
             mise_sha256: be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d
           - os: windows-latest
-            mise_sha256: cfffec40ded67f1d04039eb388827ad8de0a0089d5c9d9abc57c6c85c0aedc71
+            # mise-action checks the extracted mise.exe, not the zip whose digest versions.toml records for the host installer.
+            mise_sha256: 847d85d94808a77e998388d25f33537ff0f197ae74f1cd5d5cf65e4ba0e7af4e
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:

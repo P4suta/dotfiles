@@ -293,10 +293,14 @@ fn trust_repository(native: &mut Real, root: &Path) -> Result<()> {
             "mise could not report the trust of the configuration in {}",
             root.display()
         );
-        let pending: Vec<_> = untrusted_within(&String::from_utf8(reply.bytes)?, &canonical_root)
-            .into_iter()
-            .filter(|configuration| !trusted.contains(configuration))
-            .collect();
+        let pending: Vec<_> = untrusted_within(
+            &String::from_utf8(reply.bytes)?,
+            &canonical_root,
+            &native.home,
+        )
+        .into_iter()
+        .filter(|configuration| !trusted.contains(configuration))
+        .collect();
         if pending.is_empty() {
             break;
         }
@@ -315,12 +319,21 @@ fn trust_repository(native: &mut Real, root: &Path) -> Result<()> {
 }
 
 /// The untrusted configurations inside `root` among the `PATH: STATUS` lines of `mise trust --show`.
-fn untrusted_within(report: &str, root: &Path) -> Vec<PathBuf> {
+/// mise writes a path under the home directory with a leading `~`, which names `home`.
+fn untrusted_within(report: &str, root: &Path, home: &Path) -> Vec<PathBuf> {
     report
         .lines()
         .filter_map(|line| line.rsplit_once(": "))
         .filter(|(_, status)| status.trim() == UNTRUSTED)
-        .filter_map(|(path, _)| crate::canonical(Path::new(path)).ok())
+        .map(|(path, _)| {
+            path.strip_prefix('~')
+                .filter(|rest| rest.is_empty() || rest.starts_with(['/', '\\']))
+                .map_or_else(
+                    || PathBuf::from(path),
+                    |rest| home.join(rest.trim_start_matches(['/', '\\'])),
+                )
+        })
+        .filter_map(|path| crate::canonical(&path).ok())
         .filter(|path| path.starts_with(root))
         .collect()
 }
