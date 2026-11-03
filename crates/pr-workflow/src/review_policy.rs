@@ -1650,7 +1650,7 @@ pub(super) fn live_binding_at(
             .context("actual PR head commit is missing")?,
         signer,
     )?;
-    validate_live_source(&checked, &live.source)?;
+    validate_live_source(&checked, &live.source, None)?;
     labels(&checked, &live.labels)?;
     Ok(checked)
 }
@@ -1690,7 +1690,12 @@ pub(super) fn qualified_head(checked: &Checked, head: &str) -> Result<String> {
     }
 }
 
-pub(super) fn validate_live_source(checked: &Checked, source: &super::LiveSource) -> Result<()> {
+/// `replaced` is the check of the head that an update merge replaced, when the command pushed one.
+pub(super) fn validate_live_source(
+    checked: &Checked,
+    source: &super::LiveSource,
+    replaced: Option<&Checked>,
+) -> Result<()> {
     let supplied = source.head_repository.is_some()
         || source.head_repository_owner.is_some()
         || source.is_cross_repository.is_some();
@@ -1716,19 +1721,70 @@ pub(super) fn validate_live_source(checked: &Checked, source: &super::LiveSource
         .as_deref()
         .context("actual PR source branch missing")?;
     let branch = platform::source_identity::head_branch(&checked.root, &checked.source, branch)?;
-    let local = object(&checked.root, &format!("refs/heads/{branch}"))?;
-    let at_branch = local == checked.binding.head;
+    let live = &checked.binding.head;
+    let Some(local) = local_branch(&checked.root, &branch)? else {
+        return Err(platform::refusal::Refusal::new(
+            "pr.source",
+            format!(
+                "this checkout has no local branch {branch} to compare the PR head {live} with; run the command from the checkout that holds the branch"
+            ),
+            platform::refusal::command(&["git", "worktree", "list"]),
+        )
+        .evidence(format!(
+            "refs/heads/{branch} is missing in {}",
+            checked.root.display()
+        ))
+        .into());
+    };
+    let at_branch = local == *live;
     let (held, complete) = if at_branch {
         (Vec::new(), true)
     } else {
         held_commits(&checked.root, &local, &checked.binding)?
     };
-    ensure!(
-        rules::pr_merge_rules::live_head(at_branch, &held, complete)
-            != rules::pr_merge_rules::LiveHead::Diverged,
-        "actual PR head branch differs from the locally assessed source"
-    );
+    if rules::pr_merge_rules::live_head(at_branch, &held, complete)
+        == rules::pr_merge_rules::LiveHead::Diverged
+    {
+        let mut refusal = platform::refusal::Refusal::new(
+            "pr.source",
+            format!(
+                "the PR head {live} is neither the local branch {branch} at {local} nor a base update merge of it, so it holds work that this checkout didn't assess"
+            ),
+            platform::refusal::command(&["git", "log", "--oneline", &format!("{local}..{live}")]),
+        );
+        if let Some(replaced) = replaced.filter(|replaced| replaced.binding.head != *live) {
+            refusal = refusal.evidence(format!(
+                "the update merge moved the PR head from {} to {live}",
+                replaced.binding.head
+            ));
+        }
+        return Err(refusal.into());
+    }
     Ok(())
+}
+
+/// The commit of the local branch `branch`, or `None` when this checkout has no such branch.
+fn local_branch(root: &Path, branch: &str) -> Result<Option<String>> {
+    let reference = format!("refs/heads/{branch}");
+    let output = platform::tool::Tool::Git
+        .command()
+        .current_dir(root)
+        .args([
+            "--no-replace-objects",
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &reference,
+        ])
+        .output()?;
+    match output.status.code() {
+        Some(0) => object(root, &reference).map(Some),
+        Some(1) => Ok(None),
+        _ => anyhow::bail!(
+            "could not read {reference}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+    }
 }
 
 /// The commits that the bound head holds beyond the `local` branch head and the bound base, and whether the list is complete.

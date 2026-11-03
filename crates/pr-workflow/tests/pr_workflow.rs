@@ -6871,13 +6871,81 @@ fn merge_carries_the_assessment_through_an_update_merge_that_keeps_the_hunks() -
             }
             HeadUpdate::PlainCommit => {
                 assert!(!output.status.success(), "{update:?}");
-                assert!(!mutations(&log).contains(&"merge".into()));
+                assert_eq!(mutations(&log), ["update-branch"], "{update:?}");
+                assert!(stderr.contains(r#""rule":"pr.source""#), "{stderr}");
                 assert!(
-                    stderr
-                        .contains("actual PR head branch differs from the locally assessed source"),
-                    "{update:?}: {stderr}"
+                    stderr.contains(&format!(
+                        "the PR head {head} is neither the local branch feature at {local}"
+                    )),
+                    "{stderr}"
+                );
+                assert!(
+                    stderr.contains(&format!(
+                        "the update merge moved the PR head from {local} to {head}"
+                    )),
+                    "{stderr}"
+                );
+                assert!(
+                    stderr.contains(&format!(r#""next":"git log --oneline {local}..{head}""#)),
+                    "{stderr}"
                 );
             }
+        }
+    }
+    Ok(())
+}
+
+/// A checkout that holds `feature` while its worktree sits on another branch still carries the assessment through the update merge.
+/// A checkout without `feature` refuses before the update merge, because it has no local source to compare the head with.
+#[test]
+fn merge_refuses_before_the_update_merge_in_a_checkout_without_the_pr_branch() -> Result<()> {
+    for holds in [true, false] {
+        let fixture = Fixture::new(BODY)?;
+        let root = fixture.directory.path();
+        let UpdatedHistory {
+            base,
+            local,
+            advanced,
+            head,
+        } = UpdatedHistory::new(&fixture, HeadUpdate::OtherFile)?;
+        let mut command = fixture.personal_command("merge")?;
+        fixture.assessment(root, "P4suta/project", &base, &local)?;
+        git(root, &["checkout", "--quiet", "trunk"])?;
+        if !holds {
+            // The guarded Git refuses branch deletion, so a rename stands in for a clone that never had the branch.
+            git(root, &["branch", "--quiet", "-m", "feature", "parked"])?;
+        }
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let output = command
+            .args(["--pr", "17", "--interval", "0"])
+            .env("GH_FIXTURE_BEHIND", &local)
+            .env(
+                "GH_FIXTURE_BASES",
+                format!("{local}={base}\n{head}={advanced}"),
+            )
+            .env(
+                "GH_FIXTURE_VIEWS",
+                [
+                    sourced_read(&local, &body, "BEHIND"),
+                    sourced_read(&head, &body, "CLEAN"),
+                    sourced_read(&head, &body, "MERGED"),
+                ]
+                .join("\n"),
+            )
+            .output()?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let log = fixture.log().unwrap_or_default();
+        if holds {
+            assert!(output.status.success(), "{stderr}");
+            assert_eq!(mutations(&log), ["update-branch", "merge"]);
+            assert!(log.contains(&format!("--match-head-commit\n{head}\n")));
+        } else {
+            assert!(!output.status.success());
+            assert!(mutations(&log).is_empty(), "{log}");
+            assert!(stderr.contains(r#""rule":"pr.source""#), "{stderr}");
+            assert!(stderr.contains("no local branch feature"), "{stderr}");
+            assert!(stderr.contains(&local), "{stderr}");
+            assert!(stderr.contains(r#""next":"git worktree list""#), "{stderr}");
         }
     }
     Ok(())
