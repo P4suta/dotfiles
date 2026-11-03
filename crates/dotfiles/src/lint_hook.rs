@@ -126,6 +126,18 @@ pub(crate) fn check_shell_syntax_output(input: &str) -> Result<()> {
     Ok(())
 }
 
+/// A parser that ran and rejected the syntax of its input, which refuses the command instead of failing the hook.
+#[derive(Debug)]
+pub(crate) struct SyntaxRejected(pub(crate) String);
+
+impl std::fmt::Display for SyntaxRejected {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for SyntaxRejected {}
+
 pub(crate) fn shell_syntax_tree(input: &str) -> Result<String> {
     check_shell_syntax_source(input)?;
     let completed = bounded(
@@ -134,6 +146,9 @@ pub(crate) fn shell_syntax_tree(input: &str) -> Result<String> {
             .args(["--to-json", "--language-dialect", "bash"]),
         Some(input),
     )?;
+    if completed.outcome == Outcome::Findings && !completed.stderr.trim().is_empty() {
+        return Err(SyntaxRejected(completed.stderr.trim().to_owned()).into());
+    }
     ensure!(
         completed.outcome == Outcome::Clean,
         "the pinned shfmt parser could not finish: {:?}",
