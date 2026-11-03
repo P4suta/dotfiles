@@ -4,7 +4,7 @@
 
 [[metric]]
 metric = "proved-subjects"
-exact = 369
+exact = 370
 
 [[metric]]
 metric = "probes"
