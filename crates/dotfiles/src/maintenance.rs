@@ -105,6 +105,7 @@ const BELOW_NORMAL_PRIORITY: u8 = 7;
 /// The PowerShell that registers the Windows upgrade task.
 /// The task starts five minutes after logon and every Monday at 11:30, catches up a missed start, and logs to `log`.
 /// `conhost --headless` keeps a console window from opening.
+/// Task Scheduler denies replacing the task from its own run, so a running task keeps its registration until an upgrade outside it.
 #[must_use]
 pub fn windows_upgrade_task(dotfiles: &Path, source: &Path, config: &Path, log: &Path) -> String {
     let command = format!(
@@ -118,6 +119,16 @@ pub fn windows_upgrade_task(dotfiles: &Path, source: &Path, config: &Path, log: 
     let task = JOBS[0].task();
     [
         "$ErrorActionPreference = 'Stop'".to_owned(),
+        format!(
+            "$current = Get-ScheduledTask -TaskName {} -ErrorAction SilentlyContinue",
+            literal(&task)
+        ),
+        format!(
+            "if ($current -and $current.State -eq 'Running') {{ Write-Output {}; exit 0 }}",
+            literal(&format!(
+                "dotfiles: {task} is running, so its registration waits for an upgrade outside the task"
+            ))
+        ),
         format!(
             "$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument {}",
             literal(&argument)
@@ -250,5 +261,13 @@ mod tests {
         assert!(script.contains("-StartWhenAvailable"));
         assert!(script.contains("-TaskName 'dotfiles-tools-upgrade'"));
         assert!(script.contains("-Trigger @($logon, $weekly)"));
+        let guard = script
+            .find("$current.State -eq 'Running'")
+            .expect("the script checks whether the task runs");
+        assert!(
+            guard < script.find("Register-ScheduledTask").expect("registration"),
+            "a running task skips the registration that Task Scheduler would deny"
+        );
+        assert!(script.contains("waits for an upgrade outside the task"));
     }
 }
