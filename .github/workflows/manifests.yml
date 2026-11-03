@@ -1,0 +1,42 @@
+name: manifests
+# Writes the profile manifest set of each host family for a ref and prints every changed line, so a branch needs no Windows machine of its own.
+# It runs only on dispatch and pushes nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The branch or commit whose profile manifests to write
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: manifests-${{ inputs.ref }}
+  cancel-in-progress: true
+jobs:
+  write:
+    name: write (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            mise_sha256: be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d
+          - os: windows-latest
+            mise_sha256: cfffec40ded67f1d04039eb388827ad8de0a0089d5c9d9abc57c6c85c0aedc71
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde
+        with:
+          version: v2026.10.24
+          sha256: ${{ matrix.mise_sha256 }}
+          install_args: rust just chezmoi
+          cache: false
+      - name: Write this family's manifests and print each change
+        shell: bash
+        run: just profile-manifests

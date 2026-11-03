@@ -251,7 +251,8 @@ fn a_rendering_that_differs_from_its_manifest_is_refused() {
             "{error}"
         );
     }
-    assert!(error.contains("profile-snapshots --write"), "{error}");
+    assert!(error.contains("just profile-manifests"), "{error}");
+    assert!(error.contains("gh workflow run manifests.yml"), "{error}");
 }
 
 #[test]
