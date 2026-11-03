@@ -227,15 +227,18 @@ fn render_merged_with_mode(
 #[test]
 fn herdr_ssh_include_preserves_host_configuration_and_is_idempotent() {
     let host = "# OrbStack must stay first.\nInclude ~/.orbstack/ssh/config\n\nHost fixture\n  HostName fixture.invalid\nHost *\n  IdentityAgent /old/agent.sock\n";
+    let hosts = "Include ~/.local/state/hosts/ssh_config";
     let include = "Include ~/.config/dotfiles/ssh-agent.conf";
     for profile in ["mac", "linux"] {
         let rendered = render_merged(profile, "dot_ssh/modify_config", ".ssh/config", host);
+        assert_eq!(rendered.matches(hosts).count(), 1);
         assert_eq!(rendered.matches(include).count(), 1);
         assert!(
             rendered.starts_with("# OrbStack must stay first.\nInclude ~/.orbstack/ssh/config\n")
         );
+        assert!(rendered.find(hosts).unwrap() < rendered.find(include).unwrap());
         assert!(rendered.find(include).unwrap() < rendered.find("Host fixture").unwrap());
-        assert_eq!(rendered.replace(&format!("{include}\n"), ""), host);
+        assert_eq!(rendered.replace(&format!("{hosts}\n{include}\n"), ""), host);
     }
 }
 
@@ -248,7 +251,9 @@ fn herdr_ssh_routing_precedes_global_agent_settings_and_other_includes() {
         let rendered = render_merged("linux", "dot_ssh/modify_config", ".ssh/config", host);
         assert_eq!(
             rendered,
-            format!("Include ~/.config/dotfiles/ssh-agent.conf\n{host}")
+            format!(
+                "Include ~/.local/state/hosts/ssh_config\nInclude ~/.config/dotfiles/ssh-agent.conf\n{host}"
+            )
         );
     }
 }
