@@ -49,6 +49,7 @@ The plan runs, in order:
 6. For `commit-msg`, the prose checker on the message.
 7. For `pre-commit`, the global Lefthook configuration, then for every hook but `post-commit` and `reference-transaction`, the repository's own Lefthook configuration.
    A repository with its own Lefthook configuration first has its mise configuration trusted, because mise runs in paranoid mode and the hook runs that repository's commands anyway.
+   The hook asks `mise trust --show` until no new file appears, so it also trusts an idiomatic version file such as `global.json` that a trusted `mise.toml` enables, and it trusts nothing outside the repository.
 8. For `pre-commit`, a refusal when a hook changed the staged tree.
 9. For `pre-push`, the Renovate freshness gate.
 10. For `post-commit` and `post-merge`, the reinstallation of tools built from changed sources.
