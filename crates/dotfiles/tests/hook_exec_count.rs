@@ -217,6 +217,23 @@ fn each_hook_spawns_exactly_its_gates_in_order() -> Result<()> {
         assert_eq!(host.spawned(&arguments)?, gates, "{hook}");
         assert_eq!(baseline(hook)?, gates.len(), "{hook}");
     }
+    let history = fs::read_to_string(
+        host.home()
+            .join(".local/state/dotfiles/command-timing/history.jsonl"),
+    )?;
+    for signature in [
+        "hook pre-commit staged-tree-check",
+        "hook pre-push renovate",
+        "hook reference-transaction storage",
+    ] {
+        let field = format!("\"signature\":\"{signature}\"");
+        ensure!(
+            history
+                .lines()
+                .any(|line| line.contains(&field) && line.contains("\"succeeded\":true")),
+            "{signature} has no successful record in {history}"
+        );
+    }
     Ok(())
 }
 

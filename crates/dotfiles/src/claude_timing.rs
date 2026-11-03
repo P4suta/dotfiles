@@ -255,6 +255,31 @@ fn record(home: &Path, run: &Run) -> Result<()> {
     Ok(())
 }
 
+/// The history signature of one gate of a Git hook.
+#[must_use]
+pub fn gate_signature(hook: &str, gate: &str) -> String {
+    format!("hook {hook} {gate}")
+}
+
+/// Records how long one gate of a Git hook ran.
+/// A failed write loses this record and never changes the hook's verdict.
+pub fn record_gate(
+    home: &Path,
+    hook: &str,
+    gate: &str,
+    elapsed: std::time::Duration,
+    succeeded: bool,
+) {
+    let run = Run {
+        signature: gate_signature(hook, gate),
+        millis: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+        succeeded,
+    };
+    if let Err(error) = record(home, &run) {
+        eprintln!("dotfiles: the hook timing history is unavailable: {error:#}");
+    }
+}
+
 /// Keeps the newest window of each signature.
 /// The rename loses a run that another hook appends meanwhile, which only thins the statistics.
 fn compact(directory: &Path, path: &Path) -> Result<()> {
@@ -570,6 +595,28 @@ mod tests {
         let write =
             json!({"hook_event_name": "PreToolUse", "tool_name": "apply_patch", "tool_input": {}});
         assert_eq!(handle_for(&write, home, 0, Client::Codex).unwrap(), None);
+    }
+
+    #[test]
+    fn a_hook_gate_records_its_duration_and_result_under_its_own_signature() {
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path();
+        record_gate(
+            home,
+            "pre-push",
+            "renovate",
+            std::time::Duration::from_millis(1_500),
+            false,
+        );
+        let runs = history(home);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].signature, "hook pre-push renovate");
+        assert_eq!(runs[0].millis, 1_500);
+        assert!(!runs[0].succeeded);
+        assert_eq!(
+            window(&runs, &gate_signature("pre-push", "renovate")),
+            [1_500]
+        );
     }
 
     #[test]

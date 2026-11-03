@@ -67,6 +67,27 @@ pub enum Gate {
     Storage,
 }
 
+/// The gate's name in the command timing history.
+#[must_use]
+pub const fn gate_name(gate: Gate) -> &'static str {
+    match gate {
+        Gate::PushHold => "push-hold",
+        Gate::Health => "health",
+        Gate::ReadInput => "read-input",
+        Gate::StagedTree => "staged-tree",
+        Gate::Dotguard => "dotguard",
+        Gate::PushHosts => "push-hosts",
+        Gate::Verification => "verification",
+        Gate::CommitProse => "commit-prose",
+        Gate::GlobalLefthook => "global-lefthook",
+        Gate::RepositoryLefthook => "repository-lefthook",
+        Gate::StagedTreeCheck => "staged-tree-check",
+        Gate::Renovate => "renovate",
+        Gate::Reinstall => "reinstall",
+        Gate::Storage => "storage",
+    }
+}
+
 /// What the hook found before it plans, none of which needs a gate to run.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[expect(
@@ -390,6 +411,39 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_gate_has_its_own_timing_name() {
+        let gates = [
+            Gate::PushHold,
+            Gate::Health,
+            Gate::ReadInput,
+            Gate::StagedTree,
+            Gate::Dotguard,
+            Gate::PushHosts,
+            Gate::Verification,
+            Gate::CommitProse,
+            Gate::GlobalLefthook,
+            Gate::RepositoryLefthook,
+            Gate::StagedTreeCheck,
+            Gate::Renovate,
+            Gate::Reinstall,
+            Gate::Storage,
+        ];
+        let mut names = alloc::vec::Vec::new();
+        for gate in gates {
+            let name = gate_name(gate);
+            assert!(
+                !name.is_empty()
+                    && name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_lowercase() || byte == b'-'),
+                "{name}"
+            );
+            assert!(!names.contains(&name), "{name}");
+            names.push(name);
+        }
+    }
 
     #[test]
     fn a_commit_refreshes_recorded_tools_after_the_signing_gate() {
