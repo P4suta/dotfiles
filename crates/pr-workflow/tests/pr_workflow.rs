@@ -2316,6 +2316,24 @@ fn readying_refuses_a_closed_published_or_failing_pr() -> Result<()> {
     let record = refusal(&output);
     assert_eq!(record["rule"], "pr.checks");
     assert_eq!(record["next"], "gh pr checks 17 --repo owner/project");
+    let fixture = Fixture::new(BODY)?;
+    let unreported = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true,
+        "statusCheckRollup":[]});
+    let output = fixture
+        .command("ready")?
+        .args(["--pr", "17"])
+        .env("GH_FIXTURE_VIEW", unreported.to_string())
+        .env(
+            "GH_FIXTURE_WORKFLOWS",
+            r#"{"data":{"repository":{"object":null}}}"#,
+        )
+        .output()?;
+    let record = refusal(&output);
+    assert_eq!(
+        record["rule"], "pr.checks-absent",
+        "a head without a workflow or a required check names the missing check"
+    );
+    assert_eq!(record["next"], "gh pr checks 17 --repo owner/project");
     Ok(())
 }
 
@@ -7212,6 +7230,14 @@ fn a_merge_stops_with_a_structured_refusal_and_merges_nothing() -> Result<()> {
         ),
         (PASSING, "CLEAN", closed.as_str(), false, "120", "pr.review"),
         ("[]", "BLOCKED", excluded.as_str(), true, "0", "pr.timeout"),
+        (
+            "[]",
+            "BLOCKED",
+            excluded.as_str(),
+            true,
+            "120",
+            "pr.checks-absent",
+        ),
     ] {
         let mut fixture = Fixture::new(BODY)?;
         if rule == "pr.review" {
@@ -7221,11 +7247,17 @@ fn a_merge_stops_with_a_structured_refusal_and_merges_nothing() -> Result<()> {
         if paused {
             fixture.pause("paused-pr")?;
         }
-        let output = fixture
-            .personal_command("merge")?
+        let mut command = fixture.personal_command("merge")?;
+        command
             .args(["--pr", "17", "--interval", "0", "--timeout", timeout])
-            .env("GH_FIXTURE_VIEWS", view)
-            .output()?;
+            .env("GH_FIXTURE_VIEWS", view);
+        if rule == "pr.checks-absent" {
+            command.env(
+                "GH_FIXTURE_WORKFLOWS",
+                r#"{"data":{"repository":{"object":null}}}"#,
+            );
+        }
+        let output = command.output()?;
         assert_eq!(
             refusal(&output)["rule"],
             rule,
@@ -7234,6 +7266,11 @@ fn a_merge_stops_with_a_structured_refusal_and_merges_nothing() -> Result<()> {
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(mutations(&fixture.log()?).is_empty(), "{rule}");
+        assert_eq!(
+            fixture.log()?.contains("workflows-read"),
+            checks == "[]",
+            "only an empty report reads the head's workflows: {rule}"
+        );
     }
     Ok(())
 }

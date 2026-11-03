@@ -412,6 +412,40 @@ pub struct DocumentArgs {
     body_file: PathBuf,
 }
 
+/// The GitHub Actions directory, whose workflows report checks on a head.
+const WORKFLOW_DIRECTORY: &str = ".github/workflows";
+
+/// The entries of one tree at a head, which is null when the path is absent.
+const WORKFLOWS_QUERY: &str = "query($owner:String!,$name:String!,$expression:String!){repository(owner:$owner,name:$name){object(expression:$expression){... on Tree{entries{name}}}}}";
+
+#[derive(Deserialize)]
+struct WorkflowsResponse {
+    data: Option<WorkflowsData>,
+    #[serde(default)]
+    errors: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct WorkflowsData {
+    repository: Option<WorkflowsRepository>,
+}
+
+#[derive(Deserialize)]
+struct WorkflowsRepository {
+    object: Option<WorkflowsTree>,
+}
+
+#[derive(Deserialize)]
+struct WorkflowsTree {
+    #[serde(default)]
+    entries: Vec<TreeEntry>,
+}
+
+#[derive(Deserialize)]
+struct TreeEntry {
+    name: String,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TitlePolicy {
@@ -1056,6 +1090,44 @@ fn require(condition: bool, refusal: impl FnOnce() -> Refusal) -> Result<()> {
     }
 }
 
+/// The refusal rule for a head that no check can ever report on.
+const ABSENT_CHECKS_RULE: &str = "pr.checks-absent";
+
+/// Why a head without a declared check can't become ready or merge.
+const ABSENT_CHECKS_CAUSE: &str = "no check reported on the head, the base requires none, and the head carries no workflow under .github/workflows, so none can ever report; add a check";
+
+/// Refuses `ready` at once for a head that no check can ever report on, instead of naming unfinished checks.
+fn require_declared_checks(
+    github: &Github,
+    target: &Target,
+    pr: u64,
+    rollup: &[ReportedCheck],
+    required: &[String],
+    head: &str,
+) -> Result<()> {
+    let (total, unfinished, failed, missing) = tally(rollup, required);
+    let declared = total > 0 || !required.is_empty() || github.carries_workflow(target, head)?;
+    require(
+        head_checks(total, unfinished.saturating_add(missing), failed, declared)
+            != rules::pr_rules::HeadChecks::Absent,
+        || {
+            Refusal::new(
+                ABSENT_CHECKS_RULE,
+                format!("{ABSENT_CHECKS_CAUSE}, push, and mark the PR ready again"),
+                command(&[
+                    "gh",
+                    "pr",
+                    "checks",
+                    &pr.to_string(),
+                    "--repo",
+                    &target.repo,
+                ]),
+            )
+            .evidence(format!("#{pr}: head {head} reports no check"))
+        },
+    )
+}
+
 /// The local check to run on a corrected document.
 /// It keeps `title` unless the title caused the failure.
 fn recheck(target: &Target, title: Option<&str>) -> String {
@@ -1338,6 +1410,38 @@ impl Github {
         let metadata: Repository = self.read(&format!("repos/{repository}"))?;
         self.repositories.borrow_mut().insert(key, metadata.clone());
         Ok(metadata)
+    }
+
+    /// Whether `head` carries a GitHub Actions workflow, which can still report a check after a push.
+    /// The Git object query returns null for a missing directory, so the read needs no not-found status.
+    fn carries_workflow(&self, target: &Target, head: &str) -> Result<bool> {
+        let (owner, name) = target
+            .repo
+            .split_once('/')
+            .context("repository identity missing")?;
+        let response: WorkflowsResponse = self.graphql(
+            WORKFLOWS_QUERY,
+            &serde_json::json!({
+                "owner": owner,
+                "name": name,
+                "expression": format!("{head}:{WORKFLOW_DIRECTORY}"),
+            }),
+        )?;
+        ensure!(
+            response.errors.is_empty(),
+            "GitHub could not read the workflows of {head}"
+        );
+        let repository = response
+            .data
+            .and_then(|data| data.repository)
+            .context("GitHub reported no repository for the workflow read")?;
+        Ok(repository.object.is_some_and(|tree| {
+            tree.entries.iter().any(|entry| {
+                Path::new(&entry.name)
+                    .extension()
+                    .is_some_and(|extension| extension == "yml" || extension == "yaml")
+            })
+        }))
     }
 
     /// The status checks that the rulesets of `base` require, by the name each check reports.
@@ -2150,6 +2254,14 @@ fn ready_command(target: &Target, pr: u64, rerun: &str) -> Result<()> {
         bail!("GitHub reported no base branch or no head commit");
     };
     let required = github.required_checks(target, base)?;
+    require_declared_checks(
+        &github,
+        target,
+        pr,
+        &live.status_check_rollup,
+        &required,
+        head,
+    )?;
     let body = make_ready(
         &github,
         target,
@@ -2624,7 +2736,10 @@ fn merge_state(
     };
     let (total, unfinished, failed, missing) =
         tally(&view.status_check_rollup, &requirements.checks);
-    let checks = head_checks(total, unfinished.saturating_add(missing), failed);
+    let declared = total > 0
+        || !requirements.checks.is_empty()
+        || github.carries_workflow(target, &view.head_ref_oid)?;
+    let checks = head_checks(total, unfinished.saturating_add(missing), failed, declared);
     let mut exclusion = review_exclusion(&target.repo, pr, &view.body)?;
     let mut assessment = None;
     if matches!(lifecycle, Lifecycle::Draft | Lifecycle::Ready) {
@@ -2709,6 +2824,11 @@ fn stop_refusal(target: &Target, pr: u64, stop: Stop, stacked: bool, view: &Merg
         Stop::FailedChecks => (
             "pr.checks",
             "a check on the head failed; fix it, push, and merge again".to_owned(),
+            command(&["gh", "pr", "checks", &number, "--repo", &target.repo]),
+        ),
+        Stop::NoChecks => (
+            ABSENT_CHECKS_RULE,
+            format!("{ABSENT_CHECKS_CAUSE}, push, and merge again"),
             command(&["gh", "pr", "checks", &number, "--repo", &target.repo]),
         ),
         Stop::Review => (

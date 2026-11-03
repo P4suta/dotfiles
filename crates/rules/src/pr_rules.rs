@@ -351,18 +351,23 @@ pub fn review_requirement(paused: bool, exclusion: Exclusion) -> ReviewRequireme
 }
 
 /// The checks reported for the head commit while a merge waits for them.
-/// An empty report counts as pending.
+/// An empty report counts as pending while the head declares a check that can still report.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum HeadChecks {
     Success,
     Pending,
     Failed,
+    /// Nothing reported, and neither a workflow at the head nor a required check of the base can ever report.
+    Absent,
 }
 
+/// `declared` holds when the head carries a workflow or the base requires a check, so an empty report can still fill.
 #[must_use]
-pub fn head_checks(total: usize, unfinished: usize, failed: usize) -> HeadChecks {
+pub fn head_checks(total: usize, unfinished: usize, failed: usize, declared: bool) -> HeadChecks {
     if failed > 0 {
         HeadChecks::Failed
+    } else if total == 0 && !declared {
+        HeadChecks::Absent
     } else if total == 0 || unfinished > 0 {
         HeadChecks::Pending
     } else {
@@ -397,6 +402,8 @@ pub enum Stop {
     Closed,
     Conflict,
     FailedChecks,
+    /// No check can ever report on the head, so waiting would only reach the timeout.
+    NoChecks,
     /// The head still needs a `CodeRabbit` review.
     /// Only coderabbit-review can establish that the review's findings have a resolution.
     Review,
@@ -435,6 +442,7 @@ pub fn merge_step(state: MergeState, stacked: bool, paused: bool) -> Step {
     }
     match state.checks {
         HeadChecks::Failed => return Step::Stop(Stop::FailedChecks),
+        HeadChecks::Absent => return Step::Stop(Stop::NoChecks),
         HeadChecks::Pending => return Step::Wait,
         HeadChecks::Success => {}
     }
@@ -794,8 +802,12 @@ mod proofs {
         Lifecycle::Merged,
         Lifecycle::Closed,
     ];
-    pub const HEAD_CHECKS: [HeadChecks; 3] =
-        [HeadChecks::Success, HeadChecks::Pending, HeadChecks::Failed];
+    pub const HEAD_CHECKS: [HeadChecks; 4] = [
+        HeadChecks::Success,
+        HeadChecks::Pending,
+        HeadChecks::Failed,
+        HeadChecks::Absent,
+    ];
 
     /// A rejected document never mutates a PR, local creation starts as a draft, ready needs a validated draft with passing checks, and a refusal names the first unmet condition.
     pub fn spec_plan(
@@ -828,13 +840,17 @@ mod proofs {
         );
     }
 
-    /// Any failure fails a merge, and an empty or unfinished report waits.
-    pub fn spec_checks(total: usize, unfinished: usize, failed: usize) {
-        let head = head_checks(total, unfinished, failed);
+    /// Any failure fails a merge, an empty report without a declared check can never fill, and any other empty or unfinished report waits.
+    pub fn spec_checks(total: usize, unfinished: usize, failed: usize, declared: bool) {
+        let head = head_checks(total, unfinished, failed, declared);
         assert_eq!(head == HeadChecks::Failed, failed != 0);
         assert_eq!(
+            head == HeadChecks::Absent,
+            failed == 0 && total == 0 && !declared
+        );
+        assert_eq!(
             head == HeadChecks::Pending,
-            failed == 0 && (total == 0 || unfinished != 0)
+            failed == 0 && (total == 0 && declared || total != 0 && unfinished != 0)
         );
         assert_eq!(
             head == HeadChecks::Success,
@@ -1033,6 +1049,7 @@ mod proofs {
             _ if state.behind && stacked => Step::Restack,
             _ if state.behind => Step::Update,
             _ if state.checks == HeadChecks::Failed => Step::Stop(Stop::FailedChecks),
+            _ if state.checks == HeadChecks::Absent => Step::Stop(Stop::NoChecks),
             _ if state.checks == HeadChecks::Pending => Step::Wait,
             Lifecycle::Draft if paused && state.exclusion != Exclusion::Pause => Step::Exclude,
             Lifecycle::Draft => Step::Ready,
@@ -1069,16 +1086,19 @@ mod proofs {
         let total: usize = kani::any();
         let unfinished: usize = kani::any();
         let failed: usize = kani::any();
-        spec_checks(total, unfinished, failed);
+        let declared: bool = kani::any();
+        spec_checks(total, unfinished, failed, declared);
         let flags: [bool; 3] = [kani::any(), kani::any(), kani::any()];
         let [first, second, third] = flags;
         spec_flags(first, second, third);
         let remaining: u64 = kani::any();
         let reserve: u64 = kani::any();
         spec_quota(remaining, reserve);
-        let checks = head_checks(total, unfinished, failed);
+        let checks = head_checks(total, unfinished, failed, declared);
         kani::cover!(checks == HeadChecks::Success);
         kani::cover!((checks == HeadChecks::Pending) & (failed == 0));
+        kani::cover!(checks == HeadChecks::Absent);
+        kani::cover!((checks == HeadChecks::Pending) & (total == 0));
         kani::cover!(!api_quota_available(remaining, reserve) & (reserve > 0));
         kani::cover!(dependency(false, PathMerge::Clean).is_none());
         kani::cover!(dependency(false, PathMerge::Conflict) == Some(Dependency::Conflict));
@@ -1115,7 +1135,7 @@ mod proofs {
             lifecycle: LIFECYCLES[usize::from(kani::any::<u8>() % 4)],
             conflict,
             behind,
-            checks: HEAD_CHECKS[usize::from(kani::any::<u8>() % 3)],
+            checks: HEAD_CHECKS[usize::from(kani::any::<u8>() % 4)],
             clean,
             exclusion: EXCLUSIONS[usize::from(kani::any::<u8>() % 3)],
         };
@@ -1125,10 +1145,12 @@ mod proofs {
         let restack = step == Step::Restack;
         let exclude = step == Step::Exclude;
         let wait = (step == Step::Wait) & (state.checks == HeadChecks::Success);
+        let absent = step == Step::Stop(Stop::NoChecks);
         kani::cover!(merge);
         kani::cover!(restack);
         kani::cover!(exclude);
         kani::cover!(wait);
+        kani::cover!(absent);
     }
 }
 
@@ -1296,7 +1318,9 @@ mod tests {
         for total in [0, 1, 2, usize::MAX] {
             for unfinished in [0, 1, usize::MAX] {
                 for failed in [0, 1, usize::MAX] {
-                    proofs::spec_checks(total, unfinished, failed);
+                    for declared in [false, true] {
+                        proofs::spec_checks(total, unfinished, failed, declared);
+                    }
                 }
             }
         }
@@ -1352,10 +1376,18 @@ mod tests {
 
     #[test]
     fn an_empty_or_unfinished_check_report_is_pending_and_any_failure_fails() {
-        assert_eq!(head_checks(0, 0, 0), HeadChecks::Pending);
-        assert_eq!(head_checks(3, 1, 0), HeadChecks::Pending);
-        assert_eq!(head_checks(3, 1, 1), HeadChecks::Failed);
-        assert_eq!(head_checks(3, 0, 0), HeadChecks::Success);
+        assert_eq!(head_checks(0, 0, 0, true), HeadChecks::Pending);
+        assert_eq!(head_checks(3, 1, 0, true), HeadChecks::Pending);
+        assert_eq!(head_checks(3, 1, 1, true), HeadChecks::Failed);
+        assert_eq!(head_checks(3, 0, 0, true), HeadChecks::Success);
+    }
+
+    #[test]
+    fn an_empty_report_without_a_declared_check_is_absent_and_reported_checks_still_count() {
+        assert_eq!(head_checks(0, 0, 0, false), HeadChecks::Absent);
+        assert_eq!(head_checks(0, 0, 1, false), HeadChecks::Failed);
+        assert_eq!(head_checks(2, 1, 0, false), HeadChecks::Pending);
+        assert_eq!(head_checks(2, 0, 0, false), HeadChecks::Success);
     }
 
     #[test]
@@ -1385,6 +1417,8 @@ mod tests {
         );
         let pending = with(|state| state.checks = HeadChecks::Pending);
         assert_eq!(merge_step(pending, false, true), Step::Wait);
+        let absent = with(|state| state.checks = HeadChecks::Absent);
+        assert_eq!(merge_step(absent, false, true), Step::Stop(Stop::NoChecks));
         let blocked = with(|state| state.clean = false);
         assert_eq!(merge_step(blocked, false, true), Step::Wait);
         let draft = with(|state| {
