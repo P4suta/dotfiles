@@ -364,7 +364,7 @@
     {"mode":"0644","path":".config/lefthook/global.yml","sha256":"a52fa7ffa7ddac882c454bbc7a2669ce3b61daaa4b181a75a8ce777e2107ec19","type":"file"},
     {"mode":"0755","path":".config/mise","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/mise/config.njutest.toml","sha256":"4f6fb2e394a7d0ee9725b496ee3d50b55312a3092c639ba30ddd9a7dac36e349","type":"file"},
-    {"mode":"0644","path":".config/mise/config.toml","sha256":"62c5c1eae8ba22d26ca150ca5a3401ba295b8f7c33855e053232c5041b1b557c","type":"file"},
+    {"mode":"0644","path":".config/mise/config.toml","sha256":"0497d9d04a2aae994586518f5c64b7844e741b38af79eb5514aadf0201a2e782","type":"file"},
     {"mode":"0755","path":".config/mise/tasks","sha256":null,"type":"dir"},
     {"mode":"0755","path":".config/mise/tasks/git-audit","sha256":"647cab69b80ed1b10bb952c611f244337f35bbf4ec9ab92de311f1612291e8cc","type":"file"},
     {"mode":"0755","path":".config/nushell","sha256":null,"type":"dir"},
@@ -593,12 +593,12 @@
     {"mode":"0644","path":".ssh/config","sha256":"57084d70237c9fe3c7b36d0d645fe99afc00ba3194ebeda765a25b8502b4dff3","type":"file"}
   ],
   "scripts": [
-    {"condition":"always","phase":"before","position":0,"sha256":"c50dad758fa91516f2c0c64a2d3a90189d184224e2a6eed13dc772b0f7f9ce30","target":".chezmoiscripts/unix/00-mise.sh"},
+    {"condition":"always","phase":"before","position":0,"sha256":"f4e27d23abe5bc11bc87f367a995652801506b6d751c7c4d48e2069b6fb5aed9","target":".chezmoiscripts/unix/00-mise.sh"},
     {"condition":"always","phase":"before","position":1,"sha256":"18c93726e5cc04bf6abcc0170fca31fb549c3cc49bb64b0642b4dcd7aea297f6","target":".chezmoiscripts/unix/01-runtime.sh"},
     {"condition":"onchange","phase":"before","position":2,"sha256":"6d7ed7f72a136550609bd1e627c210694053116696033e4bb990511bac94d455","target":".chezmoiscripts/unix/02-github.sh"},
     {"condition":"onchange","phase":"after","position":3,"sha256":"fb82ebadf3abbb50292da68adf016a33bbb8bc5b06c2bdf434f4ce36ab29717a","target":".chezmoiscripts/unix/03-nix.sh"},
     {"condition":"onchange","phase":"after","position":4,"sha256":"a6a33fdb5ff5a3fca84be0760e056df8003c77b354d25b14fb211e97b9a977fe","target":".chezmoiscripts/unix/04-desktop.sh"},
-    {"condition":"onchange","phase":"after","position":5,"sha256":"8c40cacdf722d8cfc58742fec63773a783adcfd52b28420a2db66e6d24745720","target":".chezmoiscripts/unix/05-tools.sh"},
+    {"condition":"onchange","phase":"after","position":5,"sha256":"042fe0a6e6e0632777ab33f21e26fbe999a386692fe7b9c8cd2fda1743c7837a","target":".chezmoiscripts/unix/05-tools.sh"},
     {"condition":"always","phase":"after","position":6,"sha256":"d778e07ae8319a305c213bf8df6c8bffface302947a9d870a6d4d28ab8d48b2e","target":".chezmoiscripts/unix/06-integrations.sh"},
     {"condition":"onchange","phase":"after","position":7,"sha256":"f515814d88d674b2fe9b217531611827787f6448d4842f31189005a80698fa0b","target":".chezmoiscripts/unix/07-fcitx5.sh"},
     {"condition":"onchange","phase":"after","position":8,"sha256":"d2100f14948b90b9122e3a536bdd657e558d744ed1b500cd326a3c6dd73084e2","target":".chezmoiscripts/unix/10-claude.sh"},
