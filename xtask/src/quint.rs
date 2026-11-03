@@ -15,10 +15,10 @@ use std::fs;
 use std::path::Path;
 
 /// The Quint release that the image's lockfile pins.
-pub const QUINT_VERSION: &str = "0.33.0";
+pub const QUINT_VERSION: &str = "0.33.1";
 
-/// The Apalache release that Quint 0.33.0 expects, whose bundled model checker visits every state.
-pub const APALACHE_VERSION: &str = "0.62.1";
+/// The Apalache release that Quint 0.33.1 expects, whose bundled model checker visits every state.
+pub const APALACHE_VERSION: &str = "0.62.4";
 
 /// The directory that defines the image of the Quint obligations.
 pub const IMAGE_DIRECTORY: &str = "xtask/proofs/quint";

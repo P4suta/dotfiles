@@ -12,8 +12,8 @@ RUN cd /opt/quint && npm ci --ignore-scripts --no-audit --no-fund
 
 # Quint compiles a model through Apalache and runs the model checker that Apalache bundles, with the modules the compiled model extends.
 # The release lists the checksum in `sha256sum.txt`, and this file repeats it, so a replaced asset fails the build.
-ARG APALACHE_VERSION=0.62.1
-ARG APALACHE_SHA256=93fef2f381d30465eff906a2d6afa3358cb2c9adf6a8aad3bec0ded4f45432bb
+ARG APALACHE_VERSION=0.62.4
+ARG APALACHE_SHA256=b781b53bba32fac14ac2e02b0332e1dc2edc64cb7b850c0608d8142cc7aa2ef4
 ADD --checksum=sha256:${APALACHE_SHA256} https://github.com/apalache-mc/apalache/releases/download/v${APALACHE_VERSION}/apalache-${APALACHE_VERSION}.tgz /tmp/apalache.tgz
 ADD https://github.com/apalache-mc/apalache/releases/download/v${APALACHE_VERSION}/sha256sum.txt /tmp/sha256sum.txt
 RUN grep -qx "${APALACHE_SHA256}  apalache-${APALACHE_VERSION}.tgz" /tmp/sha256sum.txt \

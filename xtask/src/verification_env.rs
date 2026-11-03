@@ -789,10 +789,10 @@ mod tests {
     #[test]
     fn apalache_metadata_requires_its_exact_pinned_version_response() {
         for text in [
-            "0.62.1\n",
-            "0.62.10",
-            "0.62.1-SNAPSHOT",
-            "Usage\n0.62.1",
+            "0.62.4\n",
+            "0.62.40",
+            "0.62.4-SNAPSHOT",
+            "Usage\n0.62.4",
             "",
         ] {
             let result = apalache_component(Ok(Output {
@@ -800,8 +800,8 @@ mod tests {
                 stdout: text.as_bytes().to_vec(),
                 stderr: Vec::new(),
             }));
-            assert_eq!(result.actual.is_some(), text == "0.62.1\n");
-            assert_eq!(result.failure.is_none(), text == "0.62.1\n");
+            assert_eq!(result.actual.is_some(), text == "0.62.4\n");
+            assert_eq!(result.failure.is_none(), text == "0.62.4\n");
         }
     }
 
@@ -888,7 +888,7 @@ mod tests {
                 "Kani Rust Verifier 0.68.00",
                 crate::skill_proofs::KANI_VERSION,
             ),
-            ("140.33.0", crate::quint::QUINT_VERSION),
+            ("140.33.1", crate::quint::QUINT_VERSION),
             ("v22.wrong", "v22."),
             ("TLC20", "TLC2"),
             ("", crate::lean::LEAN_VERSION),
