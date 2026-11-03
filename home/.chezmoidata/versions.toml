@@ -7,7 +7,7 @@
 # A version update takes every checksum from the release's SHASUMS256.txt.
 [mise]
 # renovate: datasource=github-releases depName=jdx/mise extractVersion=^v(?<version>.+)$
-version = "2026.10.19"
+version = "2026.10.24"
 
 [mise.sha256]
 linux-arm64 = "4a4ca53b28e5433c527f4f73fac1f98f992a17cf32ca136a58e2e375f790f627"

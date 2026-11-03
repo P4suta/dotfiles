@@ -125,7 +125,7 @@ legacy = ["diff"]
 preferred = "difft"
 tool = "difftastic"
 # renovate: datasource=github-releases depName=Wilfred/difftastic
-version = "0.71.0"
+version = "0.72.0"
 reason = "It compares syntax trees, so a reformatting doesn't hide the change."
 keep = "A caller that applies the output as a patch."
 next = "difft {args}"
