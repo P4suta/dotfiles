@@ -43,7 +43,7 @@ Three checks that already run on this machine refuse the labels and the foreign 
   The table in `crates/dotguard/src/jis_kanji_table.rs` derives from Unihan, so a simplified Chinese character never reaches the user.
 
 The word rules `Dotfiles.VersionLabel`, `Dotfiles.FigurativeJargon`, and `Dotfiles.ForeignTerm` in `japanese.toml` declare refusals for Chinese compounds and metaphors made of Japanese characters.
-The installed reply checker doesn't read that file yet, so those compounds rely on review until it does.
+The Stop hook and `dotfiles answer check` apply every rule of that file to the Japanese lines of a reply, outside code.
 
 ## Verification
 
