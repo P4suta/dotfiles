@@ -36,6 +36,7 @@ const PLAN_CLOSE: &str = "</proposed_plan>";
 const MIN_FENCE_WIDTH: usize = 3;
 const MAX_FENCE_INDENT: usize = 3;
 const LEAN_TOOLCHAIN: &str = include_str!("../../../specs/lean/lean-toolchain");
+pub const EVIDENCE_FORMAT: &str = "The checked-arguments skill describes the evidence file in references/evidence-format.md, installed at ~/.agents/skills/checked-arguments/references/evidence-format.md.";
 
 /// Read the same release pin as the proof package.
 ///
@@ -54,11 +55,13 @@ pub enum Action {
     /// Start a new request from a `UserPromptSubmit` hook payload on standard input.
     Begin,
     /// Check an answer draft, then bind its evidence to this request.
+    #[command(after_help = EVIDENCE_FORMAT)]
     Check {
         #[arg(long)]
         session: String,
         #[arg(long)]
         draft: PathBuf,
+        /// The evidence JSON for the draft's claims.
         #[arg(long)]
         evidence: PathBuf,
     },
@@ -1116,7 +1119,8 @@ pub fn execute(action: Action) -> Result<()> {
             &session,
             &draft,
             &evidence,
-        ),
+        )
+        .inspect_err(|_| eprintln!("{EVIDENCE_FORMAT}")),
         Action::Observe {
             session,
             tool,
