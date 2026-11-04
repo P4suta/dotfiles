@@ -105,6 +105,8 @@ The attribute fuzz corpus uses line-separated fields that the target converts to
 The owner's configuration names each repository's owners and budgets under `~/.config/assure/repos/`, as [the owner-map decision](adr/keep-the-assure-owner-map-out-of-projects.md) describes.
 An exemption sits in the comment block that precedes the site it exempts.
 `dotfiles assure start` reports the gaps when an agent session starts, and the stop hook refuses to end a turn that leaves a gap in a file it changed.
+The managed request hook records a working tree snapshot, so Stop compares changes made during that request rather than all uncommitted work.
+[Request snapshots](adr/compare-agent-stops-with-request-snapshots.md) preserve the real index and keep the existing publication checks.
 Claude Code and Codex also pass the owner's `reply_language` to this hook to check final reply prose, with at most one continuation, as [the language decision](adr/check-owner-reply-language-at-stop.md) describes.
 The hook and every prose channel share the sentence layout rules in `crates/rules/src/prose_rules.rs`.
 They refuse two sentences on one line and a sentence that wraps across adjacent prose lines.

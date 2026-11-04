@@ -472,6 +472,60 @@ fn report_status(ledger: &Path, organization: &str, scope: PauseScope, json: boo
 
 /// The pinned `CodeRabbit` runtime that mise installed and renamed.
 /// The global configuration pins it, so mise reads it from the user directory, where no project configuration that paranoid mode refuses can apply.
+/// Admits a review only from the pinned runtime, and restores the pinned release once when the CLI replaced it.
+///
+/// # Errors
+/// Returns an error when the runtime can't report its version, the restore fails, or the restored runtime still reports another version.
+pub fn ensure_pinned_runtime(
+    pinned: &str,
+    mut reported: impl FnMut() -> Result<String>,
+    restore: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    let found = reported()?;
+    if found == pinned {
+        return Ok(());
+    }
+    restore().with_context(|| {
+        format!("restore the pinned CodeRabbit runtime {pinned} after it reported {found}")
+    })?;
+    let restored = reported()?;
+    ensure!(
+        restored == pinned,
+        "CodeRabbit runtime reports {restored} after a restore of {pinned}; review refused"
+    );
+    Ok(())
+}
+
+/// The version the runtime reports, without letting the CLI update itself.
+fn runtime_version(vendor: &Path) -> Result<String> {
+    let output = crate::tool::external(vendor)
+        .arg("--version")
+        .env("CI", "true")
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "the CodeRabbit runtime failed to report its version"
+    );
+    Ok(std::str::from_utf8(&output.stdout)?.trim().to_owned())
+}
+
+/// Reinstalls the pinned release through mise, which checks the release checksum from the managed configuration.
+fn restore_runtime(version: &str, user_directory: &Path) -> Result<()> {
+    let output = Tool::Mise
+        .command()
+        .current_dir(user_directory)
+        .args(["install", "--force", &format!("http:coderabbit@{version}")])
+        .output()
+        .context("start mise to restore the CodeRabbit runtime")?;
+    ensure!(
+        output.status.success(),
+        "mise failed to reinstall CodeRabbit {version}: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    eprintln!("CodeRabbit guard: restored the pinned runtime {version}");
+    Ok(())
+}
+
 fn vendor(version: &str, user_directory: &Path) -> Result<std::path::PathBuf> {
     let location = Tool::Mise
         .command()
@@ -556,6 +610,7 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
         }
         return Ok(crate::tool::external(vendor)
             .args(args)
+            .env("CI", "true")
             .status()?
             .code()
             .unwrap_or(1));
@@ -564,11 +619,11 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
         std::env::var_os("CODERABBIT_API_KEY").is_none(),
         "inline authentication cannot bypass the guarded account"
     );
-    let runtime = crate::tool::external(&vendor).arg("--version").output()?;
-    ensure!(
-        runtime.status.success() && std::str::from_utf8(&runtime.stdout)?.trim() == version,
-        "CodeRabbit runtime has drifted from its pinned version; review refused"
-    );
+    ensure_pinned_runtime(
+        &version,
+        || runtime_version(&vendor),
+        || restore_runtime(&version, user_directory),
+    )?;
     let committed = committed
         .map(|request| request.prepare(user_directory, &version))
         .transpose()?;

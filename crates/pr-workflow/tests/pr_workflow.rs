@@ -3971,7 +3971,7 @@ fn repository_pr_policy_merges_only_with_current_review_and_never_inserts_suppre
 }
 
 #[test]
-fn repository_pr_policy_preserves_an_earlier_cli_route_until_history_is_carried() -> Result<()> {
+fn a_high_pr_leaves_no_cli_history_for_a_later_repository_pr_policy() -> Result<()> {
     let mut fixture = Fixture::new(BODY)?;
     fixture.level = "high";
     let output = fixture
@@ -4000,11 +4000,12 @@ fn repository_pr_policy_preserves_an_earlier_cli_route_until_history_is_carried(
                 .args(["--title", "fix: preserve edits", "--body-file"])
                 .arg(&fixture.body);
         }
+        // A high assessment selects no review, so a later PR review policy has no CLI history to carry.
         let output = command.output()?;
-        assert!(!output.status.success());
         assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains("prior high review history must be carried")
+            !String::from_utf8_lossy(&output.stderr)
+                .contains("prior high review history must be carried"),
+            "{operation}"
         );
     }
     let record: serde_json::Value = serde_json::from_slice(&fs::read(
@@ -4013,7 +4014,7 @@ fn repository_pr_policy_preserves_an_earlier_cli_route_until_history_is_carried(
             .path()
             .join(".local/state/pr-workflow/assessments/owner__project/pr-17.json"),
     )?)?;
-    assert_eq!(record["always_pr"], false);
+    assert_eq!(record["always_pr"], true);
     Ok(())
 }
 
