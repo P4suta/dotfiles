@@ -6,6 +6,7 @@ note: >-
   Name the distinguishing decision or property, as the `decision-naming` skill describes; a stored format keeps its number beside the code that reads it.
   The segments `v4` and `v6` stay admitted because they name IP protocol versions.
   Standard UUIDv7 generator calls retain their upstream API name.
+  Imported API types and numeric format discriminants or byte layout constants keep their contract names.
 metadata:
   cwe: CWE-1099
   ruleset: decision-naming
@@ -23,7 +24,75 @@ rule:
   regex: '(^|_)[vV]([0-35789]|[1-9][0-9]+)(_|$)|[a-z]V([0-35789]|[1-9][0-9]+)([A-Z]|$)|^v([0-35789]|[1-9][0-9]+)[A-Z]'
   not:
     any:
+      - matches: verification-only
       - inside:
           pattern: Uuid::now_v7
       - inside:
           pattern: uuid::Uuid::now_v7
+      - matches: upstream-import
+      - all:
+          - kind: type_identifier
+          - pattern: $API
+          - not:
+              inside:
+                field: name
+                any:
+                  - kind: struct_item
+                  - kind: enum_item
+                  - kind: trait_item
+                  - kind: type_item
+          - inside:
+              kind: source_file
+              stopBy: end
+              has:
+                matches: upstream-import
+                stopBy: end
+      - all:
+          - pattern: $LAYOUT
+          - regex: '^V[0-9]+_(VERSION|[A-Z][A-Z0-9_]*_(BYTES|OFFSET|OFFSET_FIELD))$'
+          - not:
+              any:
+                - inside:
+                    field: pattern
+                    any:
+                      - kind: parameter
+                      - kind: let_declaration
+                - inside:
+                    field: name
+                    any:
+                      - kind: function_item
+                      - kind: struct_item
+                      - kind: enum_item
+                      - kind: trait_item
+                      - kind: type_item
+                      - kind: mod_item
+                      - kind: static_item
+                - inside:
+                    field: name
+                    kind: const_item
+                    not:
+                      has:
+                        field: value
+                        kind: integer_literal
+          - inside:
+              any:
+                - kind: source_file
+                - kind: declaration_list
+              stopBy: end
+              has:
+                all:
+                  - pattern: 'const $LAYOUT: $TYPE = $VALUE;'
+                  - has:
+                      field: value
+                      kind: integer_literal
+                stopBy: neighbor
+utils:
+  upstream-import:
+    pattern: $API
+    inside:
+      kind: use_declaration
+      stopBy: end
+    not:
+      inside:
+        kind: use_as_clause
+        field: alias
