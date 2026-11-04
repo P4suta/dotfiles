@@ -375,6 +375,87 @@ fn git(root: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
     Ok(output.stdout)
 }
 
+/// The attempts of one remote read before the hook refuses.
+/// A degraded Git host rejects or drops some connections, and a later attempt often connects.
+const REMOTE_READ_ATTEMPTS: usize = 3;
+
+/// Fragments of Git, OpenSSH, and HTTP transport errors that mark a failed connection to the remote.
+const CONNECTION_FAILURES: [&str; 14] = [
+    "Permission denied (publickey)",
+    "Connection closed by",
+    "Connection reset by",
+    "Connection timed out",
+    "Connection refused",
+    "Could not resolve hostname",
+    "Could not resolve host",
+    "kex_exchange_identification",
+    "ssh: connect to host",
+    "Failed to connect to",
+    "The requested URL returned error: 5",
+    "RPC failed",
+    "early EOF",
+    "Broken pipe",
+];
+
+/// Whether a remote read's error output names a failed connection rather than a missing repository or a refused reference.
+fn connection_failure(stderr: &str) -> bool {
+    !stderr.contains("Repository not found")
+        && CONNECTION_FAILURES
+            .iter()
+            .any(|fragment| stderr.contains(fragment))
+}
+
+/// Runs a remote read up to `REMOTE_READ_ATTEMPTS` times while it fails to connect, and reports each failed connection.
+/// `attempt` returns the read's output or its error output, and another failure refuses at once.
+fn read_remote(
+    arguments: &[&str],
+    mut attempt: impl FnMut() -> Result<std::result::Result<Vec<u8>, String>>,
+    mut report: impl FnMut(usize, &str),
+) -> Result<Vec<u8>> {
+    let mut last = String::new();
+    for number in 1..=REMOTE_READ_ATTEMPTS {
+        match attempt()? {
+            Ok(stdout) => return Ok(stdout),
+            Err(stderr) => {
+                last = stderr;
+                if !connection_failure(&last) {
+                    break;
+                }
+                report(number, &last);
+            }
+        }
+    }
+    bail!("git {} failed: {last}", arguments.join(" "))
+}
+
+/// Reads the remote through Git and retries a failed connection.
+fn remote_git(root: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
+    read_remote(
+        arguments,
+        || {
+            let output = Tool::Git
+                .command()
+                .arg("-C")
+                .arg(root)
+                .args(arguments)
+                .stderr(Stdio::piped())
+                .output()
+                .context("start Git")?;
+            Ok(if output.status.success() {
+                Ok(output.stdout)
+            } else {
+                Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+            })
+        },
+        |number, stderr| {
+            eprintln!(
+                "dotfiles: git {} attempt {number} of {REMOTE_READ_ATTEMPTS} failed to connect: {stderr}",
+                arguments.join(" ")
+            );
+        },
+    )
+}
+
 fn split_nul(bytes: &[u8]) -> Vec<String> {
     bytes
         .split(|byte| *byte == 0)
@@ -1046,6 +1127,87 @@ fn preceding_survey(
         }
     }
     Ok(survey)
+}
+
+#[cfg(test)]
+mod remote_read_tests {
+    use super::{REMOTE_READ_ATTEMPTS, connection_failure, read_remote};
+
+    const DENIED: &str = "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.";
+
+    /// A fake remote that fails to connect `failures` times and then answers.
+    fn remote(failures: usize) -> (usize, Vec<usize>, anyhow::Result<Vec<u8>>) {
+        let mut calls = 0;
+        let mut reports = Vec::new();
+        let result = read_remote(
+            &["ls-remote", "origin", "HEAD"],
+            || {
+                calls += 1;
+                Ok(if calls > failures {
+                    Ok(b"428479f\tHEAD\n".to_vec())
+                } else {
+                    Err(DENIED.to_owned())
+                })
+            },
+            |number, _| reports.push(number),
+        );
+        (calls, reports, result)
+    }
+
+    #[test]
+    fn a_remote_that_connects_on_the_last_attempt_answers() {
+        let (calls, reports, result) = remote(REMOTE_READ_ATTEMPTS - 1);
+        assert_eq!(result.unwrap(), b"428479f\tHEAD\n");
+        assert_eq!(calls, REMOTE_READ_ATTEMPTS);
+        assert_eq!(reports, (1..REMOTE_READ_ATTEMPTS).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_remote_that_never_connects_refuses_after_every_attempt() {
+        let (calls, reports, result) = remote(usize::MAX);
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("Permission denied (publickey)"), "{error}");
+        assert_eq!(calls, REMOTE_READ_ATTEMPTS);
+        assert_eq!(reports, (1..=REMOTE_READ_ATTEMPTS).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn another_failure_refuses_at_once() {
+        let mut calls = 0;
+        let result = read_remote(
+            &["ls-remote", "origin"],
+            || {
+                calls += 1;
+                Ok(Err(
+                    "ERROR: Repository not found.\nfatal: Could not read from remote repository."
+                        .to_owned(),
+                ))
+            },
+            |_, _| panic!("a missing repository is no connection failure"),
+        );
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn connection_failures_are_told_apart_from_other_errors() {
+        for stderr in [
+            DENIED,
+            "Connection closed by 20.27.177.113 port 22",
+            "ssh: connect to host github.com port 22: Connection timed out",
+            "fatal: unable to access 'https://github.com/o/r/': Could not resolve host: github.com",
+            "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502",
+        ] {
+            assert!(connection_failure(stderr), "{stderr}");
+        }
+        for stderr in [
+            "ERROR: Repository not found.\nfatal: Could not read from remote repository.",
+            "fatal: 'nowhere' does not appear to be a git repository",
+            "fatal: couldn't find remote ref HEAD",
+        ] {
+            assert!(!connection_failure(stderr), "{stderr}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1741,8 +1903,8 @@ fn upstream_base(
     remote: &str,
     head: &str,
 ) -> Result<Option<String>> {
-    let advertised = git(root, &["ls-remote", remote, "HEAD"])?;
-    if advertised.is_empty() && git(root, &["ls-remote", remote])?.is_empty() {
+    let advertised = remote_git(root, &["ls-remote", remote, "HEAD"])?;
+    if advertised.is_empty() && remote_git(root, &["ls-remote", remote])?.is_empty() {
         return Ok(None);
     }
     let advertised = std::str::from_utf8(&advertised)?;
