@@ -531,13 +531,32 @@ impl Tool {
         self.program().into()
     }
 
-    /// A chezmoi run that reads the invoking checkout.
+    /// A chezmoi run that reads the invoking checkout with the chezmoi that the checkout's mise configuration pins.
+    /// A bootstrap copy in `~/.local/bin` or another older chezmoi earlier on `PATH` misreads or refuses the source.
     /// The default source names a bare repository whose head lags, so no installer may fall back to it.
+    /// The command keeps the caller's working directory, which relative path arguments depend on.
     #[must_use]
     pub fn chezmoi_in(root: &std::path::Path) -> Command {
-        let mut command = Self::Chezmoi.command();
+        let mut command = crate::process::command(
+            Self::pinned_chezmoi(root).unwrap_or_else(|| Self::Chezmoi.executable()),
+        );
         command.arg("--source").arg(root);
         command
+    }
+
+    /// The installed chezmoi that the checkout's mise configuration pins, or `None` while mise or the pinned version is missing.
+    /// chezmoi's own `.chezmoiversion` check then refuses a fallback older than the pin.
+    fn pinned_chezmoi(root: &std::path::Path) -> Option<PathBuf> {
+        let output = Self::Mise
+            .command()
+            .arg("--cd")
+            .arg(root)
+            .args(["which", Self::Chezmoi.program()])
+            .env("MISE_AUTO_INSTALL", "false")
+            .output()
+            .ok()?;
+        let program = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
+        (output.status.success() && program.is_absolute() && program.is_file()).then_some(program)
     }
 
     /// Reads the effective machine-local configuration without overriding its source.

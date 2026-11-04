@@ -5,6 +5,41 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
+/// A stale chezmoi first on `PATH`, as a bootstrap copy in `~/.local/bin` sits on the Linux host, never reads the checkout.
+#[cfg(unix)]
+#[test]
+fn a_checkout_runs_its_pinned_chezmoi_ahead_of_a_stale_one_on_path() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let pin = fs::read_to_string(root.join("mise.toml"))?
+        .lines()
+        .find_map(|line| line.strip_prefix("chezmoi = \""))
+        .and_then(|rest| rest.strip_suffix('"'))
+        .context("the checkout pins chezmoi")?
+        .to_owned();
+    let shadow = tempfile::tempdir()?;
+    let stale = shadow.path().join("chezmoi");
+    fs::write(&stale, "#!/bin/sh\necho 'chezmoi version v0.0.1 stale'\n")?;
+    fs::set_permissions(&stale, fs::Permissions::from_mode(0o755))?;
+    let path = std::env::join_paths(std::iter::once(shadow.path().to_path_buf()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+    ))?;
+    let output = Tool::chezmoi_in(&root)
+        .env("PATH", path)
+        .arg("--version")
+        .output()?;
+    let version = String::from_utf8_lossy(&output.stdout);
+    ensure!(
+        output.status.success()
+            && version.contains(&format!("v{pin}"))
+            && !version.contains("stale"),
+        "chezmoi reported {version:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
 #[test]
 fn docker_buildx_is_an_exact_project_tool() {
     assert!(Tool::ALL.iter().any(|tool| {
