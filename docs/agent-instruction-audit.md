@@ -155,7 +155,7 @@ Judgment: the owner controls each machine's opt-in, and verification duties stil
 
 > - Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.
 
-Follow-up F7: the CodeRabbit guard enforces the floored budget and refuses unverifiable capacity for a CLI review in `crates/coderabbit-guard/src/lib.rs`.
+Follow-up F7: the CodeRabbit CLI has no review allowance, so the guard enforces its local hourly and daily limits for a CLI review in `crates/coderabbit-guard/src/lib.rs`.
 No gate represents the PR review pool or its thresholds, or holds a push on its capacity.
 
 > - Never declare a PR complete while supported review findings, required checks, or a review of its current head remain outstanding.
@@ -516,8 +516,8 @@ Experimental skill maintenance stays off until the machine's explicit opt-in.
 | Load `formal-assurance` for every implementation change. | Skill | The retained `skill-ops load formal-assurance` line loads `formal-assurance`, which states the obligations. |
 | Load `verification-tools` and `type-contracts` for implementation work. | Skill | The retained `skill-ops load formal-assurance` line loads `verification-tools`, and `home/dot_config/skill-ops/policy.json` adds `type-contracts` and `executable-policy`. |
 | Load `ci-budget` before an authorized push or PR update. | Gate and skill | The pre-push dispatcher refuses while `~/.config/git/push-paused` exists in `crates/dotfiles/src/hooks.rs`, and `ci-budget` states the local checks. |
-| Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within verified allowance in `crates/coderabbit-guard/src/lib.rs`, and `coderabbit-review` states the trigger. |
-| Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The CodeRabbit guard floors the budget once and refuses unverifiable CLI capacity in `crates/rules/src/review_rules.rs`. |
+| Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within its local limits in `crates/coderabbit-guard/src/lib.rs`, and `coderabbit-review` states the trigger. |
+| Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The floored budget in `crates/rules/src/review_rules.rs` applies where a review pool has an allowance, and the CLI pool has none. |
 | Elapsed time alone gives no permission to push. | Merged | Merged into `while review capacity stays unverified`. |
 | Honor an owner-imposed CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `crates/rules/src/review_rules.rs`, with a Kani proof. |
 | Use `reliability` for intermittent failures. | Skill | `reliability` states the trigger in its description and the rule in its body. |
@@ -530,7 +530,7 @@ Experimental skill maintenance stays off until the machine's explicit opt-in.
 | Explain unsupported findings with concrete evidence. | Skill | `coderabbit-review` states it once. |
 | The PR completion line, before the current wording. | Merged | Reworded as `Never declare a PR complete`. |
 | A passing CodeRabbit check alone doesn't establish a completed review. | Skill | `coderabbit-review` states it once. |
-| Use the existing PR review before requesting a CLI review of the same diff. | Gate and skill | `coderabbit-review` states the order, and the guard enforces the CLI budget in `crates/coderabbit-guard/src/lib.rs`. |
+| Use the existing PR review before requesting a CLI review of the same diff. | Gate and skill | `coderabbit-review` states the order, and the guard enforces the local CLI limits in `crates/coderabbit-guard/src/lib.rs`. |
 | Commit, push, PR replies, thread resolution, manual review triggers, and merge still require authorization. | Merged | Merged into `only when the owner asks`. |
 | The former nine-sentence prose rules and their rationale. | Gate | The global pre-commit hook runs `ocomment fix --tidy --staged`, which reflows a touched paragraph in `home/dot_config/lefthook/global.yml`. |
 | Use the `multi-machine` skill for remote execution. | Skill | `multi-machine` and `domyjob` state the trigger in their descriptions. |
