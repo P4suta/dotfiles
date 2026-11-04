@@ -129,7 +129,7 @@
     {"mode":"0755","path":".agents/skills/portable-skills","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/portable-skills/SKILL.md","sha256":"a691a80b750c46537cde853a16e07e5810f98a46b72c4695f3c6ddd45031a9e4","type":"file"},
     {"mode":"0755","path":".agents/skills/pull-request","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/pull-request/SKILL.md","sha256":"04c6f1fa5e655bf4a8206b527f3abf74e05d950d414d727478b9aac7837b1c92","type":"file"},
+    {"mode":"0644","path":".agents/skills/pull-request/SKILL.md","sha256":"01a35bb09c148cd5e61a66f8c5cea04d7357de9885f70a05ca205c090b17e3fa","type":"file"},
     {"mode":"0755","path":".agents/skills/pull-request/assets","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/pull-request/assets/coderabbit.yaml","sha256":"dee19d88197cd0ecacb60217b2b30f5f775eeb2c26297af1b2638fcc76f8c60e","type":"file"},
     {"mode":"0644","path":".agents/skills/pull-request/assets/workflow-policy.json","sha256":"4df8dc2c39e8b3a40ec41553dd7256576c2c1b70c5ab561285efde1b0d357f77","type":"file"},
