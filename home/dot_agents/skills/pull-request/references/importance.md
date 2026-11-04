@@ -8,7 +8,7 @@ Don't infer importance from a filename, changed-line count, issue priority, or t
 | --- | --- | --- |
 | `low` | Behavior-preserving work or a small recoverable effect. | None. |
 | `medium` | Ordinary bounded behavior changes with effective recovery and no supported severe failure scenario. | None. |
-| `high` | A credible severe failure in an authorization, secret, security, irreversible data, or foundational assurance boundary. | Guarded CLI. |
+| `high` | A credible severe failure in an authorization, secret, security, irreversible data, or foundational assurance boundary. | None. |
 | `critical` | A credible catastrophic failure across a broad or systemic boundary with difficult or irreversible recovery. | GitHub PR. |
 
 The [owner-local repository policy](workflow.md#repository-pr-review-policy) selects GitHub PR review for every level while keeping these assessment criteria.
@@ -18,7 +18,7 @@ Keep `high` and `critical` exceptional.
 Explain the affected code and concrete consequence for every assessment.
 For either severe level, also state likelihood, blast radius, and rollback evidence.
 A merely hypothetical severe scenario doesn't justify either level.
-If an actual catastrophic scenario meets the `critical` criteria, don't classify it as `high` to substitute a CLI review.
+If an actual catastrophic scenario meets the `critical` criteria, don't classify it as `high` to skip the PR review.
 
 The checked workflow binds the signed assessment to the exact repository, merge base, head, and diff.
 For a fork contribution, bind both the destination and the actual checkout source to their verified GitHub repository and fork-network identities.
@@ -33,7 +33,7 @@ Keep `@coderabbitai ignore` as a standalone PR description line for `low`, `medi
 Don't add `review:critical` to those PRs.
 Reserve that opt-in label for a current `critical` assessment after local validation and the PR pool's capacity check.
 Create drafts before requesting any PR review.
-The severe routes remain exclusive: a `critical` PR doesn't require CLI review, and a `high` PR doesn't require PR review.
+A `critical` PR requires PR review, and no level requires a CLI review.
 
 Review evidence must cover the same current diff as the assessment.
 For the CLI route, use the guard's authenticated committed-review receipt rather than a successful invocation, reservation, or handwritten result.
@@ -42,7 +42,7 @@ An incremental-only response or unknown coverage at those paths remains pending 
 Skipped, stale, failed, incomplete, rate-limited, or paused required reviews remain pending.
 A pause never changes the assessed level or satisfies its required route.
 Supported findings from earlier reviews remain obligations after a downgrade.
-Reassessing a published `high` route uses `assess --pr NUMBER --prior-cli-receipt PATH` to carry the authenticated original finding history into the new signed assessment.
+Reassessing a PR whose earlier assessment selected the CLI route uses `assess --pr NUMBER --prior-cli-receipt PATH` to carry the authenticated original finding history into the new signed assessment.
 Missing prior history blocks a downgrade, even when the public body never referenced the prior result.
 The historical reader preserves findings from an authentic older producer record and supplies no current-diff completion credit.
 The classification doesn't relax any project test, proof, lint, security, or required-check obligation.

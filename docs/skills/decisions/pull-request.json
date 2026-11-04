@@ -1,8 +1,10 @@
 {
-  "revision": "3c50a4b9167d4bbd364ca1592a9c1641328b940a3c84bf7641a1f83361ebc42f",
+  "revision": "95b388b4f9d677ad83fc0758eb0042982d14275381a7621f353e81dd76ddd69d",
   "outcome": "implemented",
-  "reason": "The skill now points a change that a reader can see on a screen at the screenshots skill, whose captures go beside the required D2 diagram. The diagram and its storage keep their behavior, and the shared figure module now stores both kinds of image.",
+  "reason": "The skill and its importance reference now route low, medium, and high assessments to no CodeRabbit review and keep the PR review for critical ones, as the routing rule does.",
   "evidence": [
+    "crates/rules/src/review_routing_rules.rs",
+    "docs/adr/require-no-cli-review-for-high-prs.md",
     "crates/pr-workflow/src/figure.rs",
     "home/dot_agents/skills/screenshots/SKILL.md",
     "crates/pr-workflow/src/diagram.rs",
@@ -70,7 +72,7 @@
   "revisit": null,
   "size": {
     "outcome": "keep",
-    "reason": "One added line routes a visible change to the screenshots skill, which holds the capture commands instead of this skill.",
+    "reason": "One sentence changed its route list, so the skill keeps its size.",
     "revisit": null
   }
 }

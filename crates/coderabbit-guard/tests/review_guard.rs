@@ -1,8 +1,8 @@
 use coderabbit_guard::review_rules::{budget, within_budget};
 use coderabbit_guard::{
     DAY_MS, HOUR_MS, HOURLY_LIMIT, Invocation, PROBE_GAP_MS, PauseScope, check_budget, classify,
-    execute_admitted, execute_probe, execute_reserved, install, reserve, review_directory,
-    usage_query, validate_policy,
+    ensure_pinned_runtime, execute_admitted, execute_probe, execute_reserved, install, reserve,
+    review_directory, usage_query, validate_policy,
 };
 use std::fs;
 
@@ -38,6 +38,42 @@ fn admission_matches_the_final_decimal_budget_at_capacity_boundaries() {
     let budget = u64::try_from(u128::from(limit) * 72 / 100).unwrap();
     assert!(within_budget(limit, limit - budget + 1));
     assert!(!within_budget(limit, limit - budget));
+}
+
+#[test]
+fn a_runtime_that_updated_itself_is_restored_once_before_a_review() {
+    let restores = std::cell::Cell::new(0);
+    let run = |reports: &[&str], restored: bool| {
+        let mut reports = reports.iter().map(|report| (*report).to_owned());
+        restores.set(0);
+        ensure_pinned_runtime(
+            "0.8.2",
+            || reports.next().ok_or_else(|| anyhow::anyhow!("no report")),
+            || {
+                restores.set(restores.get() + 1);
+                if restored {
+                    Ok(())
+                } else {
+                    anyhow::bail!("offline")
+                }
+            },
+        )
+    };
+    assert!(run(&["0.8.2"], true).is_ok());
+    assert_eq!(restores.get(), 0);
+    assert!(run(&["0.9.2", "0.8.2"], true).is_ok());
+    assert_eq!(restores.get(), 1);
+    let error = run(&["0.9.2", "0.9.2"], true).unwrap_err().to_string();
+    assert!(
+        error.contains("0.9.2") && error.contains("0.8.2"),
+        "{error}"
+    );
+    assert_eq!(restores.get(), 1);
+    let error = format!("{:#}", run(&["0.9.2"], false).unwrap_err());
+    assert!(
+        error.contains("reported 0.9.2") && error.contains("offline"),
+        "{error}"
+    );
 }
 
 #[test]
