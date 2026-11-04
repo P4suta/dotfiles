@@ -49,7 +49,8 @@ message = "State the fact or its condition without the hedge."
 tokens = ["かもしれません", "かもしれない", "と思います", "と思われます", "おそらく", "たぶん", "多分", "気がします"]
 
 # The conjunction that begins with this particle, and its longer form, are words of their own.
+# The polite verb itadakeru contains the particle's characters, so its forms stay allowed, while a past verb before the particle still counts.
 [rules."Dotfiles.Restriction"]
 message = "State the scope itself affirmatively, such as what the statement covers, instead of narrowing it with だけ."
 tokens = ["だけ"]
-except = ["だけど", "だけれど"]
+except = ["だけど", "だけれど", "いただける", "いただけれ", "いただけま", "いただけて", "いただけない", "いただけた"]
