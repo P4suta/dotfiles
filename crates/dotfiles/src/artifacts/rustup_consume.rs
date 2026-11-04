@@ -2322,7 +2322,7 @@ mod tests {
     const STDLIB_LOCK: &[u8] =
         include_bytes!("../../tests/fixtures/rust-src-nightly-library-cargo-lock.txt");
     const STDLIB_REGISTRY_PACKAGES: usize = 30;
-    const PROJECT_REGISTRY_PACKAGES: usize = 237;
+    const PROJECT_REGISTRY_PACKAGES: usize = 238;
     const STDLIB_ADDITIONAL_PACKAGES: usize = 21;
     const STDLIB_UNION_PACKAGES: usize = PROJECT_REGISTRY_PACKAGES + STDLIB_ADDITIONAL_PACKAGES;
     const MATERIAL_FIXTURE_NAME: &str = "example";
