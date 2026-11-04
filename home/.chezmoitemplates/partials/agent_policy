@@ -32,6 +32,7 @@ A project's own instructions take precedence when they conflict.
 - Use japanese-lexicon to verify Japanese readings and romanizations with identified public lexical records or major dictionaries and a named spelling standard.
 - Use checked-arguments for substantive reasoning, comparisons, explanations, and recommendations, including the checks for scope, semantic roles, evidence, counterarguments, and suitable formal methods.
 - Use monochrome-design for every visual design task, including interfaces, websites, diagrams, and documents.
+- Use source-bound-interface-design to read and cite primary sources before deciding interface structure, form controls, accessibility behavior, or user-facing copy.
 - Before completing a request, check the exact answer draft with `dotfiles answer check` using the request's managed session context.
 - Keep premise truth, natural-language interpretation, formal entailment, and decision relevance separate, and report unsupported or incomplete checks without claiming verification.
 - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
