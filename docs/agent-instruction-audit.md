@@ -140,6 +140,11 @@ The word rules in `japanese.toml` wait for a reply checker that reads them.
 Judgment: whether an artifact is a visual design task, and whether its hierarchy reads as intended, stays a design review.
 The `monochrome-design` skill states the defaults, and a project's browser checks with positive and negative fixtures cover the computed styles.
 
+> - Use source-bound-interface-design to read and cite primary sources before deciding interface structure, form controls, accessibility behavior, or user-facing copy.
+
+Judgment: whether a change decides interface structure, controls, accessibility behavior, or copy, and whether a cited page supports that decision, stays a review.
+The `source-bound-interface-design` skill lists the sources, and no gate checks that a proposal or PR cites them.
+
 > - For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
 
 Judgment: selecting relevant skill instructions and checking their verification obligations requires a review of the implementation and its evidence.
