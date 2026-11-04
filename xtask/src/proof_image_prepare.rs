@@ -395,10 +395,22 @@ struct Observation {
     contention: Contention,
 }
 
+/// The host and guest load, which slows the build and never decides whether it runs.
+/// The build keeps its fixed CPU, memory, and storage allocation and waits for CPU time on a busy host.
 #[derive(Debug)]
 enum Contention {
     Admitted,
     Saturated,
+}
+
+impl Contention {
+    fn report(&self) {
+        if matches!(self, Self::Saturated) {
+            eprintln!(
+                "notice: the host or guest load exceeds the CPUs outside the builder; the build runs slower"
+            );
+        }
+    }
 }
 
 impl Observation {
@@ -413,10 +425,7 @@ impl Observation {
                 && self.guest_memory_available >= MEMORY_BYTES,
             "BuildKit memory allocation does not fit current available memory"
         );
-        ensure!(
-            matches!(self.contention, Contention::Admitted),
-            "current workload contention is unknown or saturated"
-        );
+        self.contention.report();
         Ok(())
     }
 
@@ -464,10 +473,6 @@ impl Observation {
             self.host_memory_available >= MEMORY_BYTES
                 && self.guest_memory_available >= MEMORY_BYTES,
             "current available memory crossed the declared builder allocation"
-        );
-        ensure!(
-            matches!(self.contention, Contention::Admitted),
-            "current load is unknown or saturated"
         );
         Ok(Capacity::Admitted)
     }
