@@ -20,7 +20,7 @@ theorem ceiling_minimal (whole remainder actual : Nat)
   by_cases zero : remainder = 0 <;>
     simp [nativePostcondition, nanosPerMilli, zero] at post ⊢ <;> omega
 
-def campaignTimeout : Nat := 60
+def campaignTimeout : Nat := 600
 
 def campaignWaves (h p : Nat) : Nat :=
   h / p + (if h % p = 0 then 0 else 1)
