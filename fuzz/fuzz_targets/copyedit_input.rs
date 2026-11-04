@@ -17,18 +17,33 @@ fuzz_target!(|data: &[u8]| {
     if let Ok(findings) = prose::house::layout_findings("fuzz.md", source) {
         for finding in findings {
             assert!(finding.start < finding.end && finding.end <= source.len());
-            assert_eq!(source.get(finding.start..finding.end), Some(finding.excerpt.as_str()));
-            assert!(matches!(finding.rule.as_str(), prose::house::LIST | prose::house::TABLE));
+            assert_eq!(
+                source.get(finding.start..finding.end),
+                Some(finding.excerpt.as_str())
+            );
+            assert!(matches!(
+                finding.rule.as_str(),
+                prose::house::LIST | prose::house::TABLE
+            ));
         }
     }
     if let Ok(message) = serde_json::from_str::<prose::copyedit::NativeStyleMessage>(annotation) {
-        let document = prose::copyedit::Document { path: "fuzz.md".to_owned(), text: source.to_owned() };
+        let document = prose::copyedit::Document {
+            path: "fuzz.md".to_owned(),
+            text: source.to_owned(),
+        };
         if let Ok(finding) = message.diagnostic(&document) {
             assert!(finding.start <= finding.end && finding.end <= source.len());
-            assert_eq!(source.get(finding.start..finding.end), Some(finding.excerpt.as_str()));
+            assert_eq!(
+                source.get(finding.start..finding.end),
+                Some(finding.excerpt.as_str())
+            );
         }
     }
-    for profile in [prose::editorial::Profile::Expository, prose::editorial::Profile::General] {
+    for profile in [
+        prose::editorial::Profile::Expository,
+        prose::editorial::Profile::General,
+    ] {
         if let Ok(report) = prose::editorial::inspect("fuzz.md", source, profile) {
             for finding in report.findings {
                 assert!(finding.line > 0 && finding.column > 0);
@@ -52,11 +67,22 @@ fuzz_target!(|data: &[u8]| {
         }
         if let Ok(parsed) = serde_json::from_str::<Annotation>(annotation) {
             if parsed.validate(&segments[0]).is_ok() {
-                let policy = prose::house::Policy::parse(include_str!("../../home/dot_config/prose/house.toml")).expect("checked house policy");
-                if let Ok(findings) = policy.findings(prose::copyedit::Language::Japanese, &segments[0], &parsed, source) {
+                let policy = prose::house::Policy::parse(include_str!(
+                    "../../home/dot_config/prose/house.toml"
+                ))
+                .expect("checked house policy");
+                if let Ok(findings) = policy.findings(
+                    prose::copyedit::Language::Japanese,
+                    &segments[0],
+                    &parsed,
+                    source,
+                ) {
                     for finding in findings {
                         assert!(finding.start < finding.end && finding.end <= source.len());
-                        assert_eq!(source.get(finding.start..finding.end), Some(finding.excerpt.as_str()));
+                        assert_eq!(
+                            source.get(finding.start..finding.end),
+                            Some(finding.excerpt.as_str())
+                        );
                     }
                 }
             }
