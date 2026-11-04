@@ -1887,14 +1887,17 @@ pub(crate) fn check_request(
         resolve(&root, baseline)?.is_some_and(|resolved| resolved.eq_ignore_ascii_case(baseline)),
         "answer assurance baseline commit is missing or abbreviated"
     );
+    // A fresh snapshot leaves an untracked file from the request's start unchanged, as the Stop comparison does.
+    let current = worktree_snapshot(&root)?;
     enforce(
         catalog,
-        &decide(
+        &decide_from(
             &root,
             catalog,
             Point::Stop,
             &Tree::Commit(Some(baseline.to_owned())),
-            &Tree::WorkingTree,
+            &Tree::Commit(Some(current.commit)),
+            &merge_parents(&root)?,
         )?,
     )
 }

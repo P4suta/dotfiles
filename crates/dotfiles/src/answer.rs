@@ -1300,6 +1300,22 @@ mod tests {
     }
 
     #[test]
+    fn answer_check_ignores_untracked_work_from_before_the_request() {
+        let fixture = ContextFixture::new();
+        fs::write(fixture.root.join("earlier.rs"), "pub fn parse() {}\n").unwrap();
+        let mut input = input("Prepare the project without publishing it.");
+        input.cwd = Some(fixture.root.clone());
+        begin(&fixture.home, &input).unwrap();
+        fixture.check();
+        fs::write(fixture.root.join("later.rs"), "pub fn parse() {}\n").unwrap();
+        let draft = fixture.scope.path().join("draft.txt");
+        let evidence = fixture.scope.path().join("evidence.json");
+        fs::write(&draft, "Can we test this?\n").unwrap();
+        write_json(&evidence, &document()).unwrap();
+        assert!(check_at(&fixture.home, "session", &draft, &evidence, &fixture.root).is_err());
+    }
+
+    #[test]
     fn current_requests_keep_their_shape_and_context_parsing_is_strict() {
         let home = tempfile::tempdir().unwrap();
         begin(home.path(), &input("request")).unwrap();
