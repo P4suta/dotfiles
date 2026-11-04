@@ -5,7 +5,9 @@ pub const PROBE_GAP_MS: u64 = 60_000;
     clippy::cast_possible_truncation,
     reason = "the budget of ten reviews is seven, which every pointer width holds"
 )]
-pub const HOURLY_LIMIT: usize = budget(10) as usize;
+pub const HOURLY_LIMIT: usize = budget(HOURLY_CAPACITY) as usize;
+/// The reviews the `CodeRabbit` CLI serves in a rolling hour, of which the guard uses the floored budget.
+pub const HOURLY_CAPACITY: u64 = 10;
 pub const DAILY_LIMIT: usize = HOURLY_LIMIT * 24;
 pub const PROBE_DAILY_LIMIT: usize = DAILY_LIMIT;
 
@@ -23,9 +25,11 @@ pub const fn budget(limit: u64) -> u64 {
     (limit as u128 * BUDGET_NUMERATOR / BUDGET_DENOMINATOR) as u64
 }
 
+/// Whether one more review fits the floored budget of the hourly capacity and the daily limit.
 #[must_use]
 pub fn within_limits(hourly: usize, daily: usize) -> bool {
-    hourly < HOURLY_LIMIT && daily < DAILY_LIMIT
+    let used = u64::try_from(hourly).unwrap_or(u64::MAX);
+    within_budget(HOURLY_CAPACITY, HOURLY_CAPACITY.saturating_sub(used)) && daily < DAILY_LIMIT
 }
 
 /// The `CodeRabbit` review pools an owner pause stops.
