@@ -371,6 +371,22 @@ fn request(directory: &Path) -> Result<Request> {
     )
 }
 
+pub(crate) fn request_baseline(
+    home: &Path,
+    session: &str,
+) -> Result<Option<crate::assure::RequestBaseline>> {
+    let directory = directory(home, session)?;
+    if !directory.join("request.json").try_exists()? {
+        return Ok(None);
+    }
+    Ok(request(&directory)?
+        .assurance
+        .map(|context| crate::assure::RequestBaseline {
+            root: context.root,
+            commit: context.commit,
+        }))
+}
+
 fn begin(home: &Path, input: &HookInput) -> Result<String> {
     let prompt = input
         .prompt
@@ -386,15 +402,22 @@ fn begin(home: &Path, input: &HookInput) -> Result<String> {
         .context("request generation has no name")?
         .to_string_lossy()
         .into_owned();
-    write_json(
-        &directory.join("request.json"),
-        &Request {
-            version: VERSION,
-            generation,
-            prompt: prompt.to_owned(),
-            assurance: None,
-        },
-    )?;
+    // The request record without a baseline lands first, so a failed capture leaves no earlier request's authority behind.
+    let mut state = Request {
+        version: VERSION,
+        generation,
+        prompt: prompt.to_owned(),
+        assurance: None,
+    };
+    let path = directory.join("request.json");
+    write_json(&path, &state)?;
+    if let Some(cwd) = &input.cwd {
+        state.assurance = crate::assure::request_baseline(cwd)?.map(|baseline| Assurance {
+            root: baseline.root,
+            commit: baseline.commit,
+        });
+        write_json(&path, &state)?;
+    }
     Ok(format!(
         "Before completing this request, use japanese-lexicon for Japanese readings and checked-arguments for reasoning.\nPrepare an exact answer draft and evidence, then run dotfiles answer check --session {} --draft <file> --evidence <file>.\nThe Stop hook rejects absent or stale evidence.\nA proof checks the declared formal claim; it does not certify empirical premises or their natural-language interpretation.\n",
         platform::refusal::quote(&input.session_id)
@@ -1277,6 +1300,22 @@ mod tests {
     }
 
     #[test]
+    fn answer_check_ignores_untracked_work_from_before_the_request() {
+        let fixture = ContextFixture::new();
+        fs::write(fixture.root.join("earlier.rs"), "pub fn parse() {}\n").unwrap();
+        let mut input = input("Prepare the project without publishing it.");
+        input.cwd = Some(fixture.root.clone());
+        begin(&fixture.home, &input).unwrap();
+        fixture.check();
+        fs::write(fixture.root.join("later.rs"), "pub fn parse() {}\n").unwrap();
+        let draft = fixture.scope.path().join("draft.txt");
+        let evidence = fixture.scope.path().join("evidence.json");
+        fs::write(&draft, "Can we test this?\n").unwrap();
+        write_json(&evidence, &document()).unwrap();
+        assert!(check_at(&fixture.home, "session", &draft, &evidence, &fixture.root).is_err());
+    }
+
+    #[test]
     fn current_requests_keep_their_shape_and_context_parsing_is_strict() {
         let home = tempfile::tempdir().unwrap();
         begin(home.path(), &input("request")).unwrap();
@@ -1582,6 +1621,45 @@ mod tests {
             .unwrap();
             assert!(request(&directory).is_err(), "{generation}");
         }
+    }
+
+    #[test]
+    fn failed_snapshot_capture_invalidates_earlier_answer_evidence() {
+        let home = tempfile::tempdir().unwrap();
+        let draft = home.path().join("draft.txt");
+        let evidence = home.path().join("evidence.json");
+        fs::write(&draft, "Can we test this?\n").unwrap();
+        write_json(&evidence, &document()).unwrap();
+        let mut input = input("same request");
+        begin(home.path(), &input).unwrap();
+        check(home.path(), "session", &draft, &evidence).unwrap();
+        assert!(stop(home.path(), &input).is_ok());
+        input.cwd = Some(PathBuf::from("relative"));
+        assert!(
+            begin(home.path(), &input)
+                .unwrap_err()
+                .to_string()
+                .contains("must be absolute")
+        );
+        assert!(
+            stop(home.path(), &input)
+                .unwrap_err()
+                .to_string()
+                .contains("stale or incomplete")
+        );
+    }
+
+    #[test]
+    fn legacy_requests_without_a_snapshot_retain_the_strict_stop_comparison() {
+        let home = tempfile::tempdir().unwrap();
+        begin(home.path(), &input("request")).unwrap();
+        let path = directory(home.path(), "session")
+            .unwrap()
+            .join("request.json");
+        let mut legacy: serde_json::Value = serde_json::from_str(&read(&path).unwrap()).unwrap();
+        legacy.as_object_mut().unwrap().remove("assurance");
+        write_json(&path, &legacy).unwrap();
+        assert!(request_baseline(home.path(), "session").unwrap().is_none());
     }
 
     #[test]
