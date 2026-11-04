@@ -3257,9 +3257,16 @@ fn restack(target: &Target, restack: impl FnOnce() -> Result<()>) -> Result<()> 
 fn sync_stack(target: &Target) -> Result<()> {
     require_checkout(target)?;
     let branch = git_output(&["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    sync_stack_at(target, branch.trim())
+}
+
+/// Restacks the stack that `selector` names: a PR number, a stack number, or a branch.
+/// Checking it out adopts the stack that GitHub records while this clone still lacks tracking for it.
+/// A PR number names one stack even on a trunk that more than one local stack shares.
+fn sync_stack_at(target: &Target, selector: &str) -> Result<()> {
+    require_checkout(target)?;
     let lease = Lease::acquire()?;
-    // Checking out the current branch adopts the stack that GitHub records for it while this clone still lacks tracking for it.
-    gh_stack(target, Some(&lease), &["checkout", branch.trim()])?;
+    gh_stack(target, Some(&lease), &["checkout", selector])?;
     gh_stack(target, Some(&lease), &["sync"])
 }
 
@@ -3288,7 +3295,20 @@ fn check_stack_issue(
     .and_then(|gate| require_issue(gate, &member))
     .map_err(|error| {
         if let Some(refusal) = error.downcast_ref::<Refusal>() {
-            anyhow::Error::from(refusal.clone().evidence(format!("stack member #{pr}")))
+            let mut refusal = refusal.clone().evidence(format!("stack member #{pr}"));
+            let own = view
+                .closing_issues_references
+                .first()
+                .map(|issue| issue.number)
+                .or_else(|| closing_references(&view.body, &target.repo).first().copied());
+            if let (Some(common), Some(own)) = (target.issue, own)
+                && own != common
+            {
+                refusal = refusal.evidence(format!(
+                    "stack member #{pr} closes #{own}; omit --issue {common} so each member needs to close its own issue"
+                ));
+            }
+            anyhow::Error::from(refusal)
         } else {
             error.context(format!("stack member #{pr}"))
         }
@@ -3346,7 +3366,7 @@ fn merge_stack(
                     return Err(stop_refusal(target, *pr, *stop, true, view).into());
                 }
             }
-            sync_stack(target)?;
+            sync_stack_at(target, &top.to_string())?;
             carry = assessments;
             wait(target, top, polling, started)?;
             continue;
