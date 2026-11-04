@@ -23,9 +23,9 @@
 | [0017 Normalize line endings to LF on every host and agent write](0017-lf-line-endings-everywhere.md) | accepted |  |
 | [0018 Turn off persistent agent memory in the native client profiles](0018-agent-memory-off.md) | accepted |  |
 | [0019 Recommend the next workflow step from inspected state](0019-state-inspecting-next-action.md) | accepted |  |
-| [0020 Require a passing gate on every operating system family before push](0020-os-family-push-evidence.md) | amended | [2026-10-11](profile-evidence-scope.md), [2026-10-11](source-bound-push-validation.md), [2026-10-19](optional-native-verification-before-publication.md) |
+| [0020 Require a passing gate on every operating system family before push](0020-os-family-push-evidence.md) | amended | [2026-10-11](profile-evidence-scope.md), [2026-10-11](source-bound-push-validation.md), [2026-10-19](optional-native-verification-before-publication.md), [2026-11-03](per-host-ssh-logins.md) |
 | [0021 Check that every agent instruction line has a class](0021-checked-agent-instruction-audit.md) | accepted |  |
-| [0022 Refuse installed tools built from stale sources](0022-refuse-tools-built-from-stale-sources.md) | amended | [2026-10-11](source-bound-push-validation.md) |
+| [0022 Refuse installed tools built from stale sources](0022-refuse-tools-built-from-stale-sources.md) | amended | [2026-10-11](source-bound-push-validation.md), [2026-11-03](keep-the-previous-build-running-after-a-failed-reinstall.md) |
 | [0023 Give the repository a layout that shows what it manages](0023-repository-layout-and-target-architecture.md) | accepted |  |
 | [2026-10-05 Reuse the `gh` login for the remote GitHub tool server](github-mcp-uses-the-github-cli-login.md) | accepted |  |
 | [2026-10-06 Report every gate refusal as one structured record](structured-gate-refusals.md) | accepted |  |
@@ -63,7 +63,7 @@
 | [2026-10-12 Bind acquisition plans to pinned inputs and reusable material identities](pinned-acquisition-plans-and-content-addressed-materials.md) | proposed |  |
 | [2026-10-13 Admit native work from a complete resource plan](admit-native-work-from-a-complete-resource-plan.md) | proposed |  |
 | [2026-10-13 Assess a pinned mutation engine before adoption](assess-pinned-mutation-engine-before-adoption.md) | proposed |  |
-| [2026-10-13 Authenticate issue context at edit and integration boundaries](authenticate-issue-context-at-edit-and-integration-boundaries.md) | amended | [2026-10-20](keep-workflow-evidence-local.md) |
+| [2026-10-13 Authenticate issue context at edit and integration boundaries](authenticate-issue-context-at-edit-and-integration-boundaries.md) | amended | [2026-10-20](keep-workflow-evidence-local.md), [2026-11-03](carry-issue-contexts-through-leased-restacks.md) |
 | [2026-10-13 Bind private verifier phase evidence](bind-private-verifier-phase-evidence.md) | proposed |  |
 | [2026-10-13 Enable experimental skill maintenance only through explicit local opt-in](experimental-skill-maintenance-by-explicit-opt-in.md) | accepted |  |
 | [2026-10-13 Keep local issue authority separate from remote publication](keep-local-issue-authority-separate-from-remote-publication.md) | amended | [2026-10-26](import-unborn-artifacts-after-same-issue-selections.md) |
@@ -105,7 +105,7 @@
 | [2026-10-22 Lint agent writes and script invocations through one runtime](lint-agent-writes-and-script-invocations.md) | amended | [2026-10-29](check-agent-written-comments-at-write-time.md) |
 | [2026-10-22 Run heavy verification at the release gate](run-heavy-verification-at-the-release-gate.md) | accepted |  |
 | [2026-10-22 Scope a legacy bypass to one script invocation](script-scoped-legacy-bypass.md) | accepted |  |
-| [2026-10-22 Make one stack the unit of open work and merge it through a merge queue](stack-first-pull-requests-through-a-merge-queue.md) | amended | [2026-10-23](keep-independent-work-reasons-owner-local.md) |
+| [2026-10-22 Make one stack the unit of open work and merge it through a merge queue](stack-first-pull-requests-through-a-merge-queue.md) | amended | [2026-10-23](keep-independent-work-reasons-owner-local.md), [2026-11-02](carry-assessments-through-base-update-merges.md) |
 | [2026-10-23 Bind answer evidence to the current request and draft](bind-answer-evidence-to-the-current-request-and-draft.md) | proposed |  |
 | [2026-10-23 Keep independent work reasons in owner-local state](keep-independent-work-reasons-owner-local.md) | accepted |  |
 | [2026-10-23 Limit merge queues to organization-owned repositories](limit-merge-queues-to-organization-repositories.md) | accepted |  |
@@ -125,3 +125,7 @@
 | [2026-10-26 Require PR review by repository policy](require-pr-review-by-repository-policy.md) | proposed |  |
 | [2026-10-29 Check agent-written comments at write time](check-agent-written-comments-at-write-time.md) | proposed |  |
 | [2026-10-30 Bind official tarballs to verified update records](bind-official-tarballs-to-verified-update-records.md) | proposed |  |
+| [2026-11-02 Carry assessments through base update merges that keep the hunks](carry-assessments-through-base-update-merges.md) | accepted |  |
+| [2026-11-03 Carry issue contexts through leased restacks](carry-issue-contexts-through-leased-restacks.md) | accepted |  |
+| [2026-11-03 Keep the previous build running after a failed reinstall](keep-the-previous-build-running-after-a-failed-reinstall.md) | accepted |  |
+| [2026-11-03 Give each generated SSH host its own login](per-host-ssh-logins.md) | accepted |  |

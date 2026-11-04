@@ -50,6 +50,14 @@ fn reject_dropping_an_ssh_host_directive() {
     assert!(production::ssh_config_preserved("Host local", production::SSH_INCLUDE));
 }
 #[kani::proof]
+#[kani::unwind(128)]
+fn reject_host_logins_after_the_agent_include() {
+    assert!(production::ssh_config_preserved(
+        "Host local",
+        "Include ~/.config/dotfiles/ssh-agent.conf\nInclude ~/.local/state/hosts/ssh_config\nHost local"
+    ));
+}
+#[kani::proof]
 fn reject_routing_to_an_empty_agent() {
     assert!(production::route(production::Context::Local, production::Agent::Empty) == production::Route::Herdr);
 }
@@ -322,8 +330,21 @@ fn reject_ignoring_observed_growth_or_an_unknown_capacity() {
 verifier = "kani"
 source = "crates/rules/src/resource_rules.rs"
 probes = '''
-use production::{Allocation, COMPONENTS, Inodes, Refusal, admission, required};
+use production::{Allocation, COMPONENTS, Inodes, Refusal, admission, reported_inodes, required};
 const PLAN: [Allocation; COMPONENTS] = [Allocation { bytes: 10, inodes: 2 }; COMPONENTS];
+#[kani::proof]
+#[kani::unwind(7)]
+fn reject_admitting_a_fixed_table_shortfall() {
+    assert!(admission(PLAN, Some(60), reported_inodes(100, 11)).is_ok());
+}
+#[kani::proof]
+fn reject_reading_an_exhausted_fixed_table_as_tableless() {
+    assert_eq!(reported_inodes(12, 0), Inodes::NotApplicable);
+}
+#[kani::proof]
+fn reject_trusting_more_free_inodes_than_the_total() {
+    assert_eq!(reported_inodes(0, 12), Inodes::NotApplicable);
+}
 #[kani::proof]
 #[kani::unwind(7)]
 fn reject_omitting_the_competing_allocation() {
@@ -1134,6 +1155,136 @@ fn reject_requiring_a_context_in_a_scratch_repository() {
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/ancestry_rules.rs"
+probes = '''
+use production::{Ancestry, ancestry};
+#[kani::proof]
+fn reject_reporting_a_missing_ancestor_as_a_git_failure() {
+    assert!(ancestry(Some(1)) == Ancestry::Failed);
+}
+#[kani::proof]
+fn reject_reporting_an_ancestor_as_missing() {
+    assert!(ancestry(Some(0)) == Ancestry::NotAncestor);
+}
+#[kani::proof]
+fn reject_answering_for_an_unknown_object() {
+    assert!(ancestry(Some(128)) == Ancestry::NotAncestor);
+}
+#[kani::proof]
+fn reject_answering_for_a_git_process_that_a_signal_ended() {
+    assert!(ancestry(None) == Ancestry::NotAncestor);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/gh_read_rules.rs"
+probes = '''
+use production::{Verdict, verdict};
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_an_api_post() {
+    assert!(verdict(&["api", "-X", "POST", "repos/o/r/issues"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_an_attached_method_in_a_flag_cluster() {
+    assert!(verdict(&["api", "-iXDELETE", "repos/o/r"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_long_method_override() {
+    assert!(verdict(&["api", "--method=PATCH", "repos/o/r"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_raw_field() {
+    assert!(verdict(&["api", "repos/o/r/issues", "-f", "title=x"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_typed_field_with_an_attached_value() {
+    assert!(verdict(&["api", "repos/o/r/issues", "-Fbody=@file"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_request_body_from_input() {
+    assert!(verdict(&["api", "repos/o/r/issues", "--input=-"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_pull_request_merge() {
+    assert!(verdict(&["pr", "merge", "17"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_admitting_a_variable_write() {
+    assert!(verdict(&["variable", "set", "NAME"]) == Verdict::Admit);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_refusing_a_workflow_run_read() {
+    assert!(verdict(&["run", "view", "1", "--json", "conclusion"]) == Verdict::Refuse);
+}
+#[kani::proof]
+#[kani::unwind(20)]
+fn reject_refusing_an_explicit_get() {
+    assert!(verdict(&["api", "-X", "get", "repos/o/r/pulls"]) == Verdict::Refuse);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/skill_catalog_rules.rs"
+probes = '''
+use production::{Difference, difference};
+#[kani::proof]
+fn reject_hiding_a_changed_skill() {
+    assert!(difference(true, true, false).is_none());
+}
+#[kani::proof]
+fn reject_reporting_a_removed_skill_as_changed() {
+    assert!(difference(true, false, false) == Some(Difference::Changed));
+}
+#[kani::proof]
+fn reject_reporting_an_added_skill_as_removed() {
+    assert!(difference(false, true, false) == Some(Difference::Removed));
+}
+#[kani::proof]
+fn reject_reporting_an_unchanged_skill() {
+    assert!(difference(true, true, true).is_some());
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/restack_rules.rs"
+probes = '''
+use production::{Carry, Movement, carry};
+#[kani::proof]
+fn reject_carrying_a_rewrite_that_changed_the_branch() {
+    assert!(carry(Movement::Rewritten, true, false) == Carry::Carried);
+}
+#[kani::proof]
+fn reject_carrying_a_context_that_no_longer_held() {
+    assert!(carry(Movement::Rewritten, false, true) == Carry::Carried);
+}
+#[kani::proof]
+fn reject_leaving_an_unchanged_rewrite_behind() {
+    assert!(carry(Movement::Rewritten, true, true) == Carry::Left);
+}
+#[kani::proof]
+fn reject_carrying_an_unmoved_branch() {
+    assert!(carry(Movement::Unmoved, true, true) == Carry::Carried);
+}
+#[kani::proof]
+fn reject_leaving_a_context_that_still_holds() {
+    assert!(carry(Movement::StillCurrent, true, false) == Carry::Left);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/source_sync_rules.rs"
 probes = '''
 use production::{Checkout, Decision, Remote, SkipReason, decide, preflight};
@@ -1898,6 +2049,24 @@ fn reject_a_different_merged_head() {
 fn reject_waiting_after_queue_ejection() {
     assert_eq!(production::settlement(true, production::Lifecycle::Open, production::Queue::Removed, false), production::Settlement::Waiting);
 }
+#[kani::proof]
+fn reject_dropping_an_added_line() {
+    assert_eq!(production::patch_line(b"+index x", Some(b"--- a")), production::PatchLine::TextBlobs);
+}
+#[kani::proof]
+fn reject_dropping_the_blob_names_of_a_binary_file() {
+    assert_eq!(production::patch_line(b"index a..b", Some(b"GIT binary patch")), production::PatchLine::TextBlobs);
+}
+#[kani::proof]
+fn reject_a_plain_commit_as_a_base_update() {
+    let commit = production::HeldCommit { merge: false, follows_branch: true, merges_base: false };
+    assert_eq!(production::live_head(false, &[commit], true), production::LiveHead::BaseUpdate);
+}
+#[kani::proof]
+fn reject_an_incomplete_walk_as_a_base_update() {
+    let commit = production::HeldCommit { merge: true, follows_branch: true, merges_base: true };
+    assert_eq!(production::live_head(false, &[commit], false), production::LiveHead::BaseUpdate);
+}
 '''
 
 [[obligation]]
@@ -2066,6 +2235,14 @@ fn reject_checking_a_pr_already_conflicting_with_its_base() {
 #[kani::proof]
 fn reject_skipping_an_ordinary_pr_with_unknown_mergeability() {
     assert!(production::dependency_skip("contributor", Some("User"), false, Some("UNKNOWN")).is_some());
+}
+#[kani::proof]
+fn reject_absence_while_a_declared_check_can_still_report() {
+    assert!(production::head_checks(0, 0, 0, true) == production::HeadChecks::Absent);
+}
+#[kani::proof]
+fn reject_waiting_when_no_check_can_ever_report() {
+    assert!(production::head_checks(0, 0, 0, false) == production::HeadChecks::Pending);
 }
 '''
 
@@ -2736,6 +2913,30 @@ fn reject_handing_a_handed_run_on_again() {
 fn reject_refusing_a_stale_working_copy() {
     assert!(!production::delegates(production::freshness(true, false), production::Origin::WorkingCopy, false));
 }
+#[kani::proof]
+fn reject_tolerating_a_build_after_its_sources_change_again() {
+    let deferral = production::Deferral { same_checkout: true, same_content: false, same_build: true };
+    assert!(production::tolerates(production::freshness(true, false), Some(deferral)));
+}
+#[kani::proof]
+fn reject_tolerating_another_build() {
+    let deferral = production::Deferral { same_checkout: true, same_content: true, same_build: false };
+    assert!(production::tolerates(production::freshness(true, false), Some(deferral)));
+}
+#[kani::proof]
+fn reject_tolerating_a_failure_from_another_checkout() {
+    let deferral = production::Deferral { same_checkout: false, same_content: true, same_build: true };
+    assert!(production::tolerates(production::freshness(true, false), Some(deferral)));
+}
+#[kani::proof]
+fn reject_tolerating_a_stale_build_without_a_recorded_failure() {
+    assert!(production::tolerates(production::freshness(true, false), None));
+}
+#[kani::proof]
+fn reject_refusing_a_matching_failed_reinstall() {
+    let deferral = production::Deferral { same_checkout: true, same_content: true, same_build: true };
+    assert!(!production::tolerates(production::freshness(true, false), Some(deferral)));
+}
 '''
 
 [[obligation]]
@@ -2863,6 +3064,36 @@ fn reject_linking_duplicate_members() {
 fn reject_linking_members_outside_the_owned_open_inventory() {
     let facts = production::LinkFacts { members: 2, distinct: true, owned_open: false };
     assert!(production::link_admission(facts).is_ok());
+}
+#[kani::proof]
+fn reject_a_start_refresh_that_ignores_its_own_declaration() {
+    use production::{Carry, Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::Start, StoredStart::Descendant) == Ok(Carry::Undeclared));
+}
+#[kani::proof]
+fn reject_a_start_refresh_that_carries_a_declaration_for_other_work() {
+    use production::{Carry, Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::Start, StoredStart::OtherWork) == Ok(Carry::Declared));
+}
+#[kani::proof]
+fn reject_a_start_refresh_that_carries_a_declaration_from_another_history() {
+    use production::{Carry, Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::Start, StoredStart::LeftHistory) == Ok(Carry::Declared));
+}
+#[kani::proof]
+fn reject_a_creation_from_a_declaration_for_other_work() {
+    use production::{Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::Create, StoredStart::OtherWork).is_ok());
+}
+#[kani::proof]
+fn reject_a_creation_from_a_declaration_from_another_history() {
+    use production::{Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::Create, StoredStart::LeftHistory).is_ok());
+}
+#[kani::proof]
+fn reject_a_stack_member_that_carries_a_start_declaration() {
+    use production::{Carry, Operation, StoredStart, carried_start};
+    assert!(carried_start(Operation::StackCreate, StoredStart::Descendant) == Ok(Carry::Declared));
 }
 '''
 

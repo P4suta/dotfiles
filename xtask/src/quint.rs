@@ -14,11 +14,40 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
 
-/// The Quint release that the image's lockfile pins.
-pub const QUINT_VERSION: &str = "0.33.0";
+/// The Quint release that the image's `package.json` pins, which Renovate updates in place.
+///
+/// # Panics
+///
+/// Panics when the compiled-in `package.json` names no Quint release, which the image tests refuse.
+#[must_use]
+pub fn quint_version() -> &'static str {
+    static VERSION: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+        serde_json::from_str::<Value>(include_str!("../proofs/quint/package.json"))
+            .ok()
+            .and_then(|package| {
+                package["dependencies"]["@informalsystems/quint"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .expect("the Quint image package names its Quint release")
+    });
+    &VERSION
+}
 
-/// The Apalache release that Quint 0.33.0 expects, whose bundled model checker visits every state.
-pub const APALACHE_VERSION: &str = "0.62.1";
+/// The Apalache release that the image's `Dockerfile` bundles, whose model checker visits every state.
+/// It must be the release that the pinned Quint names in `DEFAULT_APALACHE_VERSION_TAG`.
+///
+/// # Panics
+///
+/// Panics when the compiled-in `Dockerfile` names no Apalache release, which the image tests refuse.
+#[must_use]
+pub fn apalache_version() -> &'static str {
+    include_str!("../proofs/quint/Dockerfile")
+        .lines()
+        .find_map(|line| line.strip_prefix("ARG APALACHE_VERSION="))
+        .map(str::trim)
+        .expect("the Quint image Dockerfile names its Apalache release")
+}
 
 /// The directory that defines the image of the Quint obligations.
 pub const IMAGE_DIRECTORY: &str = "xtask/proofs/quint";

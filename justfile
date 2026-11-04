@@ -28,7 +28,8 @@ dependency-gate: trust
     mise x rust -- cargo fetch --locked --manifest-path benchmarks/Cargo.toml
     mise x rust -- cargo fetch --locked --manifest-path fuzz/Cargo.toml
     mise x rust -- cargo check --locked --workspace --all-targets
-    mise x rust -- cargo test --locked --package xtask --test pins
+    mise x rust -- cargo test --locked --package xtask --test pins --test workflows --test container_proofs
+    mise x rust -- cargo test --locked --package dotfiles --lib published_stdlib_lock_has_the_exact_source_bound_package_union
 
 check-staged: lint-tools
     mise x -- cargo xtask check --staged
@@ -44,6 +45,11 @@ profiles: trust
 
 profiles-linux: trust
     mise x -- cargo xtask profiles-linux
+
+# Writes this host family's profile manifests and prints each change, as the manifests workflow does on hosted runners.
+profile-manifests: trust
+    mise x rust chezmoi -- cargo xtask profile-snapshots --write
+    git --no-pager diff --no-color --no-ext-diff -- xtask/tests/snapshots
 
 proofs *args: trust
     mise x -- cargo xtask proofs {{ args }}

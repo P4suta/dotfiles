@@ -19,6 +19,64 @@ pub const fn admits_creation(units: u32, limit: u32, joins_stack: bool) -> bool 
     joins_stack || admits(units, limit)
 }
 
+/// The command that admits work.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum Operation {
+    Start,
+    Create,
+    StackCreate,
+}
+
+/// How the declaration `start` stored for a branch relates to the work an operation admits.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum StoredStart {
+    /// No declaration is pending, because `start` stored none or it already names its PR.
+    Absent,
+    /// It names another login, destination, source, branch, or issue.
+    OtherWork,
+    /// It names this work, but the head doesn't descend from its starting commit.
+    LeftHistory,
+    /// It names this work, and the head descends from its starting commit.
+    Descendant,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Carry {
+    Declared,
+    Undeclared,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StaleStart {
+    OtherWork,
+    LeftHistory,
+}
+
+/// Whether a pending `start` declaration admits this work as independent.
+/// A later `start` or `create` carries it for the same work on a descendant commit, and `stack create` joins its named stack instead.
+/// A later `start` treats any other declaration as absent, so only work that the stack would refuse needs a new one.
+///
+/// # Errors
+/// `create` refuses a declaration for other work or another history, because it would otherwise publish the work without it.
+pub const fn carried_start(operation: Operation, stored: StoredStart) -> Result<Carry, StaleStart> {
+    match (operation, stored) {
+        (Operation::Start | Operation::Create, StoredStart::Descendant) => Ok(Carry::Declared),
+        (Operation::Create, StoredStart::OtherWork) => Err(StaleStart::OtherWork),
+        (Operation::Create, StoredStart::LeftHistory) => Err(StaleStart::LeftHistory),
+        (Operation::Start, StoredStart::OtherWork | StoredStart::LeftHistory)
+        | (Operation::Start | Operation::Create, StoredStart::Absent)
+        | (
+            Operation::StackCreate,
+            StoredStart::Absent
+            | StoredStart::OtherWork
+            | StoredStart::LeftHistory
+            | StoredStart::Descendant,
+        ) => Ok(Carry::Undeclared),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LinkFacts {
     pub members: usize,
@@ -161,6 +219,45 @@ mod proofs {
         assert!(joins_stack || !admitted || units.saturating_add(1) <= limit);
     }
 
+    pub fn spec_carried_start(operation: Operation, stored: StoredStart) {
+        let result = carried_start(operation, stored);
+        assert_eq!(
+            result == Ok(Carry::Declared),
+            operation != Operation::StackCreate && stored == StoredStart::Descendant
+        );
+        match result {
+            Ok(_) => assert!(operation != Operation::Create || !stale(stored)),
+            Err(StaleStart::OtherWork) => {
+                assert!(operation == Operation::Create && stored == StoredStart::OtherWork);
+            }
+            Err(StaleStart::LeftHistory) => {
+                assert!(operation == Operation::Create && stored == StoredStart::LeftHistory);
+            }
+        }
+    }
+
+    fn stale(stored: StoredStart) -> bool {
+        matches!(stored, StoredStart::OtherWork | StoredStart::LeftHistory)
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_the_same_work_on_a_descendant_commit_carries_a_start_declaration() {
+        let operation: Operation = kani::any();
+        let stored: StoredStart = kani::any();
+        spec_carried_start(operation, stored);
+        let result = carried_start(operation, stored);
+        kani::cover!(operation == Operation::Start && result == Ok(Carry::Declared));
+        kani::cover!(operation == Operation::Start && stale(stored) && result.is_ok());
+        kani::cover!(result == Err(StaleStart::OtherWork));
+        kani::cover!(result == Err(StaleStart::LeftHistory));
+        kani::cover!(
+            operation == Operation::StackCreate
+                && stored == StoredStart::Descendant
+                && result == Ok(Carry::Undeclared)
+        );
+    }
+
     pub fn spec_link_admission(facts: LinkFacts) {
         let result = link_admission(facts);
         assert_eq!(
@@ -255,16 +352,9 @@ mod proofs {
     #[cfg(kani)]
     #[kani::proof]
     #[kani::unwind(12)]
-    fn the_empty_graph_matches_parent_path_validation() {
-        let result = spec_workload(&[]);
-        assert!(result.is_ok_and(|work| work.units() == 0 && work.tip().is_none()));
-        kani::cover!(result.is_ok());
-    }
-
-    #[cfg(kani)]
-    #[kani::proof]
-    #[kani::unwind(12)]
-    fn every_graph_of_one_member_matches_parent_path_validation() {
+    fn every_graph_of_at_most_one_member_matches_parent_path_validation() {
+        let empty = spec_workload(&[]);
+        assert!(empty.is_ok_and(|work| work.units() == 0 && work.tip().is_none()));
         let members: [StackMember; 1] = kani::any();
         let result = spec_workload(&members);
         kani::cover!(result.is_ok());
@@ -332,6 +422,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn every_operation_and_stored_start_meets_the_specification() {
+        for operation in [Operation::Start, Operation::Create, Operation::StackCreate] {
+            for stored in [
+                StoredStart::Absent,
+                StoredStart::OtherWork,
+                StoredStart::LeftHistory,
+                StoredStart::Descendant,
+            ] {
+                proofs::spec_carried_start(operation, stored);
+            }
+        }
+    }
+
+    #[test]
+    fn a_start_refresh_carries_its_own_declaration_and_ignores_any_other() {
+        assert_eq!(
+            carried_start(Operation::Start, StoredStart::Descendant),
+            Ok(Carry::Declared)
+        );
+        for stored in [
+            StoredStart::Absent,
+            StoredStart::OtherWork,
+            StoredStart::LeftHistory,
+        ] {
+            assert_eq!(
+                carried_start(Operation::Start, stored),
+                Ok(Carry::Undeclared)
+            );
+        }
+        assert_eq!(
+            carried_start(Operation::Create, StoredStart::OtherWork),
+            Err(StaleStart::OtherWork)
+        );
     }
 
     #[test]

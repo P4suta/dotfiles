@@ -317,6 +317,8 @@ fn script_bypass_hint(path: &str) -> String {
 pub struct Findings {
     pub refusals: Vec<String>,
     pub wrapper_refusals: Vec<String>,
+    /// Commands that the pinned parser read and rejected, which the agent can rewrite.
+    pub syntax_refusals: Vec<String>,
     pub unavailable: Vec<String>,
     pub(crate) bodies: Vec<crate::claude_hook::github::Body>,
     pub(crate) scripts: Vec<InspectedScript>,
@@ -511,6 +513,7 @@ impl Findings {
                 Ok(report) => {
                     self.bodies.extend(report.bodies);
                     self.wrapper_refusals.extend(report.wrapper_refusals);
+                    self.syntax_refusals.extend(report.syntax_refusals);
                     self.unavailable.extend(report.unavailable);
                     self.scripts.extend(report.scripts);
                 }
@@ -523,6 +526,9 @@ impl Findings {
                     )));
                 }
             }
+        } else if Path::new(path).is_relative() && !context.directory.is_some_and(Path::is_absolute)
+        {
+            self.refusals.push(format!("Refused: cannot resolve the execution directory of the relative script {path}.\nNext action: run the script by its absolute path."));
         } else {
             match script_refusal(
                 path,
@@ -548,6 +554,7 @@ impl Findings {
     fn append(&mut self, other: Self) {
         self.refusals.extend(other.refusals);
         self.wrapper_refusals.extend(other.wrapper_refusals);
+        self.syntax_refusals.extend(other.syntax_refusals);
         self.unavailable.extend(other.unavailable);
         self.bodies.extend(other.bodies);
         self.scripts.extend(other.scripts);
@@ -613,14 +620,24 @@ impl Shell {
             Self::PowerShell => match syntax::parse_powershell_in(command, directory) {
                 Ok(invocations) => invocations,
                 Err(error) => {
-                    findings.unavailable.push(format!("Refused: PowerShell argument spelling could not be verified: {error:#}.\nNext action: correct the PowerShell syntax or restore the pinned parser before using a suggested command."));
+                    if let Some(rejected) = error.downcast_ref::<crate::lint_hook::SyntaxRejected>()
+                    {
+                        findings.syntax_refusals.push(format!("Refused: the pinned PowerShell parser rejected this command's syntax: {rejected}.\nNext action: rewrite the command in valid PowerShell syntax, then resubmit it."));
+                    } else {
+                        findings.unavailable.push(format!("Refused: PowerShell argument spelling could not be verified: {error:#}.\nNext action: correct the PowerShell syntax or restore the pinned parser before using a suggested command."));
+                    }
                     unparsed()
                 }
             },
             Self::Bash => match syntax::parse_in(command, directory) {
                 Ok(invocations) => invocations,
                 Err(error) => {
-                    findings.unavailable.push(format!("Refused: shell argument spelling could not be verified: {error:#}.\nNext action: correct the shell syntax or restore the pinned shfmt parser before using a suggested command."));
+                    if let Some(rejected) = error.downcast_ref::<crate::lint_hook::SyntaxRejected>()
+                    {
+                        findings.syntax_refusals.push(format!("Refused: the pinned shfmt parser rejected this command's bash syntax: {rejected}.\nNext action: rewrite the command in bash syntax, without zsh-only expansions such as `${{~name}}` or glob qualifiers, then resubmit it."));
+                    } else {
+                        findings.unavailable.push(format!("Refused: shell argument spelling could not be verified: {error:#}.\nNext action: correct the shell syntax or restore the pinned shfmt parser before using a suggested command."));
+                    }
                     unparsed()
                 }
             },
@@ -664,6 +681,7 @@ pub fn refusal(command: &str, directory: Option<&Path>) -> Result<Option<String>
         .refusals
         .into_iter()
         .chain(findings.wrapper_refusals)
+        .chain(findings.syntax_refusals)
         .chain(findings.unavailable)
         .collect();
     Ok((!messages.is_empty()).then(|| messages.join("\n\n")))
@@ -1146,7 +1164,9 @@ mod tests {
                 "{command}: {report:?}"
             );
             assert!(
-                !report.unavailable.is_empty() || !report.wrapper_refusals.is_empty(),
+                !report.unavailable.is_empty()
+                    || !report.wrapper_refusals.is_empty()
+                    || !report.refusals.is_empty(),
                 "{command}: {report:?}"
             );
         }
@@ -1205,6 +1225,7 @@ mod tests {
                     .unavailable
                     .iter()
                     .chain(&report.wrapper_refusals)
+                    .chain(&report.refusals)
                     .any(|message| message.contains("execution directory")),
                 "{command}: {report:?}"
             );
@@ -1239,6 +1260,7 @@ mod tests {
                 report
                     .unavailable
                     .iter()
+                    .chain(&report.refusals)
                     .any(|message| message.contains("execution directory")),
                 "{prefix}: {report:?}"
             );
@@ -1365,6 +1387,7 @@ mod tests {
                 report
                     .unavailable
                     .iter()
+                    .chain(&report.refusals)
                     .any(|message| message.contains("execution directory")),
                 "{command}: {report:?}"
             );
@@ -1404,6 +1427,7 @@ mod tests {
             report
                 .unavailable
                 .iter()
+                .chain(&report.refusals)
                 .any(|message| message.contains("execution directory")),
             "{command}: {report:?}"
         );
@@ -1471,6 +1495,7 @@ mod tests {
                 || report
                     .unavailable
                     .iter()
+                    .chain(&report.refusals)
                     .any(|message| message.contains("execution directory")),
             "{report:?}"
         );
@@ -1484,6 +1509,7 @@ mod tests {
             report
                 .unavailable
                 .iter()
+                .chain(&report.refusals)
                 .any(|message| message.contains("execution directory")),
             "{report:?}"
         );
@@ -1526,6 +1552,7 @@ mod tests {
                 || report
                     .unavailable
                     .iter()
+                    .chain(&report.refusals)
                     .any(|message| message.contains("execution directory")),
             "{report:?}"
         );

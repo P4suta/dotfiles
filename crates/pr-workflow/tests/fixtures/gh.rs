@@ -187,6 +187,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", states[reads.min(states.len() - 1)]);
                 return Ok(());
             }
+            if let Some(index) = args.iter().position(|arg| arg == "--input")
+                && std::fs::read_to_string(&args[index + 1])?.contains("object(expression")
+            {
+                writeln!(log, "workflows-read")?;
+                println!(
+                    "{}",
+                    std::env::var("GH_FIXTURE_WORKFLOWS").unwrap_or_else(|_| {
+                        r#"{"data":{"repository":{"object":{"entries":[{"name":"ci.yml"}]}}}}"#
+                            .into()
+                    })
+                );
+                return Ok(());
+            }
             let head = current_graph_head(&args, &log_path)?;
             println!("{}", std::env::var(variable).unwrap_or_else(|_| format!("{{\"data\":{{\"repository\":{{\"pullRequest\":{{\"headRefOid\":\"{head}\",\"reviewThreads\":{{\"pageInfo\":{{\"hasNextPage\":false,\"endCursor\":null}},\"nodes\":[]}}}}}}}}}}")));
         } else if variable == "GH_FIXTURE_BRANCH" {

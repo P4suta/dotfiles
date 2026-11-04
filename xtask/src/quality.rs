@@ -32,7 +32,7 @@ const LIGHTWEIGHT_JOBS: &str = r#"  check:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@{checkout}
         with:
           persist-credentials: false
       - name: Report the checked-out source
@@ -52,15 +52,15 @@ const LIGHTWEIGHT_JOBS: &str = r#"  check:
         shell: bash
         run: |
           printf '%s\n' 'The local pre-push gate checks the owner'"'"'s changes, so this job checks only pull requests from others, such as Renovate updates.'
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@{checkout}
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
         with:
           persist-credentials: false
-      - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde
+      - uses: jdx/mise-action@{mise_action}
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
         with:
-          version: v2026.10.19
-          sha256: 3162760f40b6b5f706c60641e4ef5ee7322bc6c54f72fc26a7111b337aa18d9d
+          version: v{mise_version}
+          sha256: {mise_sha256}
           install_args: rust just
           cache: false
       - name: Check tool locks for every host OS
@@ -162,6 +162,47 @@ pub fn push_hook_findings(configuration: &str) -> Result<Vec<String>> {
     })
 }
 
+/// The CI contract with its releases filled in from their sources, so a Renovate update edits one place.
+/// mise comes from the release that every host installs, and each action keeps the full commit pin that the workflow names.
+fn lightweight_jobs(document: &yaml_rust2::Yaml) -> Result<String> {
+    let versions: toml::Table =
+        toml::from_str(include_str!("../../home/.chezmoidata/versions.toml"))?;
+    let mise = &versions["mise"];
+    let version = mise["version"]
+        .as_str()
+        .context("versions.toml names no mise release")?;
+    let digest = mise["sha256"]["linux-x64"]
+        .as_str()
+        .context("versions.toml names no Linux mise digest")?;
+    Ok(LIGHTWEIGHT_JOBS
+        .replace("{checkout}", &action_pin(document, "actions/checkout"))
+        .replace("{mise_action}", &action_pin(document, "jdx/mise-action"))
+        .replace("{mise_version}", version)
+        .replace("{mise_sha256}", digest))
+}
+
+/// The commit that the workflow's first use of `action` pins, or an empty pin that no workflow matches when it names none or a ref other than a full commit.
+fn action_pin(document: &yaml_rust2::Yaml, action: &str) -> String {
+    const COMMIT_HEX_DIGITS: usize = 40;
+    let prefix = format!("{action}@");
+    document["jobs"]
+        .as_hash()
+        .into_iter()
+        .flat_map(|jobs| jobs.values())
+        .filter_map(|job| job["steps"].as_vec())
+        .flatten()
+        .filter_map(|step| step["uses"].as_str())
+        .find_map(|uses| uses.strip_prefix(&prefix))
+        .filter(|commit| {
+            commit.len() == COMMIT_HEX_DIGITS
+                && commit
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+        .unwrap_or_default()
+        .to_owned()
+}
+
 fn lightweight_findings(document: &yaml_rust2::Yaml) -> Result<Vec<String>> {
     let mut found = Vec::new();
     if document["permissions"].as_hash().is_none_or(|permissions| {
@@ -171,7 +212,7 @@ fn lightweight_findings(document: &yaml_rust2::Yaml) -> Result<Vec<String>> {
     }) {
         found.push("CI permissions must remain contents: read and issues: read".into());
     }
-    let expected = yaml_rust2::YamlLoader::load_from_str(LIGHTWEIGHT_JOBS)?
+    let expected = yaml_rust2::YamlLoader::load_from_str(&lightweight_jobs(document)?)?
         .into_iter()
         .next()
         .context("the lightweight CI contract holds a document")?;

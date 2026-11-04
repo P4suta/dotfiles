@@ -79,6 +79,49 @@ fn both_clients_block_english_then_admit_a_japanese_rewrite() -> Result<()> {
 }
 
 #[test]
+fn a_japanese_reply_follows_the_installed_word_rules() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let rules = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/prose");
+    let stop_with_rules = |reply: &str| -> Result<Value> {
+        let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), home.path())
+            .current_dir(home.path())
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .env("PROSE_CONFIG", &rules)
+            .args(["assure", "stop", "--reply-language", "Japanese"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&input("claude", json!(reply), false))?)?;
+        answer(&child.wait_with_output()?)
+    };
+    let narrowed = stop_with_rules(
+        "\u{5909}\u{66f4}\u{3057}\u{305f}\u{306e}\u{306f}\u{3053}\u{308c}\u{3060}\u{3051}\u{3067}\u{3059}\u{3002}",
+    )?;
+    assert_eq!(narrowed["decision"], "block", "{narrowed}");
+    assert!(
+        narrowed["reason"]
+            .as_str()
+            .unwrap()
+            .contains("Dotfiles.Restriction"),
+        "{narrowed}"
+    );
+    assert_eq!(
+        stop_with_rules(
+            "\u{3060}\u{3051}\u{3069}\u{3001}\u{5909}\u{66f4}\u{6e08}\u{307f}\u{3067}\u{3059}\u{3002}\n`\u{3060}\u{3051}`\u{3092}\u{8aad}\u{307f}\u{307e}\u{3059}\u{3002}"
+        )?,
+        json!({}),
+        "the conjunction and code stay allowed"
+    );
+    Ok(())
+}
+
+#[test]
 fn both_clients_end_an_unfixed_continuation_without_blocking_again() -> Result<()> {
     let home = tempfile::tempdir()?;
     for client in ["claude", "codex"] {

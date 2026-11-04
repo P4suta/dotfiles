@@ -15,6 +15,11 @@ mod git_fixture;
 
 const SCHEMA: u32 = 1;
 const GIT_OBJECT_LENGTHS: [usize; 2] = [40, 64];
+/// The tags of the two line kinds that enter a change digest.
+const CHANGE_LINE: u8 = 0;
+const HUNK_START: u8 = 1;
+/// The most commits a live PR head may hold beyond its local branch and base before the source check stops looking.
+const MAX_HELD_COMMITS: usize = 64;
 /// Starts the line that once carried a signed assessment in a PR body, which a published document now refuses.
 pub(super) const PACKET_PREFIX: &str = "<!-- pr-review-assessment:";
 const MAX_ASSESSMENT_BYTES: usize = 16 * 1024;
@@ -286,6 +291,8 @@ struct Binding {
 struct Current {
     root: PathBuf,
     binding: Binding,
+    /// The digest of the change the diff describes, which hunk positions and text blob names don't affect.
+    change_sha256: String,
     tree: String,
     changed: BTreeSet<String>,
     source: Option<platform::source_identity::Binding>,
@@ -352,27 +359,7 @@ fn capture_source(
     let head = object(&root, head)?;
     let base = git(&root, &["merge-base", &object(&root, base)?, &head])?;
     let tree = git(&root, &["rev-parse", &format!("{head}^{{tree}}")])?;
-    let diff = platform::tool::Tool::Git
-        .command()
-        .current_dir(&root)
-        .args([
-            "--no-replace-objects",
-            "--no-pager",
-            "diff",
-            "--binary",
-            "--full-index",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-renames",
-            &base,
-            &head,
-            "--",
-        ])
-        .output()?;
-    ensure!(
-        diff.status.success(),
-        "could not capture the exact review diff"
-    );
+    let diff = exact_diff(&root, &base, &head)?;
     let paths = platform::signed_git::git(
         &root,
         &[
@@ -397,13 +384,67 @@ fn capture_source(
         tree,
         changed,
         source,
+        change_sha256: change_digest(&diff),
         binding: Binding {
             repository: repository.into(),
             base,
             head,
-            diff_sha256: platform::build_inputs::hex(&Sha256::digest(&diff.stdout)),
+            diff_sha256: platform::build_inputs::hex(&Sha256::digest(&diff)),
         },
     })
+}
+
+/// The exact binary diff from `base` to `head`.
+fn exact_diff(root: &Path, base: &str, head: &str) -> Result<Vec<u8>> {
+    let diff = platform::tool::Tool::Git
+        .command()
+        .current_dir(root)
+        .args([
+            "--no-replace-objects",
+            "--no-pager",
+            "diff",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            base,
+            head,
+            "--",
+        ])
+        .output()?;
+    ensure!(
+        diff.status.success(),
+        "could not capture the exact review diff"
+    );
+    Ok(diff.stdout)
+}
+
+/// The change that `head` makes over its merge base with `base`, by the digest that carries an assessment through a base update.
+pub(super) fn change_identity(root: &Path, base: &str, head: &str) -> Result<String> {
+    let head = object(root, head)?;
+    let base = git(root, &["merge-base", &object(root, base)?, &head])?;
+    Ok(change_digest(&exact_diff(root, &base, &head)?))
+}
+
+/// Digests every line of `patch` that `patch_line` classifies as part of the change, and marks where each hunk starts.
+/// Each change line enters with its length, so distinct line sequences never share an input.
+fn change_digest(patch: &[u8]) -> String {
+    use rules::pr_merge_rules::{PatchLine, patch_line};
+    let mut digest = Sha256::new();
+    let mut lines = patch.split_inclusive(|byte| *byte == b'\n').peekable();
+    while let Some(line) = lines.next() {
+        match patch_line(line, lines.peek().copied()) {
+            PatchLine::Change => {
+                digest.update([CHANGE_LINE]);
+                digest.update(line.len().to_le_bytes());
+                digest.update(line);
+            }
+            PatchLine::HunkStart => digest.update([HUNK_START]),
+            PatchLine::TextBlobs => {}
+        }
+    }
+    platform::build_inputs::hex(&digest.finalize())
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -529,16 +570,6 @@ pub(super) fn carry_forward(
         &view.head_ref_oid,
     )?;
     let signer = assessment_signer(github, target, &view.author, &view.source)?;
-    let decision = assessment_change(
-        current.binding == prior.binding,
-        current.binding.diff_sha256 == prior.binding.diff_sha256,
-        current.source.as_ref() == Some(&prior.source) && signer == prior.signer,
-    );
-    match decision {
-        AssessmentChange::Keep | AssessmentChange::Reassess => return Ok(()),
-        AssessmentChange::Resign => {}
-    }
-    let signers = context::signers_for_login(github, signer)?;
     let old = capture_verified(
         github,
         &prior.root,
@@ -546,6 +577,16 @@ pub(super) fn carry_forward(
         &prior.binding.base,
         &prior.binding.head,
     )?;
+    let decision = assessment_change(
+        current.binding == prior.binding,
+        current.change_sha256 == old.change_sha256,
+        current.source.as_ref() == Some(&prior.source) && signer == prior.signer,
+    );
+    match decision {
+        AssessmentChange::Keep | AssessmentChange::Reassess => return Ok(()),
+        AssessmentChange::Resign => {}
+    }
+    let signers = context::signers_for_login(github, signer)?;
     let packet = evidence::object(&target.repo, &prior.object)?;
     let mut statement = authenticate(&old, &packet, signers.path(), signer)?;
     statement.binding = current.binding;
@@ -1609,7 +1650,7 @@ pub(super) fn live_binding_at(
             .context("actual PR head commit is missing")?,
         signer,
     )?;
-    validate_live_source(&checked, &live.source)?;
+    validate_live_source(&checked, &live.source, None)?;
     labels(&checked, &live.labels)?;
     Ok(checked)
 }
@@ -1649,7 +1690,12 @@ pub(super) fn qualified_head(checked: &Checked, head: &str) -> Result<String> {
     }
 }
 
-pub(super) fn validate_live_source(checked: &Checked, source: &super::LiveSource) -> Result<()> {
+/// `replaced` is the check of the head that an update merge replaced, when the command pushed one.
+pub(super) fn validate_live_source(
+    checked: &Checked,
+    source: &super::LiveSource,
+    replaced: Option<&Checked>,
+) -> Result<()> {
     let supplied = source.head_repository.is_some()
         || source.head_repository_owner.is_some()
         || source.is_cross_repository.is_some();
@@ -1675,11 +1721,114 @@ pub(super) fn validate_live_source(checked: &Checked, source: &super::LiveSource
         .as_deref()
         .context("actual PR source branch missing")?;
     let branch = platform::source_identity::head_branch(&checked.root, &checked.source, branch)?;
-    ensure!(
-        object(&checked.root, &format!("refs/heads/{branch}"))? == checked.binding.head,
-        "actual PR head branch differs from the locally assessed source"
-    );
+    let live = &checked.binding.head;
+    let Some(local) = local_branch(&checked.root, &branch)? else {
+        return Err(platform::refusal::Refusal::new(
+            "pr.source",
+            format!(
+                "this checkout has no local branch {branch} to compare the PR head {live} with; run the command from the checkout that holds the branch"
+            ),
+            platform::refusal::command(&["git", "worktree", "list"]),
+        )
+        .evidence(format!(
+            "refs/heads/{branch} is missing in {}",
+            checked.root.display()
+        ))
+        .into());
+    };
+    let at_branch = local == *live;
+    let (held, complete) = if at_branch {
+        (Vec::new(), true)
+    } else {
+        held_commits(&checked.root, &local, &checked.binding)?
+    };
+    if rules::pr_merge_rules::live_head(at_branch, &held, complete)
+        == rules::pr_merge_rules::LiveHead::Diverged
+    {
+        let mut refusal = platform::refusal::Refusal::new(
+            "pr.source",
+            format!(
+                "the PR head {live} is neither the local branch {branch} at {local} nor a base update merge of it, so it holds work that this checkout didn't assess"
+            ),
+            platform::refusal::command(&["git", "log", "--oneline", &format!("{local}..{live}")]),
+        );
+        if let Some(replaced) = replaced.filter(|replaced| replaced.binding.head != *live) {
+            refusal = refusal.evidence(format!(
+                "the update merge moved the PR head from {} to {live}",
+                replaced.binding.head
+            ));
+        }
+        return Err(refusal.into());
+    }
     Ok(())
+}
+
+/// The commit of the local branch `branch`, or `None` when this checkout has no such branch.
+fn local_branch(root: &Path, branch: &str) -> Result<Option<String>> {
+    let reference = format!("refs/heads/{branch}");
+    let output = platform::tool::Tool::Git
+        .command()
+        .current_dir(root)
+        .args([
+            "--no-replace-objects",
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &reference,
+        ])
+        .output()?;
+    match output.status.code() {
+        Some(0) => object(root, &reference).map(Some),
+        Some(1) => Ok(None),
+        _ => anyhow::bail!(
+            "could not read {reference}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+    }
+}
+
+/// The commits that the bound head holds beyond the `local` branch head and the bound base, and whether the list is complete.
+fn held_commits(
+    root: &Path,
+    local: &str,
+    binding: &Binding,
+) -> Result<(Vec<rules::pr_merge_rules::HeldCommit>, bool)> {
+    let listed = git(
+        root,
+        &[
+            "rev-list",
+            "--parents",
+            &format!("--max-count={}", MAX_HELD_COMMITS + 1),
+            &binding.head,
+            &format!("^{local}"),
+            &format!("^{}", binding.base),
+            "--",
+        ],
+    )?;
+    let commits: Vec<Vec<&str>> = listed
+        .lines()
+        .map(|line| line.split_whitespace().collect())
+        .collect();
+    let names: BTreeSet<&str> = commits
+        .iter()
+        .filter_map(|commit| commit.first().copied())
+        .collect();
+    let mut held = Vec::new();
+    for commit in commits.iter().take(MAX_HELD_COMMITS) {
+        let parents = commit.get(1..).unwrap_or_default();
+        let merges_base = match parents {
+            [_, second] => platform::signed_git::is_ancestor(root, second, &binding.base)?,
+            _ => false,
+        };
+        held.push(rules::pr_merge_rules::HeldCommit {
+            merge: parents.len() == 2,
+            follows_branch: parents
+                .first()
+                .is_some_and(|first| *first == local || names.contains(first)),
+            merges_base,
+        });
+    }
+    Ok((held, commits.len() <= MAX_HELD_COMMITS))
 }
 
 pub(super) fn admit_ready(

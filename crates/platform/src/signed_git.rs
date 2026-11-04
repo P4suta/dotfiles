@@ -28,6 +28,35 @@ pub fn git(root: &Path, arguments: &[&str], input: Option<&[u8]>) -> Result<Stri
     output(root, arguments, input, true)
 }
 
+/// Whether `descendant` contains `ancestor`.
+///
+/// # Errors
+/// Returns an error when Git fails instead of answering, such as for an unknown object.
+pub fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> Result<bool> {
+    use rules::ancestry_rules::{Ancestry, ancestry};
+    let output = Tool::Git
+        .command()
+        .current_dir(root)
+        .args([
+            "--no-replace-objects",
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            descendant,
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .context("start Git to compare commits")?;
+    match ancestry(output.status.code()) {
+        Ancestry::Ancestor => Ok(true),
+        Ancestry::NotAncestor => Ok(false),
+        Ancestry::Failed => anyhow::bail!(
+            "Git could not compare {ancestor} with {descendant}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+    }
+}
+
 /// # Errors
 /// Returns an error if Git can't read the actual transaction index.
 pub fn index_git(root: &Path, arguments: &[&str]) -> Result<String> {

@@ -1,11 +1,12 @@
 ---
 status: amended
-changed_by: [keep-independent-work-reasons-owner-local.md]
+changed_by: [keep-independent-work-reasons-owner-local.md, carry-assessments-through-base-update-merges.md]
 date: 2026-10-22
 ---
 # Make one stack the unit of open work and merge it through a merge queue
 
 The [local-reason decision](keep-independent-work-reasons-owner-local.md) amends the requirement to publish independence reasons.
+The [base-update carry decision](carry-assessments-through-base-update-merges.md) defines when a restack or base update keeps a member's diff.
 
 ## Context
 

@@ -138,6 +138,12 @@ fn refuse_catalog_drift(source: &Path, user: &Path, binary: &Path) -> Result<()>
             .to_string()
             .contains("installed skill catalog differs")
     );
+    let unmanaged = user.join(".agents/skills/unmanaged");
+    fs::create_dir_all(&unmanaged)?;
+    fs::write(
+        unmanaged.join("SKILL.md"),
+        "---\nname: unmanaged\ndescription: Inspect an unmanaged input.\n---\n# Extra\nKeep this owner skill.\n",
+    )?;
     let mut applied = false;
     let error = pr_workflow::deploy(source, binary, user, |_| {
         applied = true;
@@ -148,8 +154,32 @@ fn refuse_catalog_drift(source: &Path, user: &Path, binary: &Path) -> Result<()>
         error.to_string(),
         "unrelated installed managed skills have changed; preserve and review them before installation"
     );
+    let refusal = error
+        .downcast_ref::<platform::refusal::Refusal>()
+        .expect("a catalog drift refuses with the changed skills");
+    assert_eq!(refusal.rule, "pr.managed-skills");
+    let skills = user.join(".agents/skills");
+    assert_eq!(
+        refusal.next.as_deref(),
+        Some(
+            platform::refusal::command(&[
+                "chezmoi",
+                "diff",
+                skills.join("example").to_str().expect("UTF-8 fixture path"),
+            ])
+            .as_str()
+        )
+    );
+    let evidence = refusal.evidence.join("\n");
+    assert!(
+        evidence.contains("example: changed since its approved revision")
+            && evidence.contains("unmanaged: added outside the approved catalog")
+            && !evidence.contains("pull-request:"),
+        "{evidence}"
+    );
     assert!(!applied);
     assert_eq!(fs::read(&manifest)?, approved_bytes);
+    fs::remove_dir_all(&unmanaged)?;
     Ok(())
 }
 

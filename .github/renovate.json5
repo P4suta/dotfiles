@@ -64,5 +64,12 @@
       automerge: false,
       labels: ['breaking-change'],
     },
+    {
+      // Quint fetches the Apalache release in its DEFAULT_APALACHE_VERSION_TAG, and the image bundles that release by digest, so a person moves both together.
+      matchPackageNames: ['@informalsystems/quint'],
+      groupName: 'Quint',
+      automerge: false,
+      prBodyNotes: ['Set `APALACHE_VERSION` and `APALACHE_SHA256` in `xtask/proofs/quint/Dockerfile` to the Apalache release that this Quint names in `DEFAULT_APALACHE_VERSION_TAG`.'],
+    },
   ],
 }

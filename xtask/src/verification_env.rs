@@ -233,7 +233,7 @@ fn kani_component(output: Result<Output>) -> Component {
 fn apalache_component(output: Result<Output>) -> Component {
     component_with(
         "Apalache",
-        crate::quint::APALACHE_VERSION,
+        crate::quint::apalache_version(),
         output,
         |text, expected| text == expected,
     )
@@ -283,7 +283,7 @@ fn component_result(tool: &str, expected: &str, result: Result<String>) -> Compo
 fn tlc_component(output: Result<Output>) -> Component {
     let expected = format!(
         "TLC in the Apalache {} bundle",
-        crate::quint::APALACHE_VERSION
+        crate::quint::apalache_version()
     );
     let result = output.and_then(|output| {
         let text = String::from_utf8(output.stdout)?;
@@ -376,7 +376,7 @@ fn apalache_jar() -> String {
     format!(
         "{}/apalache-dist-{}/apalache/lib/apalache.jar",
         crate::quint::QUINT_HOME,
-        crate::quint::APALACHE_VERSION
+        crate::quint::apalache_version()
     )
 }
 
@@ -460,7 +460,7 @@ fn doctor_backend(root: &Path, backend: Backend) -> Environment {
                     component("Java", "21.", command(&["java", "--version"])),
                     component(
                         "Quint",
-                        crate::quint::QUINT_VERSION,
+                        crate::quint::quint_version(),
                         command(&["quint", "--version"]),
                     ),
                     apalache_component(command(&["java", JAVA_HEAP, "-jar", &jar, "version"])),
@@ -788,20 +788,22 @@ mod tests {
 
     #[test]
     fn apalache_metadata_requires_its_exact_pinned_version_response() {
+        let version = crate::quint::apalache_version();
+        let exact = format!("{version}\n");
         for text in [
-            "0.62.1\n",
-            "0.62.10",
-            "0.62.1-SNAPSHOT",
-            "Usage\n0.62.1",
-            "",
+            exact.clone(),
+            format!("{version}0"),
+            format!("{version}-SNAPSHOT"),
+            format!("Usage\n{version}"),
+            String::new(),
         ] {
             let result = apalache_component(Ok(Output {
                 status: std::process::ExitStatus::default(),
                 stdout: text.as_bytes().to_vec(),
                 stderr: Vec::new(),
             }));
-            assert_eq!(result.actual.is_some(), text == "0.62.1\n");
-            assert_eq!(result.failure.is_none(), text == "0.62.1\n");
+            assert_eq!(result.actual.is_some(), text == exact);
+            assert_eq!(result.failure.is_none(), text == exact);
         }
     }
 
@@ -883,12 +885,13 @@ mod tests {
         ] {
             assert!(version_matches(output, expected));
         }
+        let embedded_quint = format!("14{}", crate::quint::quint_version());
         for (output, expected) in [
             (
                 "Kani Rust Verifier 0.68.00",
                 crate::skill_proofs::KANI_VERSION,
             ),
-            ("140.33.0", crate::quint::QUINT_VERSION),
+            (embedded_quint.as_str(), crate::quint::quint_version()),
             ("v22.wrong", "v22."),
             ("TLC20", "TLC2"),
             ("", crate::lean::LEAN_VERSION),
@@ -901,7 +904,7 @@ mod tests {
     fn an_unavailable_component_cannot_be_ready_or_become_a_semantic_counterexample() {
         let missing = component(
             "Quint",
-            crate::quint::QUINT_VERSION,
+            crate::quint::quint_version(),
             Err(anyhow::anyhow!("cannot start")),
         );
         assert!(missing.actual.is_none());

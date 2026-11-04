@@ -461,6 +461,24 @@ fn policy_refusals_with(
             unavailable: vec![format!("{error:#}")],
             ..crate::legacy::Findings::default()
         });
+    findings.extend(inspection_blocks(legacy, bundle, &session));
+    Ok(findings)
+}
+
+/// Each finding of the command inspection under its rule, with an inspection that couldn't finish as a hook failure.
+fn inspection_blocks(
+    legacy: crate::legacy::Findings,
+    bundle: impl FnOnce() -> Result<prose::Bundle>,
+    session: &str,
+) -> Vec<Blocked> {
+    use skill_ops::incident_rules::Source::GateRefusal;
+    let blocked = |rule: &'static str, source, message: String| Blocked {
+        rule,
+        source,
+        session: session.to_owned(),
+        message,
+    };
+    let mut findings = Vec::new();
     for message in github::refusals(&legacy.bodies, bundle) {
         findings.push(blocked("hook.prose", GateRefusal, message));
     }
@@ -469,6 +487,9 @@ fn policy_refusals_with(
     }
     for message in legacy.wrapper_refusals {
         findings.push(blocked("hook.wrapper", GateRefusal, message));
+    }
+    for message in legacy.syntax_refusals {
+        findings.push(blocked("hook.syntax", GateRefusal, message));
     }
     for message in crate::lint_hook::scripts(&legacy.scripts) {
         findings.push(blocked("hook.lint", GateRefusal, message));
@@ -480,7 +501,7 @@ fn policy_refusals_with(
             format!("Refused: command policy inspection could not finish: {message}.\nNext action: correct the script's path, permissions, encoding, or inspection limit before resubmitting."),
         ));
     }
-    Ok(findings)
+    findings
 }
 
 #[cfg(test)]
@@ -910,12 +931,13 @@ mod tests {
             "tool_input":{"command":["pwsh","-NoProfile","-Command",format!("Set-Location -LiteralPath '{target}'; bash check.sh")]}
         });
         let findings = policy_refusals_with(&event.to_string(), test_bundle)?;
+        assert!(findings.iter().any(
+            |finding| finding.rule == LEGACY && finding.message.contains("execution directory")
+        ));
         assert!(
-            findings.iter().any(|finding| finding.rule == INSPECTION
-                && finding.message.contains("execution directory"))
+            !findings.iter().any(|finding| finding.rule == INSPECTION),
+            "an unresolved directory refuses the command without a hook failure"
         );
-        assert!(findings.iter().any(|finding| finding.rule == "hook.lint"
-            && finding.message.contains("execution directory")));
         assert!(
             !findings
                 .iter()
@@ -1030,10 +1052,10 @@ mod tests {
             let findings = policy_refusals_with(&event.to_string(), test_bundle)?;
             assert!(
                 findings.iter().any(|finding| {
-                    finding.rule == "hook.lint"
+                    finding.rule == LEGACY
                         && finding
                             .message
-                            .contains("known absolute execution directory")
+                            .contains("cannot resolve the execution directory")
                 }),
                 "{event}"
             );
@@ -1574,6 +1596,52 @@ mod tests {
             );
         }
         assert!(!directory.path().join("output.txt").exists());
+    }
+
+    #[test]
+    fn a_command_the_parser_rejects_is_refused_without_a_hook_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let event = json!({"tool_name": "Bash", "cwd": directory.path(), "tool_input": {"command": "for f in ${~glob}; do rg -c x $f; done"}}).to_string();
+        let findings = policy_refusals(&event).unwrap();
+        let messages = findings
+            .iter()
+            .map(|finding| format!("{}: {}", finding.rule, finding.message))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            findings.iter().any(|finding| finding.rule == "hook.syntax"
+                && finding
+                    .message
+                    .contains("rejected this command's bash syntax")),
+            "{messages}"
+        );
+        assert!(
+            !findings.iter().any(|finding| finding.rule == INSPECTION),
+            "{messages}"
+        );
+    }
+
+    #[test]
+    fn a_relative_script_from_an_unknown_directory_is_refused_without_a_hook_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let event = json!({"tool_name": "Bash", "cwd": directory.path(), "tool_input": {"command": "cd \"$WORK\" && ./probe"}}).to_string();
+        let findings = policy_refusals(&event).unwrap();
+        let messages = findings
+            .iter()
+            .map(|finding| format!("{}: {}", finding.rule, finding.message))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            findings.iter().any(|finding| finding.rule == LEGACY
+                && finding.message.contains(
+                    "cannot resolve the execution directory of the relative script ./probe"
+                )),
+            "{messages}"
+        );
+        assert!(
+            !findings.iter().any(|finding| finding.rule == INSPECTION),
+            "{messages}"
+        );
     }
 
     #[test]

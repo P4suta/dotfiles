@@ -354,9 +354,32 @@ fn a_repository_with_its_own_lefthook_configuration_has_its_mise_configuration_t
     let log = host.scope.path().join("mise.log");
     let configuration = host.repository().join("mise.toml");
     fs::write(&configuration, "[tools]\n")?;
+    let idiomatic = host.repository().join("global.json");
+    fs::write(&idiomatic, "{}\n")?;
+    let trusted_already = host.repository().join(".tool-versions");
+    fs::write(&trusted_already, "\n")?;
+    let parent = host.scope.path().join("mise.toml");
+    fs::write(&parent, "[tools]\n")?;
+    let report = host.scope.path().join("trust-report.txt");
+    let (configuration_line, idiomatic_line, kept_line, parent_line) = (
+        configuration.display(),
+        idiomatic.display(),
+        trusted_already.display(),
+        parent.display(),
+    );
+    // mise names a configuration under the home directory with a leading `~`, as the first report does.
+    fs::write(
+        &report,
+        format!(
+            "~/../repository/mise.toml: untrusted\n{kept_line}: trusted\n{parent_line}: untrusted\n---\n\
+             {idiomatic_line}: untrusted\n{configuration_line}: trusted\n{kept_line}: trusted\n{parent_line}: untrusted\n---\n\
+             {idiomatic_line}: trusted\n{configuration_line}: trusted\n{kept_line}: trusted\n{parent_line}: untrusted\n"
+        ),
+    )?;
     let hook = || {
         host.command(env!("CARGO_BIN_EXE_dotfiles"))
             .env("MISE_FIXTURE_LOG", &log)
+            .env("MISE_FIXTURE_TRUST_REPORT", &report)
             .args(["hook", "pre-commit"])
             .output()
     };
@@ -368,17 +391,33 @@ fn a_repository_with_its_own_lefthook_configuration_has_its_mise_configuration_t
     fs::write(host.repository().join("lefthook.yml"), "pre-commit: {}\n")?;
     assert_eq!(refusal(&hook()?).rule, "hook.lefthook");
     let recorded = fs::read_to_string(&log)?;
-    let trusted: Vec<_> = recorded
+    let calls: Vec<_> = recorded
         .lines()
         .map(|line| {
-            line.strip_prefix("trust --quiet ")
-                .map(|path| dotfiles::canonical(Path::new(path)).ok())
+            let (verb, path) = if let Some(directory) = line
+                .strip_prefix("--cd ")
+                .and_then(|rest| rest.strip_suffix(" trust --show"))
+            {
+                ("show", directory)
+            } else if let Some(path) = line.strip_prefix("trust --quiet ") {
+                ("trust", path)
+            } else {
+                ("other", line)
+            };
+            (verb, dotfiles::canonical(Path::new(path)).ok())
         })
         .collect();
+    let root = Some(dotfiles::canonical(&host.repository())?);
     assert_eq!(
-        trusted,
-        [Some(Some(dotfiles::canonical(&configuration)?))],
-        "{recorded}"
+        calls,
+        [
+            ("show", root.clone()),
+            ("trust", Some(dotfiles::canonical(&configuration)?)),
+            ("show", root.clone()),
+            ("trust", Some(dotfiles::canonical(&idiomatic)?)),
+            ("show", root),
+        ],
+        "the hook asks again after each trust, trusts the idiomatic version file the trusted mise.toml reveals, and trusts nothing in a parent: {recorded}"
     );
     Ok(())
 }

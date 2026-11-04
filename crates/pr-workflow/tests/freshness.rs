@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use platform::build_inputs::{CRATES, content_hash, inputs};
 use platform::freshness::{
     BUILD_IDENTITY_ARGUMENT, Built, DELEGATED_VARIABLE, Embedded, SOURCE_VARIABLE, embedded,
-    lagging, locate, record_installation, verify, verify_artifact,
+    lagging, locate, record_installation, reinstall_lagging_with, verify, verify_artifact,
+    verify_in,
 };
 use platform::refusal::Refusal;
 use platform::stale_rules::{Freshness, Origin, delegates, freshness, origin, reinstalls, runs};
@@ -385,6 +386,125 @@ fn a_recorded_installation_is_rebuilt_only_after_its_sources_change() -> Result<
     );
     record_fixture(home.path(), checkout.path(), Built::SkillOps)?;
     assert_eq!(lagging(home.path(), checkout.path())?, Vec::<Built>::new());
+    Ok(())
+}
+
+fn refused_as_stale(result: Result<()>) -> bool {
+    result
+        .err()
+        .and_then(|error| {
+            error
+                .downcast_ref::<Refusal>()
+                .map(|refusal| refusal.rule.clone())
+        })
+        .is_some_and(|rule| rule == "tool.stale")
+}
+
+#[test]
+fn a_failed_reinstall_keeps_the_previous_build_running_until_its_sources_change_again() -> Result<()>
+{
+    let home = tempfile::tempdir()?;
+    let checkout = fixture("pub fn rule() {}")?;
+    let installed = built_from(checkout.path())?;
+    record_fixture(home.path(), checkout.path(), Built::PrWorkflow)?;
+    fs::write(
+        checkout.path().join(LIBRARY),
+        "pub fn rule() { /* merged */ }",
+    )?;
+    assert!(refused_as_stale(verify_in(
+        Some(home.path()),
+        Built::PrWorkflow,
+        &installed,
+        None,
+        Some(checkout.path())
+    )));
+    let error = reinstall_lagging_with(home.path(), checkout.path(), |_| {
+        anyhow::bail!("unrelated installed managed skills have changed")
+    })
+    .unwrap_err();
+    assert!(
+        format!("{error:#}")
+            .contains("pr-workflow: unrelated installed managed skills have changed"),
+        "{error:#}"
+    );
+    verify_in(
+        Some(home.path()),
+        Built::PrWorkflow,
+        &installed,
+        None,
+        Some(checkout.path()),
+    )?;
+    let mut other_build = built_from(checkout.path())?;
+    other_build.hash = "0".repeat(64);
+    assert!(refused_as_stale(verify_in(
+        Some(home.path()),
+        Built::PrWorkflow,
+        &other_build,
+        None,
+        Some(checkout.path())
+    )));
+    let other_checkout = fixture("pub fn rule() { /* merged */ }")?;
+    assert!(refused_as_stale(verify_in(
+        Some(home.path()),
+        Built::PrWorkflow,
+        &installed,
+        Some(other_checkout.path()),
+        None
+    )));
+    fs::write(
+        checkout.path().join(LIBRARY),
+        "pub fn rule() { /* merged twice */ }",
+    )?;
+    assert!(refused_as_stale(verify_in(
+        Some(home.path()),
+        Built::PrWorkflow,
+        &installed,
+        None,
+        Some(checkout.path())
+    )));
+    Ok(())
+}
+
+#[test]
+fn a_failed_reinstall_still_reinstalls_every_other_lagging_tool() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let checkout = fixture("pub fn rule() {}")?;
+    let installed = built_from(checkout.path())?;
+    for built in [Built::Coderabbit, Built::PrWorkflow] {
+        record_fixture(home.path(), checkout.path(), built)?;
+    }
+    fs::write(
+        checkout.path().join(LIBRARY),
+        "pub fn rule() { /* merged */ }",
+    )?;
+    let mut attempted = Vec::new();
+    let error = reinstall_lagging_with(home.path(), checkout.path(), |built| {
+        attempted.push(built);
+        if built == Built::PrWorkflow {
+            anyhow::bail!("the PR skill catalog refused installation");
+        }
+        Ok(())
+    })
+    .unwrap_err();
+    assert_eq!(attempted, [Built::Coderabbit, Built::PrWorkflow]);
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("pr-workflow: the PR skill catalog refused installation")
+            && !message.contains("coderabbit:"),
+        "{message}"
+    );
+    let deferred = home.path().join(".local/state/dotfiles/deferred");
+    assert!(deferred.join(Built::PrWorkflow.binary()).is_file());
+    assert!(!deferred.join(Built::Coderabbit.binary()).exists());
+    reinstall_lagging_with(home.path(), checkout.path(), |_| Ok(()))?;
+    assert!(!deferred.join(Built::PrWorkflow.binary()).exists());
+    assert!(refused_as_stale(verify_in(
+        Some(home.path()),
+        Built::PrWorkflow,
+        &installed,
+        None,
+        Some(checkout.path())
+    )));
     Ok(())
 }
 

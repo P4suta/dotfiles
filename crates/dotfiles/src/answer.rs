@@ -36,6 +36,7 @@ const PLAN_CLOSE: &str = "</proposed_plan>";
 const MIN_FENCE_WIDTH: usize = 3;
 const MAX_FENCE_INDENT: usize = 3;
 const LEAN_TOOLCHAIN: &str = include_str!("../../../specs/lean/lean-toolchain");
+pub const EVIDENCE_FORMAT: &str = "The checked-arguments skill describes the evidence file in references/evidence-format.md, installed at ~/.agents/skills/checked-arguments/references/evidence-format.md.";
 
 /// Read the same release pin as the proof package.
 ///
@@ -54,11 +55,13 @@ pub enum Action {
     /// Start a new request from a `UserPromptSubmit` hook payload on standard input.
     Begin,
     /// Check an answer draft, then bind its evidence to this request.
+    #[command(after_help = EVIDENCE_FORMAT)]
     Check {
         #[arg(long)]
         session: String,
         #[arg(long)]
         draft: PathBuf,
+        /// The evidence JSON for the draft's claims.
         #[arg(long)]
         evidence: PathBuf,
     },
@@ -665,7 +668,8 @@ impl ObservationTool {
                 Some("status" | "diff" | "show" | "log" | "rev-parse" | "--version")
             ),
             Self::Gh => {
-                matches!(arguments, [group, verb, ..] if matches!(group.as_str(), "pr" | "issue" | "repo") && verb == "view")
+                let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+                rules::gh_read_rules::verdict(&arguments) == rules::gh_read_rules::Verdict::Admit
             }
             Self::Cargo => matches!(
                 arguments.first().map(String::as_str),
@@ -883,6 +887,12 @@ fn check_at(home: &Path, session: &str, draft: &Path, evidence: &Path, cwd: &Pat
             .map(|hit| dotguard::lang::evidence("draft", hit))
             .collect::<Vec<_>>()
             .join("\n")
+    );
+    let words = crate::assure::japanese_word_reasons(&draft);
+    ensure!(
+        words.is_empty(),
+        "answer draft breaks the Japanese word rules, which the Stop hook also applies:\n{}",
+        words.join("\n")
     );
     let Plan {
         document,
@@ -1115,7 +1125,8 @@ pub fn execute(action: Action) -> Result<()> {
             &session,
             &draft,
             &evidence,
-        ),
+        )
+        .inspect_err(|_| eprintln!("{EVIDENCE_FORMAT}")),
         Action::Observe {
             session,
             tool,
@@ -1617,6 +1628,68 @@ mod tests {
                 .is_err()
         );
         assert!(ObservationTool::Just.tool(&["release".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn github_observations_admit_reads_and_refuse_every_write_form() {
+        let admitted = |arguments: &[&str]| {
+            ObservationTool::Gh
+                .tool(
+                    &arguments
+                        .iter()
+                        .map(|argument| (*argument).to_owned())
+                        .collect::<Vec<_>>(),
+                )
+                .is_ok()
+        };
+        for read in [
+            &["run", "view", "41505470980", "--json", "conclusion"][..],
+            &["run", "list", "--limit", "5"],
+            &["pr", "checks", "552"],
+            &["variable", "list"],
+            &["release", "view", "v1.0.0"],
+            &["pr", "view", "17"],
+            &["api", "repos/P4suta/dotfiles/actions/runs/1"],
+            &["api", "-X", "GET", "repos/P4suta/dotfiles/pulls"],
+            &[
+                "api",
+                "--method=get",
+                "repos/P4suta/dotfiles/pulls",
+                "--jq",
+                ".[].number",
+            ],
+            &[
+                "api",
+                "-H",
+                "Accept: application/vnd.github+json",
+                "rate_limit",
+            ],
+        ] {
+            assert!(admitted(read), "{read:?}");
+        }
+        for write in [
+            &["api", "-X", "POST", "repos/o/r/issues"][..],
+            &["api", "--method", "DELETE", "repos/o/r/git/refs/heads/x"],
+            &["api", "--method=PATCH", "repos/o/r"],
+            &["api", "-XPUT", "repos/o/r/topics"],
+            &["api", "-iXPOST", "repos/o/r/issues"],
+            &["api", "-X"],
+            &["api", "repos/o/r/issues", "-f", "title=x"],
+            &["api", "repos/o/r/issues", "-Fbody=@file"],
+            &["api", "repos/o/r/issues", "-if", "title=x"],
+            &["api", "repos/o/r/issues", "--field", "title=x"],
+            &["api", "repos/o/r/issues", "--raw-field=title=x"],
+            &["api", "repos/o/r/issues", "--input", "body.json"],
+            &["api", "graphql", "-f", "query=mutation{x}"],
+            &["pr", "merge", "17"],
+            &["run", "rerun", "1"],
+            &["variable", "set", "NAME"],
+            &["release", "create", "v1"],
+            &["issue", "comment", "1"],
+            &["auth", "token"],
+        ] {
+            assert!(!admitted(write), "{write:?}");
+        }
     }
 
     #[test]
