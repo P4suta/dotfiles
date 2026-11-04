@@ -21,7 +21,7 @@ Keep Usage-based reviews, CodeRabbit Agent, and CodeRabbit Security Scan off.
 Never start a trial, turn on paid usage, change the subscription, or add seats to get around review limits.
 Check carryover settings after a trial or plan change, and keep automatic seat assignment off for a single-user account.
 Keep the dotfiles CLI guard installed.
-It enforces the local CLI budget and inactive paid usage, and `coderabbit --guard-status --json` reports its capacity and pause scope.
+It enforces the local CLI limits and refuses paid reviews, and `coderabbit --guard-status --json` reports its capacity and pause scope.
 The guard leaves GitHub automatic reviews, IDE extensions, browser tasks, and unmanaged clients uncoordinated.
 Never bypass the guard or reset its ledger when capacity runs out or verification fails.
 

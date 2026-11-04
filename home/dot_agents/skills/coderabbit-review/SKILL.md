@@ -26,7 +26,7 @@ Read `coderabbit --guard-status --json` first: `reviews.cli` and `reviews.pr` st
 Run the project's relevant checks before requesting a service review.
 Check `coderabbit --version` and `coderabbit auth status`, and read `coderabbit review --help` when choosing options.
 Use only the dotfiles-installed `coderabbit` or `cr` guard, including inside `mise x`.
-The guard enforces machine-local review policy, verified allowance, and inactive paid usage, and runs its own preflight.
+The guard enforces machine-local review policy and local review limits, refuses paid reviews, and runs its own preflight.
 Exit code 75 means a guard refusal: report it and continue independent work without another service attempt.
 Never invoke `coderabbit-vendor`, install another CLI, edit or delete guard state, or raise limits to get around a refusal.
 Never schedule an automatic retry for the end of a window.
@@ -52,7 +52,7 @@ Use the default CLI review for the selected scope.
 
 Never pass `--use-credits`, turn on an add-on, or confirm a priced review.
 Treat rate limits and `action_required` as a stop for service analysis.
-Review a local checkout instead of using `--remote`, so the guard can check the allowance for the exact repository.
+Review a local checkout instead of using `--remote`, because the guard refuses remote scopes.
 Report authentication errors, failed reviews, and `review_skipped` as those outcomes, never as a clean review.
 
 Test each finding on the current code before changing anything.

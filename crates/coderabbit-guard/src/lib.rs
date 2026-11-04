@@ -22,7 +22,7 @@ use std::path::Path;
 
 use crate::review_rules::{
     Budget, Event, Guard, Stage, cli_reviews_paused, cooldown_complete, pause_scope,
-    service_access, within_budget, within_limits,
+    service_access, within_limits,
 };
 pub use crate::review_rules::{
     DAILY_LIMIT, DAY_MS, HOUR_MS, HOURLY_LIMIT, PROBE_DAILY_LIMIT, PROBE_GAP_MS, PauseScope,
@@ -92,56 +92,6 @@ pub fn check_budget(records: &[u64], now: u64) -> Result<()> {
             "local CodeRabbit limit reached ({HOURLY_LIMIT}/rolling hour, {DAILY_LIMIT}/rolling day); wait for history to leave the window and recheck usage without bypassing the guard"
         ),
     }
-}
-
-/// Checks a `CodeRabbit` usage response for the remaining budget on the guarded organization with paid usage inactive.
-///
-/// # Errors
-///
-/// Returns an error when a line holds something other than JSON, when the response lacks exactly one completed usage event, or when that event names another organization.
-/// Returns an error when the remaining budget runs out or falls short, or when paid review usage stays active.
-pub fn check_usage(text: &str, organization: &str) -> Result<()> {
-    let events: Vec<serde_json::Value> = text
-        .lines()
-        .map(serde_json::from_str)
-        .collect::<std::result::Result<_, _>>()
-        .context("invalid CodeRabbit usage response")?;
-    let mut completed = events
-        .iter()
-        .filter(|event| event["phase"] == "usage" && event["status"] == "complete");
-    let usage = completed
-        .next()
-        .context("the CodeRabbit limit is unavailable; review refused")?;
-    ensure!(
-        completed.next().is_none(),
-        "ambiguous usage response; review refused"
-    );
-    ensure!(
-        usage["type"] == "status" && usage["organization"] == organization,
-        "CodeRabbit organization does not match the guarded account"
-    );
-    let included = &usage["includedReviews"];
-    let limit = included["limit"]
-        .as_u64()
-        .context("missing included review limit")?;
-    let remaining = included["remaining"]
-        .as_u64()
-        .context("missing review limit")?;
-    ensure!(
-        included["state"] == "available"
-            && included["rollingWindowMs"] == HOUR_MS
-            && within_budget(limit, remaining),
-        "insufficient remaining budget; consumption is limited to floor(limit * 0.9 * 0.8)"
-    );
-    let billing = &usage["billingPeriod"];
-    ensure!(
-        billing["state"] == "available"
-            && billing["usageBillingStatus"] == "inactive"
-            && billing["scope"] == "user"
-            && billing["user"] == organization,
-        "paid review usage must be inactive; review refused"
-    );
-    Ok(())
 }
 
 /// Reads the review directory from a `--dir` or `--dir=` argument.
@@ -270,14 +220,12 @@ pub fn usage_query(args: &[String]) -> bool {
 ///
 /// # Errors
 ///
-/// Returns an error when locking or reading the ledger fails, when `pause` fails or pauses CLI use, when the budget refuses the review, or any later error of [`execute_reserved`].
+/// Returns an error when locking or reading the ledger fails, when `pause` fails or pauses CLI use, or when the local limits refuse the review.
+/// Returns the error of `review`.
 pub fn execute_admitted(
     pause: impl FnOnce() -> Result<PauseScope>,
     ledger: &Path,
-    probes: &Path,
     now: u64,
-    organization: &str,
-    usage: impl FnOnce() -> Result<String>,
     review: impl FnOnce() -> Result<i32>,
 ) -> Result<i32> {
     let (mut file, records) = lock_ledger(ledger)?;
@@ -290,7 +238,6 @@ pub fn execute_admitted(
     );
     check_budget(&records, now)?;
     record(&mut file, now)?;
-    check_usage(&execute_probe(probes, now, usage)?, organization)?;
     review()
 }
 
@@ -321,22 +268,19 @@ fn admit(scope: PauseScope, local_status: bool) -> Result<()> {
     Ok(())
 }
 
-/// Reserves a review in `ledger`, verifies the remaining budget through a usage probe, and then runs `review`.
+/// Reserves a review in `ledger` under the local limits, and then runs `review`.
+/// The `CodeRabbit` CLI has no review allowance, so no usage query precedes a review.
 ///
 /// # Errors
 ///
-/// Returns an error when the reservation, the usage probe, or the usage check fails.
+/// Returns an error when the reservation fails.
 /// Returns the error of `review`.
 pub fn execute_reserved(
     ledger: &Path,
-    probes: &Path,
     now: u64,
-    organization: &str,
-    usage: impl FnOnce() -> Result<String>,
     review: impl FnOnce() -> Result<i32>,
 ) -> Result<i32> {
     let _reservation = reserve(ledger, now)?;
-    check_usage(&execute_probe(probes, now, usage)?, organization)?;
     review()
 }
 
@@ -628,29 +572,13 @@ pub fn run(args: Vec<String>, user_directory: &Path) -> Result<i32> {
     let committed = committed
         .map(|request| request.prepare(user_directory, &version))
         .transpose()?;
-    let directory = match &committed {
-        Some(prepared) => Some(prepared.root.clone()),
-        None => review_directory(&args)?,
-    };
+    if committed.is_none() {
+        review_directory(&args)?;
+    }
     execute_admitted(
         || pause(user_directory),
         &ledger,
-        &user_directory.join(".local/state/coderabbit-guard/usage.log"),
         now_ms()?,
-        &organization,
-        || {
-            let mut command = crate::tool::external(&vendor);
-            command.args(["usage", "--agent"]).env("CI", "true");
-            if let Some(directory) = &directory {
-                command.current_dir(directory);
-            }
-            let usage = command.output()?;
-            ensure!(
-                usage.status.success(),
-                "the remaining review budget could not be verified; no review started"
-            );
-            Ok(String::from_utf8(usage.stdout)?)
-        },
         || {
             if let Some(prepared) = committed {
                 return prepared.execute(&vendor);
