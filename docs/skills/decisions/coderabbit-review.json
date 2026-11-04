@@ -1,5 +1,5 @@
 {
-  "revision": "e60b87ea73d22b8ce91dd2aa6d3f766559d6e015cdb87ddb951abf72218470e2",
+  "revision": "8109490e8bebfb7f7c0a92037739da1b554ef08bcd9f3abd0997624894425127",
   "outcome": "implemented",
   "reason": "Separate owner-side service review from project verification and leave executor and allowance policy in machine-local configuration.\nHonor the repository PR policy without escalating importance or substituting CLI evidence.\nRequire actual current-head PR review and preserve supported historical findings and owner-controlled pauses.\nThe CodeRabbit CLI has no review allowance, so the guard no longer queries vendor usage before a CLI review and keeps its local limits and its refusal of paid reviews.",
   "evidence": [
