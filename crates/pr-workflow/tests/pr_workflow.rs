@@ -8869,10 +8869,10 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    // The top PR number names one stack even on a trunk that more than one local stack shares.
+    // The address of the top pull request names one stack even on a trunk that more than one local stack shares.
     assert_eq!(
         fixture.stack_log(),
-        "gh-stack checkout 17 repo=P4suta/project leased=true notifier=1\n\
+        "gh-stack checkout https://github.com/P4suta/project/pull/17 repo=P4suta/project leased=true notifier=1\n\
          gh-stack sync repo=P4suta/project leased=true notifier=1\n"
     );
     assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());

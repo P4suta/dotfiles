@@ -3260,9 +3260,9 @@ fn sync_stack(target: &Target) -> Result<()> {
     sync_stack_at(target, branch.trim())
 }
 
-/// Restacks the stack that `selector` names: a PR number, a stack number, or a branch.
+/// Restacks the stack that `selector` names: a pull request address, a stack number, or a branch.
 /// Checking it out adopts the stack that GitHub records while this clone still lacks tracking for it.
-/// A PR number names one stack even on a trunk that more than one local stack shares.
+/// The web address of a pull request names one stack even on a trunk that more than one local stack shares, and a bare number could name a stack first.
 fn sync_stack_at(target: &Target, selector: &str) -> Result<()> {
     require_checkout(target)?;
     let lease = Lease::acquire()?;
@@ -3366,7 +3366,7 @@ fn merge_stack(
                     return Err(stop_refusal(target, *pr, *stop, true, view).into());
                 }
             }
-            sync_stack_at(target, &top.to_string())?;
+            sync_stack_at(target, &format!("{GITHUB}/{}/pull/{top}", target.repo))?;
             carry = assessments;
             wait(target, top, polling, started)?;
             continue;
