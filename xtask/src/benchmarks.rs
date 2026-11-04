@@ -1354,12 +1354,11 @@ fn container_command(root: &Path, image_id: &str, request: &Path, result: &Path)
 ///
 /// # Errors
 ///
-/// Returns an error when Docker can't build or run the image or the gate inside fails.
+/// Refuses an unavailable image, failed Docker execution, or a failed gate.
 pub fn verify_in_container(root: &Path) -> Result<()> {
     let root = crate::canonical(root)?;
-    let definition = root.join(crate::skill_proofs::PROOF_IMAGE);
     let image = proof_image(&root)?;
-    crate::skill_proofs::ensure_image(&root, &definition, &image)?;
+    crate::skill_proofs::require_image(&image)?;
     let image_id = crate::skill_proofs::verified_image_id(&image)?;
     crate::container::prepare_cargo(&root, &image_id)?;
     let exchange = tempfile::Builder::new().prefix("benchmarks-").tempdir()?;

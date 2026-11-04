@@ -1,7 +1,7 @@
 {
-  "revision": "25ae9349cff620712efaa62ccd1795b70bea67d4333aa9cdaf33b9b1186aab5d",
+  "revision": "5d8b5806aad0b1760656ff59417f6d27e2afce5af35661d3a20492fee0c8268d",
   "outcome": "implemented",
-  "reason": "Wire fast checks into hooks and pull-request CI, and heavy checks into the release gate.",
+  "reason": "The skill tool inventory now pins Docker CLI 29.9.2. Verification policy and task selection are unchanged, and this metadata update does not claim a current-source build or Docker execution.",
   "evidence": [
     "home/dot_config/dotfiles/bounded-tools.toml",
     "crates/dotfiles/tests/bounded.rs",

@@ -1,0 +1,14 @@
+id: typescript-version-label
+valid:
+  - "export function ipv6Prefix(address: bigint): bigint { return address; }"
+  - "export const IPV4_VERSION = 4;"
+  - "export const NON_PUBLIC_V4: readonly string[] = [];"
+  - "export function inV6(address: bigint): boolean { return address > 0n; }"
+  - "export interface FeedPoller { url: string }"
+  - "export function onDemandFetch(): void {}"
+invalid:
+  - "export function fetchV2(): void {}"
+  - "export interface FeedV2 { url: string }"
+  - "export const API_V2 = 'items';"
+  - "export const handlers = { v3Handler(): void {} };"
+  - "export const schemaV10 = 'x';"

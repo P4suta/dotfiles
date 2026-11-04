@@ -9,7 +9,7 @@ trust:
     mise trust --quiet {{ quote(justfile_directory() / "mise.toml") }}
 
 [private]
-lint-tools: (mise-install "python" "uv" "yamllint")
+lint-tools: (mise-install "--locked" "python" "uv" "yamllint")
 
 mise-install *args: trust
     mise x rust -- cargo run --locked --package dotfiles --bin dotfiles -- mise-install {{ args }}
@@ -25,8 +25,11 @@ push-check: lint-tools
 
 # The hosted gate for a pull request that skipped the local hooks, such as a Renovate update.
 dependency-gate: trust
+    mise x rust -- cargo fetch --locked --manifest-path benchmarks/Cargo.toml
+    mise x rust -- cargo fetch --locked --manifest-path fuzz/Cargo.toml
     mise x rust -- cargo check --locked --workspace --all-targets
-    mise x rust -- cargo test --locked --package xtask --test pins
+    mise x rust -- cargo test --locked --package xtask --test pins --test workflows --test container_proofs
+    mise x rust -- cargo test --locked --package dotfiles --lib published_stdlib_lock_has_the_exact_source_bound_package_union
 
 check-staged: lint-tools
     mise x -- cargo xtask check --staged
@@ -42,6 +45,11 @@ profiles: trust
 
 profiles-linux: trust
     mise x -- cargo xtask profiles-linux
+
+# Writes this host family's profile manifests and prints each change, as the manifests workflow does on hosted runners.
+profile-manifests: trust
+    mise x rust chezmoi -- cargo xtask profile-snapshots --write
+    git --no-pager diff --no-color --no-ext-diff -- xtask/tests/snapshots
 
 proofs *args: trust
     mise x -- cargo xtask proofs {{ args }}
@@ -94,6 +102,12 @@ doppler-organize *args: trust
 gen: trust
     mise x -- cargo xtask gen
 
+# Vendors the Japanese kanji repertoire from the pinned Unihan release and regenerates the Rust table.
+kanji-repertoire: trust
+    xh GET --follow --download --output "{{ justfile_directory() }}/target/Unihan.zip" https://www.unicode.org/Public/16.0.0/ucd/Unihan.zip
+    ouch decompress --yes "{{ justfile_directory() }}/target/Unihan.zip" --dir "{{ justfile_directory() }}/target/unihan"
+    mise x -- cargo xtask gen --irg-sources "{{ justfile_directory() }}/target/unihan/Unihan_IRGSources.txt"
+
 decide skill: trust
     mise x -- cargo xtask decide {{ quote(skill) }}
 
@@ -135,6 +149,9 @@ install-prose: trust
 
 install-pr-workflow: trust
     mise x -- cargo xtask install-pr-workflow
+
+install-pr-workflow-binary: trust
+    mise x -- cargo xtask install-pr-workflow-binary
 
 install-answer-prover: trust
     mise x -- cargo xtask install-answer-prover

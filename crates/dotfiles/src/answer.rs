@@ -22,6 +22,7 @@ use sources::Source;
 const STATE: &str = ".local/state/dotfiles/answers";
 const PROVER_CONFIG: &str = ".config/dotfiles/answer-proof.json";
 const VERSION: u8 = 1;
+const RETAINED_VERSION: u8 = 2;
 const MAX_INPUT_BYTES: u64 = 262_144;
 const MAX_CLAIMS: usize = 128;
 #[cfg(unix)]
@@ -35,6 +36,7 @@ const PLAN_CLOSE: &str = "</proposed_plan>";
 const MIN_FENCE_WIDTH: usize = 3;
 const MAX_FENCE_INDENT: usize = 3;
 const LEAN_TOOLCHAIN: &str = include_str!("../../../specs/lean/lean-toolchain");
+pub const EVIDENCE_FORMAT: &str = "The checked-arguments skill describes the evidence file in references/evidence-format.md, installed at ~/.agents/skills/checked-arguments/references/evidence-format.md.";
 
 /// Read the same release pin as the proof package.
 ///
@@ -53,11 +55,13 @@ pub enum Action {
     /// Start a new request from a `UserPromptSubmit` hook payload on standard input.
     Begin,
     /// Check an answer draft, then bind its evidence to this request.
+    #[command(after_help = EVIDENCE_FORMAT)]
     Check {
         #[arg(long)]
         session: String,
         #[arg(long)]
         draft: PathBuf,
+        /// The evidence JSON for the draft's claims.
         #[arg(long)]
         evidence: PathBuf,
     },
@@ -84,14 +88,103 @@ struct HookInput {
     stop_hook_active: bool,
 }
 
+/// A bounded, validated managed request, including its optional repository baseline.
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(try_from = "UncheckedRequest")]
+pub struct Request {
+    version: u8,
+    generation: String,
+    prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assurance: Option<Assurance>,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Request {
+struct UncheckedRequest {
     version: u8,
     generation: String,
     prompt: String,
     #[serde(default)]
-    assurance: Option<crate::assure::RequestBaseline>,
+    assurance: Option<Assurance>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Assurance {
+    root: PathBuf,
+    commit: String,
+}
+
+impl TryFrom<UncheckedRequest> for Request {
+    type Error = anyhow::Error;
+
+    fn try_from(state: UncheckedRequest) -> Result<Self> {
+        ensure!(
+            state.version == VERSION,
+            "unsupported answer request version"
+        );
+        ensure!(
+            state.generation.starts_with(".tmp")
+                && state.generation.len() <= MAX_GENERATION_BYTES
+                && state.generation.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')
+                }),
+            "invalid answer request generation"
+        );
+        ensure!(!state.prompt.trim().is_empty(), "answer request is empty");
+        if let Some(context) = &state.assurance {
+            ensure!(
+                context.root.is_absolute()
+                    && context
+                        .root
+                        .to_str()
+                        .is_some_and(|root| !root.contains('\0')),
+                "answer assurance root must be an absolute native path"
+            );
+            ensure!(
+                crate::shape_rules::commit_id(context.commit.as_bytes()),
+                "invalid answer assurance baseline commit"
+            );
+        }
+        Ok(Self {
+            version: state.version,
+            generation: state.generation,
+            prompt: state.prompt,
+            assurance: state.assurance,
+        })
+    }
+}
+
+impl Request {
+    fn identity(&self) -> Result<String> {
+        Ok(digest(&serde_json::to_vec(self)?))
+    }
+
+    fn check_assurance(&self, home: &Path, cwd: &Path) -> Result<()> {
+        if let Some(context) = &self.assurance {
+            crate::assure::check_request(
+                &context.root,
+                &context.commit,
+                cwd,
+                &crate::assure::installed_at(home)?,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// Parse the same bounded request format that observation, checking, and Stop consume.
+///
+/// # Errors
+///
+/// Refuses unknown fields, unsupported versions, unsafe generations, and malformed context.
+pub fn inspect_request(input: &str) -> Result<Request> {
+    ensure!(
+        input.len() as u64 <= MAX_INPUT_BYTES,
+        "answer input exceeds its byte bound"
+    );
+    serde_json::from_str(input).context("invalid answer request")
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -272,24 +365,10 @@ fn directory(home: &Path, session: &str) -> Result<PathBuf> {
 }
 
 fn request(directory: &Path) -> Result<Request> {
-    let state: Request = serde_json::from_str(
+    inspect_request(
         &read(&directory.join("request.json"))
             .context("answer request is missing; run the managed UserPromptSubmit hook")?,
-    )?;
-    ensure!(
-        state.version == VERSION,
-        "unsupported answer request version"
-    );
-    ensure!(
-        state.generation.starts_with(".tmp")
-            && state.generation.len() <= MAX_GENERATION_BYTES
-            && state
-                .generation
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_')),
-        "invalid answer request generation"
-    );
-    Ok(state)
+    )
 }
 
 pub(crate) fn request_baseline(
@@ -300,7 +379,12 @@ pub(crate) fn request_baseline(
     if !directory.join("request.json").try_exists()? {
         return Ok(None);
     }
-    Ok(request(&directory)?.assurance)
+    Ok(request(&directory)?
+        .assurance
+        .map(|context| crate::assure::RequestBaseline {
+            root: context.root,
+            commit: context.commit,
+        }))
 }
 
 fn begin(home: &Path, input: &HookInput) -> Result<String> {
@@ -318,6 +402,7 @@ fn begin(home: &Path, input: &HookInput) -> Result<String> {
         .context("request generation has no name")?
         .to_string_lossy()
         .into_owned();
+    // The request record without a baseline lands first, so a failed capture leaves no earlier request's authority behind.
     let mut state = Request {
         version: VERSION,
         generation,
@@ -327,7 +412,10 @@ fn begin(home: &Path, input: &HookInput) -> Result<String> {
     let path = directory.join("request.json");
     write_json(&path, &state)?;
     if let Some(cwd) = &input.cwd {
-        state.assurance = crate::assure::request_baseline(cwd)?;
+        state.assurance = crate::assure::request_baseline(cwd)?.map(|baseline| Assurance {
+            root: baseline.root,
+            commit: baseline.commit,
+        });
         write_json(&path, &state)?;
     }
     Ok(format!(
@@ -603,7 +691,8 @@ impl ObservationTool {
                 Some("status" | "diff" | "show" | "log" | "rev-parse" | "--version")
             ),
             Self::Gh => {
-                matches!(arguments, [group, verb, ..] if matches!(group.as_str(), "pr" | "issue" | "repo") && verb == "view")
+                let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+                rules::gh_read_rules::verdict(&arguments) == rules::gh_read_rules::Verdict::Admit
             }
             Self::Cargo => matches!(
                 arguments.first().map(String::as_str),
@@ -632,6 +721,7 @@ impl ObservationTool {
 struct Observation {
     version: u8,
     generation: String,
+    request_sha256: String,
     program: String,
     arguments: Vec<String>,
     directory: PathBuf,
@@ -650,7 +740,7 @@ fn observe(home: &Path, session: &str, tool: ObservationTool, arguments: &[Strin
         .output()
         .context("run the authorized observation command")?;
     ensure!(
-        request(&directory)?.generation == state.generation,
+        request(&directory)?.identity()? == state.identity()?,
         "answer request changed during the observation"
     );
     ensure!(
@@ -658,7 +748,8 @@ fn observe(home: &Path, session: &str, tool: ObservationTool, arguments: &[Strin
         "observation exceeds its retained byte bound"
     );
     let observation = Observation {
-        version: VERSION,
+        version: RETAINED_VERSION,
+        request_sha256: state.identity()?,
         generation: state.generation,
         program: tool.program().to_owned(),
         arguments: arguments.to_vec(),
@@ -698,7 +789,9 @@ fn check_observation(
         "observation content differs from its identity"
     );
     ensure!(
-        observation.version == VERSION && observation.generation == state.generation,
+        observation.version == RETAINED_VERSION
+            && observation.generation == state.generation
+            && observation.request_sha256 == state.identity()?,
         "observation belongs to another answer request"
     );
     ensure!(
@@ -799,10 +892,31 @@ fn validate_report(report: &str, count: usize, source_sha256: &str) -> Result<()
 }
 
 fn check(home: &Path, session: &str, draft: &Path, evidence: &Path) -> Result<()> {
+    check_at(home, session, draft, evidence, &std::env::current_dir()?)
+}
+
+fn check_at(home: &Path, session: &str, draft: &Path, evidence: &Path, cwd: &Path) -> Result<()> {
     let directory = directory(home, session)?;
     let state = request(&directory)?;
+    state.check_assurance(home, cwd)?;
     let draft = read(draft)?;
     let evidence = read(evidence)?;
+    let foreign = dotguard::lang::scan(&draft, dotguard::lang::Mode::Japanese);
+    ensure!(
+        foreign.is_empty(),
+        "answer draft holds characters outside the Japanese and English repertoires; name a foreign character by its code point instead:\n{}",
+        foreign
+            .iter()
+            .map(|hit| dotguard::lang::evidence("draft", hit))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let words = crate::assure::japanese_word_reasons(&draft);
+    ensure!(
+        words.is_empty(),
+        "answer draft breaks the Japanese word rules, which the Stop hook also applies:\n{}",
+        words.join("\n")
+    );
     let Plan {
         document,
         proof,
@@ -829,7 +943,7 @@ fn check(home: &Path, session: &str, draft: &Path, evidence: &Path) -> Result<()
         Some(prove(home, &proof, count)?)
     };
     ensure!(
-        request(&directory)?.generation == state.generation,
+        request(&directory)?.identity()? == state.identity()?,
         "answer request changed during verification"
     );
     let artifacts = directory.join(&state.generation);
@@ -851,9 +965,9 @@ fn check(home: &Path, session: &str, draft: &Path, evidence: &Path) -> Result<()
         None
     };
     let receipt = Receipt {
-        version: VERSION,
+        version: RETAINED_VERSION,
+        request_sha256: state.identity()?,
         generation: state.generation,
-        request_sha256: digest(state.prompt.as_bytes()),
         draft_sha256: draft_digest(&draft),
         evidence_sha256: digest(evidence.as_bytes()),
         producer: platform::BUILD_HASH.to_owned(),
@@ -864,7 +978,7 @@ fn check(home: &Path, session: &str, draft: &Path, evidence: &Path) -> Result<()
         proof,
     };
     ensure!(
-        request(&directory)?.generation == receipt.generation,
+        request(&directory)?.identity()? == receipt.request_sha256,
         "answer request changed while retaining evidence"
     );
     write_json(&directory.join("receipt.json"), &receipt)?;
@@ -880,6 +994,11 @@ fn check(home: &Path, session: &str, draft: &Path, evidence: &Path) -> Result<()
 }
 
 fn stop(home: &Path, input: &HookInput) -> Result<()> {
+    let cwd = input.cwd.clone().map_or_else(std::env::current_dir, Ok)?;
+    stop_at(home, input, &cwd)
+}
+
+fn stop_at(home: &Path, input: &HookInput, cwd: &Path) -> Result<()> {
     let directory = directory(home, &input.session_id)?;
     let state = request(&directory)?;
     let receipt: Receipt = serde_json::from_str(&read(&directory.join("receipt.json")).context(
@@ -890,9 +1009,9 @@ fn stop(home: &Path, input: &HookInput) -> Result<()> {
         .as_deref()
         .context("the Stop hook supplied no answer text")?;
     let binding = answer_rules::binding(
-        receipt.version == VERSION
+        receipt.version == RETAINED_VERSION
             && receipt.generation == state.generation
-            && receipt.request_sha256 == digest(state.prompt.as_bytes()),
+            && receipt.request_sha256 == state.identity()?,
         receipt.draft_sha256 == draft_digest(draft),
         receipt.producer == platform::BUILD_HASH,
     );
@@ -936,8 +1055,9 @@ fn stop(home: &Path, input: &HookInput) -> Result<()> {
         answer_rules::may_complete(evidence),
         "answer evidence is stale or incomplete; check the exact final draft for this request"
     );
+    state.check_assurance(home, cwd)?;
     ensure!(
-        request(&directory)?.generation == state.generation,
+        request(&directory)?.identity()? == state.identity()?,
         "answer request changed during the final evidence check"
     );
     Ok(())
@@ -1028,7 +1148,8 @@ pub fn execute(action: Action) -> Result<()> {
             &session,
             &draft,
             &evidence,
-        ),
+        )
+        .inspect_err(|_| eprintln!("{EVIDENCE_FORMAT}")),
         Action::Observe {
             session,
             tool,
@@ -1088,6 +1209,7 @@ pub fn execute(action: Action) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixture_git;
     use Formula::{Atom, Implies};
     use serde_json::json;
 
@@ -1106,6 +1228,265 @@ mod tests {
             "version":1,"atoms":[],"readings":[],
             "claims":[{"id":"question","text":"Can we test this?","formula":null,"basis":{"kind":"question"}}]
         })).unwrap()
+    }
+
+    struct ContextFixture {
+        scope: tempfile::TempDir,
+        home: PathBuf,
+        root: PathBuf,
+        config: PathBuf,
+    }
+
+    impl ContextFixture {
+        fn new() -> Self {
+            let scope = tempfile::tempdir().unwrap();
+            let home = scope.path().join("home");
+            let root = scope.path().join("repository with 'quotes'");
+            let config = scope.path().join("gitconfig");
+            fs::create_dir_all(&home).unwrap();
+            fs::create_dir_all(&root).unwrap();
+            fs::write(&config, "[user]\nname = Fixture\nemail = fixture@example.com\n[commit]\ngpgsign = false\n[init]\ndefaultBranch = main\n").unwrap();
+            let fixture = Self {
+                scope,
+                home,
+                root,
+                config,
+            };
+            fixture.git(&["init", "--quiet"]);
+            fs::write(fixture.root.join("README.md"), "fixture\n").unwrap();
+            fixture.git(&["add", "--all"]);
+            fixture.git(&["commit", "--quiet", "-m", "chore: create fixture"]);
+            let catalog = fixture.home.join(crate::assure::CATALOG);
+            fs::create_dir_all(catalog.parent().unwrap()).unwrap();
+            fs::write(catalog, "version = 1\nexclude = []\n[[shape]]\nid = 'parser'\nrequirement = 'a parser owner'\nnext = 'add an owner'\nmarker = 'fuzz_target!'\nsignals = [{ suffix = '.rs', prefix = 'pub fn parse(' }]\n").unwrap();
+            fixture
+        }
+
+        fn git(&self, arguments: &[&str]) -> String {
+            let output = fixture_git::command("git", &self.config)
+                .current_dir(&self.root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        }
+
+        fn begin(&self) -> HookInput {
+            let mut input = input("Prepare the project without publishing it.");
+            input.cwd = Some(self.root.clone());
+            begin(&self.home, &input).unwrap();
+            let directory = directory(&self.home, "session").unwrap();
+            let mut state = request(&directory).unwrap();
+            state.assurance = Some(Assurance {
+                root: self.root.clone(),
+                commit: self.git(&["rev-parse", "HEAD"]),
+            });
+            write_json(&directory.join("request.json"), &state).unwrap();
+            input
+        }
+
+        fn check(&self) {
+            let draft = self.scope.path().join("draft.txt");
+            let evidence = self.scope.path().join("evidence.json");
+            fs::write(&draft, "Can we test this?\n").unwrap();
+            write_json(&evidence, &document()).unwrap();
+            check_at(&self.home, "session", &draft, &evidence, &self.root).unwrap();
+        }
+    }
+
+    #[test]
+    fn current_requests_keep_their_shape_and_context_parsing_is_strict() {
+        let home = tempfile::tempdir().unwrap();
+        begin(home.path(), &input("request")).unwrap();
+        let directory = directory(home.path(), "session").unwrap();
+        let current = serde_json::to_value(request(&directory).unwrap()).unwrap();
+        assert_eq!(current.as_object().unwrap().len(), 3);
+        let mut context = current.clone();
+        context["assurance"] = json!({
+            "root": home.path(),
+            "commit": "ee178c449d6507de8045f8f79b92269da9b752fb"
+        });
+        for (field, value) in [
+            ("root", json!("relative")),
+            ("root", json!(format!("{}\0", home.path().display()))),
+            ("commit", json!("HEAD")),
+            ("commit", json!("ee178c4")),
+            ("commit", json!(null)),
+            ("unchecked", json!(true)),
+        ] {
+            let mut invalid = context.clone();
+            invalid["assurance"][field] = value;
+            assert!(inspect_request(&invalid.to_string()).is_err(), "{field}");
+        }
+        for field in ["root", "commit"] {
+            let mut invalid = context.clone();
+            invalid["assurance"].as_object_mut().unwrap().remove(field);
+            assert!(
+                inspect_request(&invalid.to_string()).is_err(),
+                "missing {field}"
+            );
+        }
+        let mut unknown = current.clone();
+        unknown["unchecked"] = json!(true);
+        assert!(inspect_request(&unknown.to_string()).is_err());
+        let mut nullable = current.clone();
+        nullable["assurance"] = json!(null);
+        assert_eq!(
+            serde_json::to_value(inspect_request(&nullable.to_string()).unwrap()).unwrap(),
+            current
+        );
+        assert!(
+            inspect_request(&" ".repeat(usize::try_from(MAX_INPUT_BYTES).unwrap() + 1)).is_err()
+        );
+        for entry in [current, context] {
+            let parsed = inspect_request(&entry.to_string()).unwrap();
+            assert_eq!(serde_json::to_value(parsed).unwrap(), entry);
+        }
+    }
+
+    #[test]
+    fn contextual_completion_enforces_the_saved_baseline_and_repository() {
+        let fixture = ContextFixture::new();
+        let input = fixture.begin();
+        fixture.check();
+        assert!(stop(&fixture.home, &input).is_ok());
+        let directory = directory(&fixture.home, "session").unwrap();
+        let mut state = request(&directory).unwrap();
+        assert!(
+            state
+                .check_assurance(&fixture.home, fixture.scope.path())
+                .is_err()
+        );
+        let nested = fixture.root.join("nested");
+        fs::create_dir(&nested).unwrap();
+        assert!(state.check_assurance(&fixture.home, &nested).is_ok());
+        let original_root = state.assurance.as_ref().unwrap().root.clone();
+        state.assurance.as_mut().unwrap().root = nested;
+        assert!(state.check_assurance(&fixture.home, &fixture.root).is_err());
+        state.assurance.as_mut().unwrap().root = original_root;
+        state.assurance.as_mut().unwrap().commit = "f".repeat(40);
+        assert!(state.check_assurance(&fixture.home, &fixture.root).is_err());
+        fs::write(
+            fixture.root.join("unowned.rs"),
+            "pub fn parse(input: &str) {}\n",
+        )
+        .unwrap();
+        let original = request(&directory).unwrap();
+        let error = original
+            .check_assurance(&fixture.home, &fixture.root)
+            .unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<crate::refusal::Refusal>()
+                .unwrap()
+                .rule,
+            "assure.added"
+        );
+        assert!(stop(&fixture.home, &input).is_err());
+        observe(
+            &fixture.home,
+            "session",
+            ObservationTool::Git,
+            &["--version".to_owned()],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn changing_any_context_invalidates_observations_and_receipts() {
+        let fixture = ContextFixture::new();
+        let input = fixture.begin();
+        fixture.check();
+        observe(
+            &fixture.home,
+            "session",
+            ObservationTool::Git,
+            &["--version".to_owned()],
+        )
+        .unwrap();
+        let directory = directory(&fixture.home, "session").unwrap();
+        let record = fs::read_dir(directory.join("observations"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let id = record.file_stem().unwrap().to_str().unwrap();
+        let original = serde_json::to_value(request(&directory).unwrap()).unwrap();
+        let mut mutations = Vec::new();
+        let mut changed = original.clone();
+        changed["assurance"]["root"] = json!(fixture.scope.path());
+        mutations.push(changed);
+        let mut changed = original.clone();
+        changed["assurance"]["commit"] = json!("f".repeat(40));
+        mutations.push(changed);
+        let mut changed = original.clone();
+        changed.as_object_mut().unwrap().remove("assurance");
+        mutations.push(changed);
+        for changed in mutations {
+            write_json(&directory.join("request.json"), &changed).unwrap();
+            let state = request(&directory).unwrap();
+            assert!(check_observation(&directory, &state, id, "git version", 0).is_err());
+            let error = stop(&fixture.home, &input).unwrap_err();
+            assert!(format!("{error:#}").contains("stale or incomplete"));
+        }
+        write_json(&directory.join("request.json"), &original).unwrap();
+        assert!(stop(&fixture.home, &input).is_ok());
+    }
+
+    #[test]
+    fn saved_requests_preserve_the_known_assurance_context() {
+        let home = tempfile::tempdir().unwrap();
+        let directory = directory(home.path(), "session").unwrap();
+        let original = json!({
+            "version": VERSION,
+            "generation": ".tmpSavedRequest",
+            "prompt": "Prepare the project without publishing it.",
+            "assurance": {
+                "root": home.path(),
+                "commit": "ee178c449d6507de8045f8f79b92269da9b752fb"
+            }
+        });
+        write_json(&directory.join("request.json"), &original).unwrap();
+        let state = request(&directory).unwrap();
+        assert_eq!(serde_json::to_value(state).unwrap(), original);
+    }
+
+    #[test]
+    fn changing_the_prompt_without_renewing_the_generation_invalidates_evidence() {
+        let home = tempfile::tempdir().unwrap();
+        let draft = home.path().join("draft.txt");
+        let evidence = home.path().join("evidence.json");
+        fs::write(&draft, "Can we test this?\n").unwrap();
+        write_json(&evidence, &document()).unwrap();
+        let input = input("request");
+        begin(home.path(), &input).unwrap();
+        check(home.path(), "session", &draft, &evidence).unwrap();
+        let directory = directory(home.path(), "session").unwrap();
+        observe(
+            home.path(),
+            "session",
+            ObservationTool::Git,
+            &["--version".to_owned()],
+        )
+        .unwrap();
+        let record = fs::read_dir(directory.join("observations"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let id = record.file_stem().unwrap().to_str().unwrap();
+        let mut state = request(&directory).unwrap();
+        state.prompt = "another request".to_owned();
+        write_json(&directory.join("request.json"), &state).unwrap();
+        assert!(check_observation(&directory, &state, id, "git version", 0).is_err());
+        assert!(stop(home.path(), &input).is_err());
     }
 
     #[test]
@@ -1309,6 +1690,68 @@ mod tests {
                 .is_err()
         );
         assert!(ObservationTool::Just.tool(&["release".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn github_observations_admit_reads_and_refuse_every_write_form() {
+        let admitted = |arguments: &[&str]| {
+            ObservationTool::Gh
+                .tool(
+                    &arguments
+                        .iter()
+                        .map(|argument| (*argument).to_owned())
+                        .collect::<Vec<_>>(),
+                )
+                .is_ok()
+        };
+        for read in [
+            &["run", "view", "41505470980", "--json", "conclusion"][..],
+            &["run", "list", "--limit", "5"],
+            &["pr", "checks", "552"],
+            &["variable", "list"],
+            &["release", "view", "v1.0.0"],
+            &["pr", "view", "17"],
+            &["api", "repos/P4suta/dotfiles/actions/runs/1"],
+            &["api", "-X", "GET", "repos/P4suta/dotfiles/pulls"],
+            &[
+                "api",
+                "--method=get",
+                "repos/P4suta/dotfiles/pulls",
+                "--jq",
+                ".[].number",
+            ],
+            &[
+                "api",
+                "-H",
+                "Accept: application/vnd.github+json",
+                "rate_limit",
+            ],
+        ] {
+            assert!(admitted(read), "{read:?}");
+        }
+        for write in [
+            &["api", "-X", "POST", "repos/o/r/issues"][..],
+            &["api", "--method", "DELETE", "repos/o/r/git/refs/heads/x"],
+            &["api", "--method=PATCH", "repos/o/r"],
+            &["api", "-XPUT", "repos/o/r/topics"],
+            &["api", "-iXPOST", "repos/o/r/issues"],
+            &["api", "-X"],
+            &["api", "repos/o/r/issues", "-f", "title=x"],
+            &["api", "repos/o/r/issues", "-Fbody=@file"],
+            &["api", "repos/o/r/issues", "-if", "title=x"],
+            &["api", "repos/o/r/issues", "--field", "title=x"],
+            &["api", "repos/o/r/issues", "--raw-field=title=x"],
+            &["api", "repos/o/r/issues", "--input", "body.json"],
+            &["api", "graphql", "-f", "query=mutation{x}"],
+            &["pr", "merge", "17"],
+            &["run", "rerun", "1"],
+            &["variable", "set", "NAME"],
+            &["release", "create", "v1"],
+            &["issue", "comment", "1"],
+            &["auth", "token"],
+        ] {
+            assert!(!admitted(write), "{write:?}");
+        }
     }
 
     #[test]

@@ -17,6 +17,13 @@ pub enum ReviewRoute {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum ReviewPolicy {
+    Importance,
+    AlwaysPr,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
 pub enum Consequence {
     Severe,
     Catastrophic,
@@ -61,6 +68,14 @@ pub const fn route(level: ReviewLevel) -> ReviewRoute {
         ReviewLevel::Low | ReviewLevel::Medium => ReviewRoute::None,
         ReviewLevel::High => ReviewRoute::Cli,
         ReviewLevel::Critical => ReviewRoute::Pr,
+    }
+}
+
+#[must_use]
+pub const fn repository_route(level: ReviewLevel, policy: ReviewPolicy) -> ReviewRoute {
+    match policy {
+        ReviewPolicy::Importance => route(level),
+        ReviewPolicy::AlwaysPr => ReviewRoute::Pr,
     }
 }
 
@@ -125,6 +140,39 @@ pub enum Completion {
     Unresolved,
 }
 
+pub const COMPARE_FILE_LIMIT: usize = 300;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub struct ReviewCarry {
+    pub comparison_files: usize,
+    pub changed_paths_selected: bool,
+    pub same_pr_diff: bool,
+    pub submitted_at: i128,
+    pub status_created_at: i128,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReviewCarryDecision {
+    Accepted,
+    IncompleteComparison,
+    UnreviewedChanges,
+    StaleStatus,
+}
+
+#[must_use]
+pub fn review_carry(evidence: ReviewCarry) -> ReviewCarryDecision {
+    if evidence.comparison_files >= COMPARE_FILE_LIMIT {
+        ReviewCarryDecision::IncompleteComparison
+    } else if !evidence.changed_paths_selected && !evidence.same_pr_diff {
+        ReviewCarryDecision::UnreviewedChanges
+    } else if evidence.status_created_at <= evidence.submitted_at {
+        ReviewCarryDecision::StaleStatus
+    } else {
+        ReviewCarryDecision::Accepted
+    }
+}
+
 #[must_use]
 pub fn completion(
     route: ReviewRoute,
@@ -151,6 +199,41 @@ pub fn completion(
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_review_carry(evidence: ReviewCarry) {
+        let actual = review_carry(evidence);
+        let complete = evidence.comparison_files < COMPARE_FILE_LIMIT;
+        let covered = evidence.changed_paths_selected || evidence.same_pr_diff;
+        let fresh = evidence.status_created_at > evidence.submitted_at;
+        assert_eq!(
+            actual == ReviewCarryDecision::Accepted,
+            complete && covered && fresh
+        );
+        assert_eq!(
+            actual == ReviewCarryDecision::IncompleteComparison,
+            !complete
+        );
+        assert_eq!(
+            actual == ReviewCarryDecision::UnreviewedChanges,
+            complete && !covered
+        );
+        assert_eq!(
+            actual == ReviewCarryDecision::StaleStatus,
+            complete && covered && !fresh
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn carried_reviews_require_complete_covered_changes_and_a_later_status() {
+        let evidence: ReviewCarry = kani::any();
+        let actual = review_carry(evidence);
+        kani::cover!(actual == ReviewCarryDecision::Accepted);
+        kani::cover!(actual == ReviewCarryDecision::IncompleteComparison);
+        kani::cover!(actual == ReviewCarryDecision::UnreviewedChanges);
+        kani::cover!(actual == ReviewCarryDecision::StaleStatus);
+        spec_review_carry(evidence);
+    }
 
     pub fn spec_signer(bot: bool, owner: bool, same_repository: bool) {
         let actual = assessment_signer(bot, owner, same_repository);
@@ -184,6 +267,26 @@ mod proofs {
         );
         assert_eq!(actual == ReviewRoute::Cli, level == ReviewLevel::High);
         assert_eq!(actual == ReviewRoute::Pr, level == ReviewLevel::Critical);
+    }
+
+    pub fn spec_repository_route(level: ReviewLevel, policy: ReviewPolicy) {
+        let selected = repository_route(level, policy);
+        match policy {
+            ReviewPolicy::Importance => assert_eq!(selected, route(level)),
+            ReviewPolicy::AlwaysPr => assert_eq!(selected, ReviewRoute::Pr),
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn repository_policy_selects_pr_review_without_changing_pause_or_completion() {
+        let level = kani::any();
+        let policy = kani::any();
+        let selected = repository_route(level, policy);
+        kani::cover!(policy == ReviewPolicy::AlwaysPr && selected == ReviewRoute::Pr);
+        kani::cover!(policy == ReviewPolicy::Importance && selected != ReviewRoute::Pr);
+        spec_repository_route(level, policy);
+        spec_completion(selected, kani::any(), kani::any(), kani::any(), kani::any());
     }
 
     pub fn spec_assessment(level: ReviewLevel, risk: Option<SevereRisk>) {
@@ -290,6 +393,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn carried_reviews_refuse_unknown_scope_unselected_changes_and_stale_statuses() {
+        for comparison_files in [0, COMPARE_FILE_LIMIT - 1, COMPARE_FILE_LIMIT, usize::MAX] {
+            for [changed_paths_selected, same_pr_diff] in crate::domain::flags() {
+                for submitted_at in [i128::MIN, 0, i128::MAX] {
+                    for status_created_at in [i128::MIN, -1, 0, 1, i128::MAX] {
+                        proofs::spec_review_carry(ReviewCarry {
+                            comparison_files,
+                            changed_paths_selected,
+                            same_pr_diff,
+                            submitted_at,
+                            status_created_at,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn every_creator_and_ownership_case_selects_the_accountable_signer() {
         for [bot, owner, same_repository] in crate::domain::flags() {
             proofs::spec_signer(bot, owner, same_repository);
@@ -305,6 +427,9 @@ mod tests {
             ReviewLevel::Critical,
         ] {
             proofs::spec_route(level);
+            for policy in [ReviewPolicy::Importance, ReviewPolicy::AlwaysPr] {
+                proofs::spec_repository_route(level, policy);
+            }
         }
     }
 

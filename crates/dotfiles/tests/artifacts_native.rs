@@ -11,7 +11,8 @@ mod host_materials;
 #[path = "../examples/support/artifact_material_corpus.rs"]
 mod corpus;
 
-const PIN: &str = "2.73.1";
+/// This repository's tool pins, whose chezmoi entry `mise which chezmoi` resolves for the fixture renderer.
+const PROJECT_MISE: &str = include_str!("../../../mise.toml");
 const CHECKSUM: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 const GLOBAL: &str = "[tools]\nglobal = '1.2.3'\n";
 
@@ -85,6 +86,20 @@ fn a_kani_launcher_archive_does_not_close_verifier_materials() -> Result<()> {
     Ok(())
 }
 
+/// The chezmoi version this repository pins, so the fixture names the release the installed renderer reports.
+fn project_pin() -> Result<String> {
+    let project: toml::Value = toml::from_str(PROJECT_MISE)?;
+    let pin = project
+        .get("tools")
+        .and_then(|tools| tools.get("chezmoi"))
+        .and_then(|pin| {
+            pin.as_str()
+                .or_else(|| pin.get("version").and_then(toml::Value::as_str))
+        })
+        .context("the project pins chezmoi")?;
+    Ok(pin.to_owned())
+}
+
 fn locked(name: &str, version: &str, backend: &str) -> String {
     format!(
         "[[tools.{name}]]\nversion={version:?}\nbackend={backend:?}\nspecifiers=[{version:?}]\n[tools.{name}.\"platforms.windows-x64\"]\nurl='https://example.com/{name}.zip'\nchecksum='sha256:{CHECKSUM}'\n"
@@ -98,6 +113,7 @@ struct Fixture {
     configuration: PathBuf,
     lock: PathBuf,
     renderer: PathBuf,
+    pin: String,
 }
 
 impl Fixture {
@@ -110,15 +126,16 @@ impl Fixture {
         fs::create_dir(&home)?;
         fs::write(root.join(".chezmoiroot"), "home\n")?;
         host_materials::seed(&root, &home)?;
+        let pin = project_pin()?;
         fs::write(
             root.join("mise.toml"),
-            format!("[tools]\nchezmoi='{PIN}'\nproject='1.2.3'\n"),
+            format!("[tools]\nchezmoi='{pin}'\nproject='1.2.3'\n"),
         )?;
         fs::write(
             root.join("mise.lock"),
             format!(
                 "lockfile_version=3\n{}{}",
-                locked("chezmoi", PIN, "aqua:twpayne/chezmoi"),
+                locked("chezmoi", &pin, "aqua:twpayne/chezmoi"),
                 locked("project", "1.2.3", "aqua:owner/project")
             ),
         )?;
@@ -154,6 +171,7 @@ impl Fixture {
             configuration,
             lock,
             renderer,
+            pin,
         })
     }
 
@@ -331,7 +349,7 @@ fn caller_rendered_bytes_and_a_different_renderer_pin_cannot_replace_source_capt
     assert!(fixture.capture().is_err());
     fs::write(
         fixture.root.join("mise.toml"),
-        format!("[tools]\nchezmoi='{PIN}'\nproject='1.2.3'\n"),
+        format!("[tools]\nchezmoi='{}'\nproject='1.2.3'\n", fixture.pin),
     )?;
     fs::write(
         fixture.root.join("home/dot_config/mise/config.toml.tmpl"),

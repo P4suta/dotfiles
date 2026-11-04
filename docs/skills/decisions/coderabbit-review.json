@@ -1,7 +1,7 @@
 {
-  "revision": "a8a4e76f4af87f428f83065e3f8a8f2271889bdb94390ae8d72925eeb0929e63",
+  "revision": "e60b87ea73d22b8ce91dd2aa6d3f766559d6e015cdb87ddb951abf72218470e2",
   "outcome": "implemented",
-  "reason": "Separate owner-side service review from project verification and leave executor and allowance policy in machine-local configuration.",
+  "reason": "Separate owner-side service review from project verification and leave executor and allowance policy in machine-local configuration.\nHonor the repository PR policy without escalating importance or substituting CLI evidence.\nRequire actual current-head PR review and preserve supported historical findings and owner-controlled pauses.",
   "evidence": [
     "home/dot_agents/skills/coderabbit-review/SKILL.md",
     "home/dot_agents/skills/pull-request/references/importance.md",
@@ -12,7 +12,11 @@
     "crates/rules/src/review_rules.rs",
     "docs/adr/0008-layered-review-capacity.md",
     "docs/adr/0015-scoped-coderabbit-pause.md",
-    "crates/coderabbit-guard/src/lib.rs"
+    "crates/coderabbit-guard/src/lib.rs",
+    "docs/adr/require-pr-review-by-repository-policy.md",
+    "crates/pr-workflow/src/review_policy.rs",
+    "crates/pr-workflow/src/evidence.rs",
+    "crates/pr-workflow/tests/pr_workflow.rs"
   ],
   "revisit": null
 }

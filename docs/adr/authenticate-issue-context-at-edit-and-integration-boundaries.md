@@ -1,6 +1,6 @@
 ---
 status: amended
-changed_by: [keep-workflow-evidence-local.md]
+changed_by: [keep-workflow-evidence-local.md, carry-issue-contexts-through-leased-restacks.md]
 date: 2026-10-13
 ---
 # Authenticate issue context at edit and integration boundaries

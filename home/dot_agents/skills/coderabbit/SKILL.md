@@ -45,10 +45,16 @@ Never create issues or post `@coderabbitai plan` without authorization to publis
 Finish and check a coherent local change before a push or a ready-for-review PR.
 Batch related commits into one push, and let the current review finish before another update.
 Check review freshness after the final update, because automatic reviews can pause or hit rate limits.
-Use the `pull-request` importance policy: no CodeRabbit for `low` or `medium`, guarded CLI for `high`, and PR review for `critical`.
+Use the `pull-request` review policy.
+Its default routes are no CodeRabbit for `low` or `medium`, guarded CLI for `high`, and PR review for `critical`.
+Its owner-local repository policy selects PR review for every level, with no ignore line or critical opt-in label.
 Keep severe classifications rare and the selected routes exclusive.
 Use `coderabbit-review` for the selected current-diff evidence and existing supported findings.
-Shared service settings opt in only `review:critical` and turn off automatic incremental review.
+Shared service settings opt in only `review:critical` and turn off automatic incremental review unless a repository requires PR review for every change.
+For that repository, enable automatic reviews, include drafts, and remove positive label requirements in its effective service configuration.
+The local policy selects and checks the route.
+It doesn't configure the service or establish capacity.
+Keep PR and CLI pools and their adaptive thresholds separate, and never substitute CLI capacity for PR capacity.
 Inspect the effective configuration after adoption because inherited positive labels can remain active.
 Read existing findings before requesting the selected review.
 

@@ -273,6 +273,15 @@ pub enum Commands {
 
 #[derive(Debug, Subcommand)]
 pub enum StackAction {
+    /// Link an ordered set of existing owned PRs and retire their independent declarations after readback.
+    Link {
+        #[command(flatten)]
+        target: Target,
+        #[arg(long)]
+        base: String,
+        #[arg(num_args = 2.., value_parser = clap::value_parser!(u64).range(1..))]
+        prs: Vec<u64>,
+    },
     /// Create a draft PR for the head on top of the open PR of the base branch, and link the chain as one stack.
     Create {
         #[command(flatten)]
@@ -401,6 +410,40 @@ pub struct DocumentArgs {
     title: String,
     #[arg(long)]
     body_file: PathBuf,
+}
+
+/// The GitHub Actions directory, whose workflows report checks on a head.
+const WORKFLOW_DIRECTORY: &str = ".github/workflows";
+
+/// The entries of one tree at a head, which is null when the path is absent.
+const WORKFLOWS_QUERY: &str = "query($owner:String!,$name:String!,$expression:String!){repository(owner:$owner,name:$name){object(expression:$expression){... on Tree{entries{name}}}}}";
+
+#[derive(Deserialize)]
+struct WorkflowsResponse {
+    data: Option<WorkflowsData>,
+    #[serde(default)]
+    errors: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct WorkflowsData {
+    repository: Option<WorkflowsRepository>,
+}
+
+#[derive(Deserialize)]
+struct WorkflowsRepository {
+    object: Option<WorkflowsTree>,
+}
+
+#[derive(Deserialize)]
+struct WorkflowsTree {
+    #[serde(default)]
+    entries: Vec<TreeEntry>,
+}
+
+#[derive(Deserialize)]
+struct TreeEntry {
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -1047,6 +1090,44 @@ fn require(condition: bool, refusal: impl FnOnce() -> Refusal) -> Result<()> {
     }
 }
 
+/// The refusal rule for a head that no check can ever report on.
+const ABSENT_CHECKS_RULE: &str = "pr.checks-absent";
+
+/// Why a head without a declared check can't become ready or merge.
+const ABSENT_CHECKS_CAUSE: &str = "no check reported on the head, the base requires none, and the head carries no workflow under .github/workflows, so none can ever report; add a check";
+
+/// Refuses `ready` at once for a head that no check can ever report on, instead of naming unfinished checks.
+fn require_declared_checks(
+    github: &Github,
+    target: &Target,
+    pr: u64,
+    rollup: &[ReportedCheck],
+    required: &[String],
+    head: &str,
+) -> Result<()> {
+    let (total, unfinished, failed, missing) = tally(rollup, required);
+    let declared = total > 0 || !required.is_empty() || github.carries_workflow(target, head)?;
+    require(
+        head_checks(total, unfinished.saturating_add(missing), failed, declared)
+            != rules::pr_rules::HeadChecks::Absent,
+        || {
+            Refusal::new(
+                ABSENT_CHECKS_RULE,
+                format!("{ABSENT_CHECKS_CAUSE}, push, and mark the PR ready again"),
+                command(&[
+                    "gh",
+                    "pr",
+                    "checks",
+                    &pr.to_string(),
+                    "--repo",
+                    &target.repo,
+                ]),
+            )
+            .evidence(format!("#{pr}: head {head} reports no check"))
+        },
+    )
+}
+
 /// The local check to run on a corrected document.
 /// It keeps `title` unless the title caused the failure.
 fn recheck(target: &Target, title: Option<&str>) -> String {
@@ -1331,6 +1412,38 @@ impl Github {
         Ok(metadata)
     }
 
+    /// Whether `head` carries a GitHub Actions workflow, which can still report a check after a push.
+    /// The Git object query returns null for a missing directory, so the read needs no not-found status.
+    fn carries_workflow(&self, target: &Target, head: &str) -> Result<bool> {
+        let (owner, name) = target
+            .repo
+            .split_once('/')
+            .context("repository identity missing")?;
+        let response: WorkflowsResponse = self.graphql(
+            WORKFLOWS_QUERY,
+            &serde_json::json!({
+                "owner": owner,
+                "name": name,
+                "expression": format!("{head}:{WORKFLOW_DIRECTORY}"),
+            }),
+        )?;
+        ensure!(
+            response.errors.is_empty(),
+            "GitHub could not read the workflows of {head}"
+        );
+        let repository = response
+            .data
+            .and_then(|data| data.repository)
+            .context("GitHub reported no repository for the workflow read")?;
+        Ok(repository.object.is_some_and(|tree| {
+            tree.entries.iter().any(|entry| {
+                Path::new(&entry.name)
+                    .extension()
+                    .is_some_and(|extension| extension == "yml" || extension == "yaml")
+            })
+        }))
+    }
+
     /// The status checks that the rulesets of `base` require, by the name each check reports.
     fn required_checks(&self, target: &Target, base: &str) -> Result<Vec<String>> {
         Ok(self.branch_requirements(target, base)?.checks)
@@ -1456,6 +1569,11 @@ impl Github {
 
 /// Recognize a closing reference in visible Markdown outside examples and comments.
 fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
+    closing_references(body, repo).contains(&issue)
+}
+
+/// The issues of `repo` that visible Markdown outside examples and comments closes, in document order.
+fn closing_references(body: &str, repo: &str) -> Vec<u64> {
     let visible = prose(&without_comments(body));
     let mut text = String::new();
     let mut quoted = 0;
@@ -1473,26 +1591,69 @@ fn references_issue(body: &str, repo: &str, issue: u64) -> bool {
             _ => {}
         }
     }
-    let short = format!("#{issue}");
-    let url = format!("{GITHUB}/{repo}/issues/{issue}");
+    let url = format!("{GITHUB}/{repo}/issues/");
     let words: Vec<_> = text
         .split_whitespace()
         .map(|word| word.trim_matches([',', '.', ':', ';', '!', '(', ')', '[', ']']))
         .collect();
-    words.windows(CLOSING_REFERENCE_WORDS).any(|pair| {
-        matches!(
-            pair[0].to_ascii_lowercase().as_str(),
-            "close"
-                | "closes"
-                | "closed"
-                | "fix"
-                | "fixes"
-                | "fixed"
-                | "resolve"
-                | "resolves"
-                | "resolved"
-        ) && (pair[1] == short || pair[1].eq_ignore_ascii_case(&url))
-    })
+    words
+        .windows(CLOSING_REFERENCE_WORDS)
+        .filter(|pair| {
+            matches!(
+                pair[0].to_ascii_lowercase().as_str(),
+                "close"
+                    | "closes"
+                    | "closed"
+                    | "fix"
+                    | "fixes"
+                    | "fixed"
+                    | "resolve"
+                    | "resolves"
+                    | "resolved"
+            )
+        })
+        .filter_map(|pair| {
+            let digits = pair[1].strip_prefix('#').or_else(|| {
+                pair[1]
+                    .get(..url.len())
+                    .filter(|prefix| prefix.eq_ignore_ascii_case(&url))
+                    .and_then(|_| pair[1].get(url.len()..))
+            })?;
+            let issue: u64 = digits.parse().ok()?;
+            (issue.to_string() == digits).then_some(issue)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod closing_reference_parsing {
+    use super::{closing_references, references_issue};
+
+    const REPO: &str = "P4suta/project";
+
+    #[test]
+    fn visible_references_keep_their_document_order() {
+        let body = "Fixes #56.\n\nAlso resolves https://GitHub.com/p4suta/PROJECT/issues/12 and closes #57.\n";
+        assert_eq!(closing_references(body, REPO), [56, 12, 57]);
+        assert!(references_issue(body, REPO, 12));
+        assert!(!references_issue(body, REPO, 5));
+    }
+
+    #[test]
+    fn noncanonical_foreign_quoted_and_commented_references_close_nothing() {
+        for body in [
+            "Closes #023.",
+            "Closes #+5.",
+            "Closes #.",
+            "Closes other/project#5.",
+            "Closes https://github.com/other/project/issues/5.",
+            "> Closes #5.",
+            "<!-- Closes #5. -->",
+            "See #5.",
+        ] {
+            assert_eq!(closing_references(body, REPO), Vec::<u64>::new(), "{body}");
+        }
+    }
 }
 
 /// Where a checked PR body lives, so a refusal names the edit that changes it.
@@ -2025,6 +2186,10 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
         } => {
             target.conventional_required()?;
             let github = Github::connect()?;
+            let open = open_prs(&target)?;
+            for &pr in &prs {
+                require_unstacked(&target, &open, pr)?;
+            }
             for pr in prs {
                 merge_independent(&github, &target, pr, polling, rerun)?;
             }
@@ -2089,6 +2254,14 @@ fn ready_command(target: &Target, pr: u64, rerun: &str) -> Result<()> {
         bail!("GitHub reported no base branch or no head commit");
     };
     let required = github.required_checks(target, base)?;
+    require_declared_checks(
+        &github,
+        target,
+        pr,
+        &live.status_check_rollup,
+        &required,
+        head,
+    )?;
     let body = make_ready(
         &github,
         target,
@@ -2111,7 +2284,7 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
     let github = Github::connect()?;
     let live = live_document(&github, target, pr)?;
     let checked = review_policy::live_binding(&github, target, &live.body, &live)?;
-    evidence::remember(&target.repo, pr, &checked.object)?;
+    review_policy::remember(&checked, target, &github, pr)?;
     let document = validate(target, live.title, live.body, r#final)?;
     let destination = destination(&github, &target.repo)?;
     written_to_standard(destination, PULL_REQUEST, &document)?;
@@ -2205,12 +2378,17 @@ fn create(
         head,
         base,
         independent,
-        work::Operation::Create,
+        if matches!(creation, Creation::Stack) {
+            work::Operation::StackCreate
+        } else {
+            work::Operation::Create
+        },
     )?;
     let stack = CreationStack::select(&target, &work, creation)?;
     let checked =
         review_policy::create_binding(&github, &target, &document.body, head, Some(work.base()))?;
     let head = review_policy::qualified_head(&checked, head)?;
+    review_policy::admit_publication(&checked, &document.body)?;
     admit_review_request(
         Operation::Create,
         target.generation,
@@ -2257,9 +2435,9 @@ fn create(
     let created = gh(&args)?;
     print!("{created}");
     let number = created_number(&created)?;
-    evidence::remember(&target.repo, number, &checked.object)?;
-    work.published(number)?;
-    stack.published(&target, number)
+    review_policy::remember(&checked, &target, &github, number)?;
+    stack.published(&target, number)?;
+    work.published(number)
 }
 
 fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
@@ -2268,6 +2446,7 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     let github = Github::connect()?;
     let live = live_document(&github, &target, pr)?;
     let checked = review_policy::live_binding(&github, &target, &document.body, &live)?;
+    review_policy::admit_publication(&checked, &document.body)?;
     review_policy::preserve_edit(&github, &target, pr, &checked)?;
     admit_review_request(
         Operation::Edit,
@@ -2307,7 +2486,7 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     ];
     let _body = write_document(&mut args, &document)?;
     print!("{}", gh(&args)?);
-    evidence::remember(&target.repo, pr, &checked.object)?;
+    review_policy::remember(&checked, &target, &github, pr)?;
     settle_pause(&target.repo, pr, checked.route, &document.body)
 }
 
@@ -2373,7 +2552,7 @@ fn make_ready(
     let mut args = arguments("ready", &target.repo);
     args.push(pr.to_string().into());
     print!("{}", gh(&args)?);
-    evidence::remember(&target.repo, pr, &reviewed.object)?;
+    review_policy::remember(&reviewed, target, github, pr)?;
     settle_ready(target, pr, head, marked)?;
     Ok(document.body)
 }
@@ -2455,6 +2634,54 @@ fn open_prs(target: &Target) -> Result<Vec<OpenPr>> {
         .collect())
 }
 
+/// `merge` lands a stack of one.
+/// GitHub merges a member of a longer stack only through its asynchronous endpoint, which `stack merge` uses with the members below it.
+fn require_unstacked(target: &Target, open: &[OpenPr], pr: u64) -> Result<()> {
+    let Some(member) = open.iter().find(|open| open.number == pr) else {
+        return Ok(());
+    };
+    let related: Vec<_> = open
+        .iter()
+        .filter_map(|other| {
+            if other.head_ref_name == member.base_ref_name {
+                Some(format!(
+                    "parent #{} ({})",
+                    other.number, other.head_ref_name
+                ))
+            } else if other.base_ref_name == member.head_ref_name {
+                Some(format!("child #{} ({})", other.number, other.head_ref_name))
+            } else {
+                None
+            }
+        })
+        .collect();
+    if related.is_empty() {
+        return Ok(());
+    }
+    let mut refusal = Refusal::new(
+        "pr.stack",
+        format!(
+            "#{pr} belongs to an open stack; `stack merge` lands it with the members below it through GitHub's asynchronous merge"
+        ),
+        command(&[
+            "pr-workflow",
+            "stack",
+            "merge",
+            "--repo",
+            &target.repo,
+            "--pr",
+            &pr.to_string(),
+        ]),
+    );
+    for relation in related {
+        refusal = refusal.evidence(format!(
+            "#{pr} ({}) on {} has {relation}",
+            member.head_ref_name, member.base_ref_name
+        ));
+    }
+    Err(refusal.into())
+}
+
 /// Returns the open PRs from the trunk up to the one whose head matches `head`, bottom first, and the trunk below them.
 fn chain(open: &[OpenPr], head: &str) -> (Vec<u64>, String) {
     let mut numbers = Vec::new();
@@ -2509,7 +2736,10 @@ fn merge_state(
     };
     let (total, unfinished, failed, missing) =
         tally(&view.status_check_rollup, &requirements.checks);
-    let checks = head_checks(total, unfinished.saturating_add(missing), failed);
+    let declared = total > 0
+        || !requirements.checks.is_empty()
+        || github.carries_workflow(target, &view.head_ref_oid)?;
+    let checks = head_checks(total, unfinished.saturating_add(missing), failed, declared);
     let mut exclusion = review_exclusion(&target.repo, pr, &view.body)?;
     let mut assessment = None;
     if matches!(lifecycle, Lifecycle::Draft | Lifecycle::Ready) {
@@ -2535,8 +2765,9 @@ fn merge_state(
             &view.head_ref_oid,
             signer,
         )?;
-        evidence::remember(&target.repo, pr, &reviewed.object)?;
-        review_policy::validate_live_source(&reviewed, &view.source)?;
+        review_policy::admit_publication(&reviewed, &view.body)?;
+        review_policy::remember(&reviewed, target, github, pr)?;
+        review_policy::validate_live_source(&reviewed, &view.source, carry)?;
         review_policy::labels(&reviewed, &view.labels)?;
         if lifecycle == Lifecycle::Ready
             && (stacked || requirements.queue || !behind)
@@ -2593,6 +2824,11 @@ fn stop_refusal(target: &Target, pr: u64, stop: Stop, stacked: bool, view: &Merg
         Stop::FailedChecks => (
             "pr.checks",
             "a check on the head failed; fix it, push, and merge again".to_owned(),
+            command(&["gh", "pr", "checks", &number, "--repo", &target.repo]),
+        ),
+        Stop::NoChecks => (
+            ABSENT_CHECKS_RULE,
+            format!("{ABSENT_CHECKS_CAUSE}, push, and merge again"),
             command(&["gh", "pr", "checks", &number, "--repo", &target.repo]),
         ),
         Stop::Review => (
@@ -2653,13 +2889,21 @@ fn add_pause_lines(target: &Target, pr: u64, view: &MergeView) -> Result<()> {
 }
 
 /// The target of one PR's ready transition: its own closing issue unless the command named one.
+/// GitHub reports no closing reference for a PR whose base isn't the default branch, so the visible body supplies it then.
 fn ready_target(target: &Target, view: &MergeView) -> Target {
     let mut target = target.clone();
-    target.issue = target.issue.or_else(|| {
-        view.closing_issues_references
-            .first()
-            .map(|issue| issue.number)
-    });
+    target.issue = target
+        .issue
+        .or_else(|| {
+            view.closing_issues_references
+                .first()
+                .map(|issue| issue.number)
+        })
+        .or_else(|| {
+            closing_references(&view.body, &target.repo)
+                .first()
+                .copied()
+        });
     target
 }
 
@@ -2989,6 +3233,24 @@ fn prune_merged(target: &Target, dry_run: bool) -> Result<()> {
         println!("Deleted {branch} at {head}: {reason}");
     }
     Ok(())
+}
+
+/// Runs a leased `restack` and carries the issue context of each local stack branch whose own change it kept.
+fn restack(target: &Target, restack: impl FnOnce() -> Result<()>) -> Result<()> {
+    require_checkout(target)?;
+    let root = platform::issue_context::checkout(&std::env::current_dir()?)?;
+    let contexts = context::local_contexts(&root)?;
+    if contexts.is_empty() {
+        return restack();
+    }
+    let github = Github::connect()?;
+    let trunk = github
+        .repository(&target.repo)?
+        .default_branch
+        .context("the repository reports no default branch")?;
+    let restacking = context::before_restack(&root, contexts, &open_prs(target)?, &trunk)?;
+    restack()?;
+    context::after_restack(&github, &root, &target.repo, &trunk, restacking)
 }
 
 /// Restacks the checked-out stack under the lease, pushing it with explicit leases.
@@ -3322,8 +3584,77 @@ fn create_stacked(document: DocumentArgs, head: &str, base: &str, rerun: &str) -
     create(document, head, Some(base), &Creation::Stack, rerun)
 }
 
+fn link_stack(target: &Target, numbers: &[u64], base: &str) -> Result<()> {
+    target.conventional_required()?;
+    require_checkout(target)?;
+    let github = Github::connect()?;
+    let plan = work::LinkPlan::prepare(&github, target, numbers, base)?;
+    let mut before = Vec::new();
+    for member in &plan.members {
+        let live = live_document(&github, target, member.number)?;
+        ensure!(
+            live.state == "OPEN" && live.author.login.eq_ignore_ascii_case(&github.login),
+            "stack members must remain owned open PRs"
+        );
+        ensure!(
+            live.head_ref_oid.as_deref() == Some(&member.sha),
+            "stack PR head changed before linking"
+        );
+        let checked = review_policy::create_binding(
+            &github,
+            target,
+            &live.body,
+            &member.head,
+            Some(&member.base),
+        )?;
+        review_policy::validate_live_source(&checked, &live.source, None)?;
+        review_policy::admit_publication(&checked, &live.body)?;
+        review_policy::labels(&checked, &live.labels)?;
+        admit_review_request(
+            Operation::Edit,
+            target.generation,
+            &live.body,
+            checked.route,
+            || {
+                Ok((
+                    live.is_draft,
+                    review_exclusion(&target.repo, member.number, &live.body)?,
+                ))
+            },
+        )?;
+        before.push(live);
+    }
+    plan.require_current()?;
+    let mut args = vec!["link".to_owned(), "--base".to_owned(), base.to_owned()];
+    args.extend(numbers.iter().map(u64::to_string));
+    gh_stack(
+        target,
+        None,
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+    )?;
+    for (member, original) in plan.members.iter().zip(before) {
+        let live = live_document(&github, target, member.number)?;
+        ensure!(
+            live.state == "OPEN"
+                && live.head_ref_oid.as_deref() == Some(&member.sha)
+                && live.base_ref_name.as_deref() == Some(&member.base)
+                && live.is_draft == original.is_draft
+                && live.body == original.body
+                && live.title == original.title,
+            "stack link readback changed; inspect the remote stack before another write"
+        );
+    }
+    plan.linked()?;
+    println!(
+        "Linked {} PRs and retired their independent declarations",
+        numbers.len()
+    );
+    Ok(())
+}
+
 fn stack(action: StackAction, rerun: &str) -> Result<()> {
     match action {
+        StackAction::Link { target, base, prs } => link_stack(&target, &prs, &base)?,
         StackAction::Create {
             document,
             head,
@@ -3331,7 +3662,7 @@ fn stack(action: StackAction, rerun: &str) -> Result<()> {
         } => create_stacked(document, &head, &base, rerun)?,
         StackAction::Sync { target } => {
             target.conventional_required()?;
-            sync_stack(&target)?;
+            restack(&target, || sync_stack(&target))?;
         }
         StackAction::Rebase {
             target,
@@ -3340,18 +3671,26 @@ fn stack(action: StackAction, rerun: &str) -> Result<()> {
         } => {
             target.conventional_required()?;
             require_checkout(&target)?;
-            let lease = Lease::acquire()?;
-            let mut args = vec!["rebase"];
-            if resume {
-                args.push("--continue");
-            }
+            let rebase = || {
+                let lease = Lease::acquire()?;
+                let mut args = vec!["rebase"];
+                if resume {
+                    args.push("--continue");
+                }
+                if abort {
+                    args.push("--abort");
+                }
+                gh_stack(&target, Some(&lease), &args)?;
+                if !abort {
+                    drop(lease);
+                    sync_stack(&target)?;
+                }
+                Ok(())
+            };
             if abort {
-                args.push("--abort");
-            }
-            gh_stack(&target, Some(&lease), &args)?;
-            if !abort {
-                drop(lease);
-                sync_stack(&target)?;
+                rebase()?;
+            } else {
+                restack(&target, rebase)?;
             }
         }
         StackAction::Merge {
@@ -3407,6 +3746,81 @@ pub(crate) fn install(binary: &std::path::Path, user_directory: &std::path::Path
     Ok(())
 }
 
+/// Refresh only the verified executable and its installation origin.
+///
+/// # Errors
+///
+/// Refuses a stale or foreign artifact and reports installation failures.
+pub fn install_binary(
+    source: &std::path::Path,
+    binary: &std::path::Path,
+    user_directory: &std::path::Path,
+) -> Result<()> {
+    let built = platform::freshness::Built::PrWorkflow;
+    platform::freshness::verify_artifact(source, binary, built)?;
+    install(binary, user_directory)?;
+    platform::freshness::record_installation(user_directory, source, built)
+}
+
+/// The refusal of an installation whose unrelated managed skills differ from the approved catalog.
+/// It names each difference and the review command.
+/// The skill this command installs isn't unrelated, so a difference in it doesn't appear.
+fn changed_skills(
+    skills: &std::path::Path,
+    retained: &skill_ops::Catalog,
+    capture: Option<anyhow::Error>,
+) -> Result<Refusal> {
+    use skill_ops::skill_catalog_rules::Difference;
+    let differences = match skill_ops::catalog_differences(skills, retained) {
+        Ok(differences) => differences,
+        Err(error) => return Err(capture.unwrap_or(error)),
+    };
+    let differences: Vec<_> = differences
+        .into_iter()
+        .filter(|(name, _)| name != "pull-request")
+        .collect();
+    let mut review = vec!["chezmoi".to_owned(), "diff".to_owned()];
+    let mut evidence = Vec::new();
+    for (name, difference) in &differences {
+        let path = skills.join(name);
+        let (state, blocks) = match difference {
+            Difference::Changed => ("changed since its approved revision", true),
+            Difference::Removed => ("removed though the approved catalog names it", true),
+            Difference::Added => (
+                "added outside the approved catalog, which leaves installation unaffected",
+                false,
+            ),
+        };
+        evidence.push(format!("{name}: {state} ({})", path.display()));
+        if blocks {
+            review.push(path.to_string_lossy().into_owned());
+        }
+    }
+    if review.len() == 2 {
+        review.push(skills.to_string_lossy().into_owned());
+        evidence.push(
+            "no unrelated managed skill differs in its files, description, or size; their approved references differ"
+                .to_owned(),
+        );
+    }
+    if let Some(error) = capture {
+        evidence.push(format!("capture: {error:#}"));
+    }
+    evidence.push(
+        "after review, `mise x -- cargo xtask install` in the dotfiles checkout reinstalls the source skills and records their approval"
+            .to_owned(),
+    );
+    let mut refusal = Refusal::new(
+        "pr.managed-skills",
+        "unrelated installed managed skills have changed; preserve and review them before installation",
+        command(&review),
+    );
+    for line in evidence {
+        refusal = refusal.evidence(line);
+    }
+    Ok(refusal)
+}
+
 /// Installs the checked PR skill through `apply` and the `pr-workflow` binary under `user_directory`, then records the new catalog.
 /// Experimental decision checks require the machine's opt-in.
 ///
@@ -3436,10 +3850,14 @@ pub fn deploy(
     for skill in retained.skills.values_mut() {
         skill.references.remove("pull-request");
     }
-    ensure!(
-        ops::catalog_owned(&user_directory.join(".agents/skills"), &retained)? == retained,
-        "unrelated installed managed skills have changed; preserve and review them before installation"
-    );
+    let skills = user_directory.join(".agents/skills");
+    let installed = ops::catalog_owned(&skills, &retained);
+    if !installed
+        .as_ref()
+        .is_ok_and(|installed| *installed == retained)
+    {
+        return Err(changed_skills(&skills, &retained, installed.err())?.into());
+    }
     let policy: ops::Policy =
         ops::read_json(&user_directory.join(".config/skill-ops/policy.json"))?;
     ensure!(

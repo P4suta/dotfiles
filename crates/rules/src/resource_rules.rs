@@ -28,6 +28,20 @@ pub enum Refusal {
     Inodes,
 }
 
+/// The inode capacity of one `df -i` row with its `total` and `free` counts.
+/// A filesystem without a fixed inode table, such as Btrfs or an overlay on it, reports a total of zero.
+/// A row with more free inodes than its total is inconsistent, so it leaves the capacity unmeasured.
+#[must_use]
+pub const fn reported_inodes(total: u64, free: u64) -> Inodes {
+    if free > total {
+        Inodes::Unmeasured
+    } else if total == 0 {
+        Inodes::NotApplicable
+    } else {
+        Inodes::Available(free)
+    }
+}
+
 /// Sum every declared allocation without admitting arithmetic overflow.
 #[must_use]
 pub fn required(plan: [Allocation; COMPONENTS]) -> Option<Allocation> {
@@ -112,6 +126,51 @@ mod proofs {
         kani::cover!(result.is_ok());
         kani::cover!(result.is_err());
     }
+
+    #[kani::proof]
+    fn only_a_consistent_zero_total_reports_no_inode_table() {
+        let [total, free]: [u64; 2] = kani::any();
+        let reported = reported_inodes(total, free);
+        assert_eq!(reported == Inodes::NotApplicable, total == 0 && free == 0);
+        assert_eq!(reported == Inodes::Unmeasured, free > total);
+        assert_eq!(
+            reported == Inodes::Available(free),
+            total > 0 && free <= total
+        );
+        kani::cover!(reported == Inodes::NotApplicable);
+        kani::cover!(reported == Inodes::Unmeasured);
+        kani::cover!(matches!(reported, Inodes::Available(_)));
+    }
+
+    #[kani::proof]
+    #[kani::unwind(7)]
+    fn a_fixed_inode_table_still_refuses_a_real_shortfall() {
+        let plan: [Allocation; COMPONENTS] = kani::any();
+        let bytes: Option<u64> = kani::any();
+        let [total, free]: [u64; 2] = kani::any();
+        let result = admission(plan, bytes, reported_inodes(total, free));
+        let shortfall = total > 0 && required(plan).is_some_and(|need| free < need.inodes);
+        if shortfall {
+            assert!(result.is_err());
+            let otherwise_admitted = required(plan).is_some_and(|need| {
+                need.bytes > 0
+                    && need.inodes > 0
+                    && bytes.is_some_and(|available| available >= need.bytes)
+            });
+            if otherwise_admitted {
+                assert_eq!(
+                    result,
+                    Err(if free > total {
+                        Refusal::UnmeasuredInodes
+                    } else {
+                        Refusal::Inodes
+                    })
+                );
+            }
+        }
+        kani::cover!(shortfall && result == Err(Refusal::Inodes));
+        kani::cover!(total == 0 && free == 0 && result.is_ok());
+    }
 }
 
 #[cfg(test)]
@@ -151,6 +210,34 @@ mod tests {
             admission(plan(), None, Inodes::Available(12)),
             Err(Refusal::UnmeasuredBytes)
         );
+    }
+
+    #[test]
+    fn a_reported_row_maps_tableless_fixed_and_inconsistent_counts() {
+        assert_eq!(reported_inodes(0, 0), Inodes::NotApplicable);
+        assert_eq!(reported_inodes(0, 1), Inodes::Unmeasured);
+        assert_eq!(reported_inodes(12, 13), Inodes::Unmeasured);
+        assert_eq!(reported_inodes(12, 0), Inodes::Available(0));
+        assert_eq!(reported_inodes(12, 12), Inodes::Available(12));
+        assert!(admission(plan(), Some(60), reported_inodes(0, 0)).is_ok());
+        assert_eq!(
+            admission(plan(), Some(60), reported_inodes(100, 11)),
+            Err(Refusal::Inodes)
+        );
+        assert_eq!(
+            admission(plan(), Some(60), reported_inodes(0, 12)),
+            Err(Refusal::UnmeasuredInodes)
+        );
+        for total in 0..=13 {
+            for free in 0..=13 {
+                let reported = reported_inodes(total, free);
+                assert_eq!(reported == Inodes::NotApplicable, total == 0 && free == 0);
+                assert_eq!(reported == Inodes::Unmeasured, free > total);
+                if total > 0 && free < 12 {
+                    assert!(admission(plan(), Some(60), reported).is_err());
+                }
+            }
+        }
     }
 
     #[test]

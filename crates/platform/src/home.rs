@@ -34,6 +34,17 @@ pub fn local_app_data(home: &Path) -> PathBuf {
         .map_or_else(|| home.join("AppData/Local"), PathBuf::from)
 }
 
+/// The user's cache folder: the local app data folder on Windows, and `XDG_CACHE_HOME` or `.cache` under `home` elsewhere.
+#[must_use]
+pub fn cache_home(home: &Path) -> PathBuf {
+    if cfg!(windows) {
+        return local_app_data(home);
+    }
+    std::env::var_os("XDG_CACHE_HOME")
+        .filter(|value| !value.is_empty())
+        .map_or_else(|| home.join(".cache"), PathBuf::from)
+}
+
 /// The Scoop installation, from `SCOOP` or its default under `home`.
 #[must_use]
 pub fn scoop_root(home: &Path) -> PathBuf {

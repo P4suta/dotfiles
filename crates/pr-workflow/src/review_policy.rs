@@ -1,7 +1,7 @@
 use super::evidence::{self, Packet};
 use super::{Github, Target, context};
 use anyhow::{Context, Result, ensure};
-use rules::review_routing_rules::{self as policy, ReviewLevel, ReviewRoute};
+use rules::review_routing_rules::{self as policy, ReviewLevel, ReviewPolicy, ReviewRoute};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -15,9 +15,17 @@ mod git_fixture;
 
 const SCHEMA: u32 = 1;
 const GIT_OBJECT_LENGTHS: [usize; 2] = [40, 64];
+/// The tags of the two line kinds that enter a change digest.
+const CHANGE_LINE: u8 = 0;
+const HUNK_START: u8 = 1;
+/// The most commits a live PR head may hold beyond its local branch and base before the source check stops looking.
+const MAX_HELD_COMMITS: usize = 64;
 /// Starts the line that once carried a signed assessment in a PR body, which a published document now refuses.
 pub(super) const PACKET_PREFIX: &str = "<!-- pr-review-assessment:";
 const MAX_ASSESSMENT_BYTES: usize = 16 * 1024;
+const MAX_REVIEW_POLICY_BYTES: u64 = 16 * 1024;
+const REVIEW_POLICIES: &str = "review-policies";
+const REVIEW_POLICY_FILE: &str = "policy.json";
 const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
 const PAGE_SIZE: usize = 100;
 const MAX_PAGES: usize = 20;
@@ -26,7 +34,58 @@ const GRAPHQL_BOT: &str = "coderabbitai";
 const REVIEW_CONTEXT: &str = "CodeRabbit";
 const RUN_ID_LENGTH: usize = 36;
 const RUN_ID_SEPARATORS: [usize; 4] = [8, 13, 18, 23];
+const REVIEW_RANGE: &str = "Reviewing files that changed from the base of the PR and between ";
 pub(super) const CRITICAL_LABEL: &str = "review:critical";
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RepositoryReviewPolicy {
+    repository: String,
+    review: RepositoryReview,
+    reason: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RepositoryReview {
+    AlwaysPr,
+}
+
+fn repository_policy(home: &Path, repository: &str) -> Result<ReviewPolicy> {
+    let path = evidence::directory(home, REVIEW_POLICIES, repository)?.join(REVIEW_POLICY_FILE);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ReviewPolicy::Importance);
+        }
+        Err(error) => return Err(error).context("can't inspect repository review policy"),
+    };
+    ensure!(
+        metadata.is_file(),
+        "repository review policy must be a regular file"
+    );
+    let mut bytes = Vec::new();
+    fs::File::open(&path)?
+        .take(MAX_REVIEW_POLICY_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        u64::try_from(bytes.len())? <= MAX_REVIEW_POLICY_BYTES,
+        "repository review policy exceeds its byte bound"
+    );
+    let policy: RepositoryReviewPolicy = serde_json::from_slice(&bytes)
+        .context("repository review policy needs repository, review: always_pr, and reason")?;
+    ensure!(
+        policy.repository.eq_ignore_ascii_case(repository),
+        "repository review policy belongs to another repository"
+    );
+    ensure!(
+        super::single_line(&policy.reason),
+        "repository review policy needs a one-line reason"
+    );
+    Ok(match policy.review {
+        RepositoryReview::AlwaysPr => ReviewPolicy::AlwaysPr,
+    })
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -232,6 +291,8 @@ struct Binding {
 struct Current {
     root: PathBuf,
     binding: Binding,
+    /// The digest of the change the diff describes, which hunk positions and text blob names don't affect.
+    change_sha256: String,
     tree: String,
     changed: BTreeSet<String>,
     source: Option<platform::source_identity::Binding>,
@@ -298,27 +359,7 @@ fn capture_source(
     let head = object(&root, head)?;
     let base = git(&root, &["merge-base", &object(&root, base)?, &head])?;
     let tree = git(&root, &["rev-parse", &format!("{head}^{{tree}}")])?;
-    let diff = platform::tool::Tool::Git
-        .command()
-        .current_dir(&root)
-        .args([
-            "--no-replace-objects",
-            "--no-pager",
-            "diff",
-            "--binary",
-            "--full-index",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--no-renames",
-            &base,
-            &head,
-            "--",
-        ])
-        .output()?;
-    ensure!(
-        diff.status.success(),
-        "could not capture the exact review diff"
-    );
+    let diff = exact_diff(&root, &base, &head)?;
     let paths = platform::signed_git::git(
         &root,
         &[
@@ -343,13 +384,67 @@ fn capture_source(
         tree,
         changed,
         source,
+        change_sha256: change_digest(&diff),
         binding: Binding {
             repository: repository.into(),
             base,
             head,
-            diff_sha256: platform::build_inputs::hex(&Sha256::digest(&diff.stdout)),
+            diff_sha256: platform::build_inputs::hex(&Sha256::digest(&diff)),
         },
     })
+}
+
+/// The exact binary diff from `base` to `head`.
+fn exact_diff(root: &Path, base: &str, head: &str) -> Result<Vec<u8>> {
+    let diff = platform::tool::Tool::Git
+        .command()
+        .current_dir(root)
+        .args([
+            "--no-replace-objects",
+            "--no-pager",
+            "diff",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            base,
+            head,
+            "--",
+        ])
+        .output()?;
+    ensure!(
+        diff.status.success(),
+        "could not capture the exact review diff"
+    );
+    Ok(diff.stdout)
+}
+
+/// The change that `head` makes over its merge base with `base`, by the digest that carries an assessment through a base update.
+pub(super) fn change_identity(root: &Path, base: &str, head: &str) -> Result<String> {
+    let head = object(root, head)?;
+    let base = git(root, &["merge-base", &object(root, base)?, &head])?;
+    Ok(change_digest(&exact_diff(root, &base, &head)?))
+}
+
+/// Digests every line of `patch` that `patch_line` classifies as part of the change, and marks where each hunk starts.
+/// Each change line enters with its length, so distinct line sequences never share an input.
+fn change_digest(patch: &[u8]) -> String {
+    use rules::pr_merge_rules::{PatchLine, patch_line};
+    let mut digest = Sha256::new();
+    let mut lines = patch.split_inclusive(|byte| *byte == b'\n').peekable();
+    while let Some(line) = lines.next() {
+        match patch_line(line, lines.peek().copied()) {
+            PatchLine::Change => {
+                digest.update([CHANGE_LINE]);
+                digest.update(line.len().to_le_bytes());
+                digest.update(line);
+            }
+            PatchLine::HunkStart => digest.update([HUNK_START]),
+            PatchLine::TextBlobs => {}
+        }
+    }
+    platform::build_inputs::hex(&digest.finalize())
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -375,6 +470,7 @@ struct HistoricalReview {
 
 pub(super) struct Checked {
     pub route: ReviewRoute,
+    repository_policy: ReviewPolicy,
     /// The signed assessment object this check authenticated.
     pub object: String,
     binding: Binding,
@@ -474,16 +570,6 @@ pub(super) fn carry_forward(
         &view.head_ref_oid,
     )?;
     let signer = assessment_signer(github, target, &view.author, &view.source)?;
-    let decision = assessment_change(
-        current.binding == prior.binding,
-        current.binding.diff_sha256 == prior.binding.diff_sha256,
-        current.source.as_ref() == Some(&prior.source) && signer == prior.signer,
-    );
-    match decision {
-        AssessmentChange::Keep | AssessmentChange::Reassess => return Ok(()),
-        AssessmentChange::Resign => {}
-    }
-    let signers = context::signers_for_login(github, signer)?;
     let old = capture_verified(
         github,
         &prior.root,
@@ -491,6 +577,16 @@ pub(super) fn carry_forward(
         &prior.binding.base,
         &prior.binding.head,
     )?;
+    let decision = assessment_change(
+        current.binding == prior.binding,
+        current.change_sha256 == old.change_sha256,
+        current.source.as_ref() == Some(&prior.source) && signer == prior.signer,
+    );
+    match decision {
+        AssessmentChange::Keep | AssessmentChange::Reassess => return Ok(()),
+        AssessmentChange::Resign => {}
+    }
+    let signers = context::signers_for_login(github, signer)?;
     let packet = evidence::object(&target.repo, &prior.object)?;
     let mut statement = authenticate(&old, &packet, signers.path(), signer)?;
     statement.binding = current.binding;
@@ -544,7 +640,8 @@ fn check_at(
         &current.binding.diff_sha256,
     )?;
     let statement = authenticate(&current, &packet, signers.path(), signer)?;
-    let route = policy::route(statement.assessment.level.into());
+    let repository_policy = repository_policy(&evidence::home()?, &target.repo)?;
+    let route = policy::repository_route(statement.assessment.level.into(), repository_policy);
     let ignore_count = body
         .lines()
         .filter(|line| line.trim() == REVIEW_EXCLUSION)
@@ -558,6 +655,7 @@ fn check_at(
     }
     Ok(Checked {
         route,
+        repository_policy,
         object: packet.object,
         binding: current.binding,
         root: current.root,
@@ -655,6 +753,20 @@ pub(super) fn paused(checked: &Checked) -> Result<bool> {
     })
 }
 
+pub(super) fn admit_publication(checked: &Checked, body: &str) -> Result<()> {
+    if checked.repository_policy == ReviewPolicy::AlwaysPr {
+        ensure!(
+            !paused(checked)?,
+            "repository PR review route is paused by the owner; keep this operation pending until the owner resumes PR reviews"
+        );
+        ensure!(
+            !body.lines().any(|line| line.trim() == REVIEW_EXCLUSION),
+            "repository PR review policy requires removing the standing CodeRabbit suppression"
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn completion(
     checked: &Checked,
     target: &Target,
@@ -692,7 +804,7 @@ pub(super) fn completion(
         ReviewRoute::Pr => {
             ensure!(
                 target.cli_receipt.is_none(),
-                "critical importance requires PR review, not a CLI substitute"
+                "the selected PR review route does not accept a CLI substitute"
             );
             require_pr_review(github, target, pr, &checked.binding, &checked.assessment)?;
         }
@@ -803,7 +915,7 @@ pub(super) fn labels(checked: &Checked, labels: &[super::ReviewLabel]) -> Result
     }
     ensure!(
         checked.route == ReviewRoute::Pr || !seen.contains(&CRITICAL_LABEL.to_owned()),
-        "noncritical PR cannot opt into automatic CodeRabbit PR review"
+        "the selected review route cannot opt into automatic CodeRabbit PR review"
     );
     Ok(())
 }
@@ -839,6 +951,108 @@ struct CommitStatus {
     context: String,
     state: String,
     description: String,
+    created_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ComparedFile {
+    filename: String,
+    previous_filename: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ReviewComparison {
+    base_commit: CommitObject,
+    behind_by: u64,
+    files: Vec<ComparedFile>,
+}
+
+struct ComparedReview {
+    base: String,
+    files: BTreeSet<String>,
+    comparison_files: usize,
+    same_pr_diff: bool,
+}
+
+struct FullReview<'a> {
+    review: &'a SubmittedReview,
+    base: &'a str,
+    files: BTreeSet<String>,
+}
+
+fn latest_full_review(reviews: &[SubmittedReview]) -> Option<FullReview<'_>> {
+    reviews
+        .iter()
+        .filter(|review| review.user.login == REVIEW_BOT)
+        .filter_map(|review| {
+            let (base, _) = review_range(&review.body).ok()?;
+            let files = full_review_body(&review.body, base, &review.commit_id).ok()?;
+            Some(FullReview {
+                review,
+                base,
+                files,
+            })
+        })
+        .max_by_key(|full| full.review.id)
+}
+
+fn compare_reviewed_head(
+    github: &Github,
+    target: &Target,
+    binding: &Binding,
+    review: &SubmittedReview,
+) -> Result<ComparedReview> {
+    let root = std::env::current_dir()?;
+    fetch_pr(&root, target, &binding.base, &review.commit_id)?;
+    let prior = capture_verified(
+        github,
+        &root,
+        &target.repo,
+        &binding.base,
+        &review.commit_id,
+    )?;
+    let compare = |base: &str, head: &str| -> Result<ReviewComparison> {
+        let comparison: ReviewComparison = github
+            .read(&format!(
+                "repos/{}/compare/{base}...{head}?per_page=1&page=1",
+                target.repo
+            ))
+            .context("CodeRabbit head comparison file inventory is unavailable or malformed")?;
+        ensure!(
+            comparison.base_commit.sha == base,
+            "CodeRabbit head comparison belongs to another base commit"
+        );
+        Ok(comparison)
+    };
+    let forward = compare(&review.commit_id, &binding.head)?;
+    let reverse_needed = forward.behind_by > 0;
+    let mut comparisons = vec![forward];
+    if reverse_needed {
+        comparisons.push(compare(&binding.head, &review.commit_id)?);
+    }
+    let comparison_files = comparisons
+        .iter()
+        .map(|comparison| comparison.files.len())
+        .max()
+        .context("CodeRabbit head comparison is missing")?;
+    let mut files = BTreeSet::new();
+    for comparison in comparisons {
+        for file in comparison.files {
+            for path in Some(file.filename)
+                .into_iter()
+                .chain(file.previous_filename)
+            {
+                platform::issue_context::relative(Path::new(&path))?;
+                files.insert(path);
+            }
+        }
+    }
+    Ok(ComparedReview {
+        base: prior.binding.base,
+        files,
+        comparison_files,
+        same_pr_diff: prior.binding.diff_sha256 == binding.diff_sha256,
+    })
 }
 
 fn pages<T: serde::de::DeserializeOwned>(github: &Github, endpoint: &str) -> Result<Vec<T>> {
@@ -872,7 +1086,9 @@ fn require_pr_review(
         github,
         &format!("repos/{}/commits/{head}/statuses", target.repo),
     )?;
-    validate_pr_evidence(&reviews, &statuses, binding, assessment, pr)?;
+    validate_pr_evidence(&reviews, &statuses, binding, assessment, pr, |review| {
+        compare_reviewed_head(github, target, binding, review)
+    })?;
     let live = super::live_document(github, target, pr)?;
     ensure!(
         live.head_ref_oid.as_deref() == Some(head.as_str()),
@@ -887,6 +1103,7 @@ fn validate_pr_evidence(
     binding: &Binding,
     assessment: &Assessment,
     pr: u64,
+    compare: impl FnMut(&SubmittedReview) -> Result<ComparedReview>,
 ) -> Result<()> {
     let review = reviews
         .iter()
@@ -896,10 +1113,9 @@ fn validate_pr_evidence(
             missing_pr_review(
                 binding,
                 pr,
-                "critical PR has no submitted CodeRabbit review of its current head",
+                "PR has no submitted CodeRabbit review of its current head",
             )
         })?;
-    validate_submitted_review(review, binding, assessment)?;
     let status = statuses
         .iter()
         .filter(|status| status.creator.login == REVIEW_BOT && status.context == REVIEW_CONTEXT)
@@ -915,6 +1131,95 @@ fn validate_pr_evidence(
         status.state == "success" && status.description == "Review completed",
         "current-head CodeRabbit terminal is skipped, partial, pending, failed, or unknown"
     );
+    if review.commit_id == binding.head && !review.body.trim().is_empty() {
+        return validate_submitted_review(review, binding, assessment);
+    }
+    if review.commit_id == binding.head {
+        ensure!(
+            review.id != 0
+                && review.state == "APPROVED"
+                && review
+                    .submitted_at
+                    .as_ref()
+                    .is_some_and(|time| !time.is_empty()),
+            "empty current-head CodeRabbit review is not a submitted approval"
+        );
+    }
+    validate_carried_review(reviews, status, binding, assessment, pr, compare)
+}
+
+fn validate_carried_review(
+    reviews: &[SubmittedReview],
+    status: &CommitStatus,
+    binding: &Binding,
+    assessment: &Assessment,
+    pr: u64,
+    mut compare: impl FnMut(&SubmittedReview) -> Result<ComparedReview>,
+) -> Result<()> {
+    let FullReview {
+        review,
+        base,
+        files,
+    } = latest_full_review(reviews).ok_or_else(|| {
+        missing_pr_review(
+            binding,
+            pr,
+            "PR has no complete CodeRabbit full-review body",
+        )
+    })?;
+    ensure!(
+        review.id != 0
+            && matches!(
+                review.state.as_str(),
+                "COMMENTED" | "APPROVED" | "CHANGES_REQUESTED"
+            ),
+        "prior full CodeRabbit review is pending, dismissed, or unknown"
+    );
+    ensure!(
+        assessment
+            .evidence
+            .iter()
+            .all(|evidence| files.contains(&evidence.path)),
+        "assessment evidence paths were not selected by the prior full CodeRabbit review"
+    );
+    let submitted_at: jiff::Timestamp = review
+        .submitted_at
+        .as_deref()
+        .context("prior full CodeRabbit review submission time is missing")?
+        .parse()
+        .context("prior full CodeRabbit review submission time is malformed")?;
+    let created_at: jiff::Timestamp = status
+        .created_at
+        .as_deref()
+        .context("current-head CodeRabbit terminal status creation time is missing")?
+        .parse()
+        .context("current-head CodeRabbit terminal status creation time is malformed")?;
+    let comparison = compare(review)?;
+    ensure!(
+        base == comparison.base,
+        "prior CodeRabbit full review does not cover its canonical PR base-to-head range"
+    );
+    let unselected: Vec<_> = comparison.files.difference(&files).cloned().collect();
+    match policy::review_carry(policy::ReviewCarry {
+        comparison_files: comparison.comparison_files,
+        changed_paths_selected: unselected.is_empty(),
+        same_pr_diff: comparison.same_pr_diff,
+        submitted_at: submitted_at.as_nanosecond(),
+        status_created_at: created_at.as_nanosecond(),
+    }) {
+        policy::ReviewCarryDecision::Accepted => {}
+        policy::ReviewCarryDecision::IncompleteComparison => anyhow::bail!(
+            "CodeRabbit head comparison reaches GitHub's {}-file limit; no partial review credit",
+            policy::COMPARE_FILE_LIMIT
+        ),
+        policy::ReviewCarryDecision::UnreviewedChanges => anyhow::bail!(
+            "files changed outside the prior full CodeRabbit review's selected set: {}",
+            unselected.join(", ")
+        ),
+        policy::ReviewCarryDecision::StaleStatus => anyhow::bail!(
+            "current-head CodeRabbit terminal status was not created after the prior full review submission"
+        ),
+    }
     Ok(())
 }
 
@@ -960,7 +1265,7 @@ fn validate_submitted_review(
             .evidence
             .iter()
             .all(|evidence| files.contains(&evidence.path)),
-        "critical severity-bearing source paths were not selected by the completed full PR review"
+        "assessment evidence paths were not selected by the completed full PR review"
     );
     Ok(())
 }
@@ -970,7 +1275,6 @@ fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTree
         "<!-- This is an auto-generated comment by CodeRabbit for review status -->";
     const COMMENTS: &str = "**Actionable comments posted: ";
     const RUN: &str = "- **Run ID**: `";
-    const RANGE: &str = "Reviewing files that changed from the base of the PR and between ";
     const FILES: &str = "<summary>📒 Files selected for processing (";
     ensure!(
         body.lines().last() == Some(FOOTER) && body.matches(FOOTER).count() == 1,
@@ -1011,24 +1315,16 @@ fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTree
                 }),
         "CodeRabbit run identity malformed"
     );
-    let range = unique(RANGE)?
-        .strip_suffix('.')
-        .context("CodeRabbit reviewed range malformed")?;
-    let (base, reviewed) = range
-        .split_once(" and ")
-        .context("CodeRabbit reviewed range missing")?;
+    let (base, reviewed) = review_range(body)?;
     ensure!(
         base == expected_base && reviewed == head,
-        "critical review must cover the full canonical PR base-to-head range"
+        "PR review must cover the full canonical PR base-to-head range"
     );
     let count = unique(FILES)?
         .strip_suffix(")</summary>")
         .context("CodeRabbit selected file inventory malformed")?
         .parse::<usize>()?;
-    ensure!(
-        count > 0,
-        "CodeRabbit selected no files for the critical review"
-    );
+    ensure!(count > 0, "CodeRabbit selected no files for the PR review");
     let selected = body
         .split_once(FILES)
         .context("CodeRabbit selected files missing")?
@@ -1052,6 +1348,29 @@ fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTree
         "CodeRabbit selected file inventory is incomplete"
     );
     Ok(files)
+}
+
+fn review_range(body: &str) -> Result<(&str, &str)> {
+    let mut ranges = body
+        .lines()
+        .filter_map(|line| line.strip_prefix(REVIEW_RANGE));
+    let range = ranges.next().context("CodeRabbit reviewed range missing")?;
+    ensure!(
+        ranges.next().is_none(),
+        "CodeRabbit reviewed range is ambiguous"
+    );
+    let (base, head) = range
+        .strip_suffix('.')
+        .and_then(|range| range.split_once(" and "))
+        .context("CodeRabbit reviewed range malformed")?;
+    ensure!(
+        [base, head]
+            .into_iter()
+            .all(|object| GIT_OBJECT_LENGTHS.contains(&object.len())
+                && object.bytes().all(|byte| byte.is_ascii_hexdigit())),
+        "CodeRabbit reviewed range requires full Git object names"
+    );
+    Ok((base, head))
 }
 
 const THREADS_QUERY: &str = "query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated comments(first:100){pageInfo{hasNextPage endCursor} nodes{author{login} body}}}}}}}";
@@ -1331,7 +1650,7 @@ pub(super) fn live_binding_at(
             .context("actual PR head commit is missing")?,
         signer,
     )?;
-    validate_live_source(&checked, &live.source)?;
+    validate_live_source(&checked, &live.source, None)?;
     labels(&checked, &live.labels)?;
     Ok(checked)
 }
@@ -1371,7 +1690,12 @@ pub(super) fn qualified_head(checked: &Checked, head: &str) -> Result<String> {
     }
 }
 
-pub(super) fn validate_live_source(checked: &Checked, source: &super::LiveSource) -> Result<()> {
+/// `replaced` is the check of the head that an update merge replaced, when the command pushed one.
+pub(super) fn validate_live_source(
+    checked: &Checked,
+    source: &super::LiveSource,
+    replaced: Option<&Checked>,
+) -> Result<()> {
     let supplied = source.head_repository.is_some()
         || source.head_repository_owner.is_some()
         || source.is_cross_repository.is_some();
@@ -1397,11 +1721,114 @@ pub(super) fn validate_live_source(checked: &Checked, source: &super::LiveSource
         .as_deref()
         .context("actual PR source branch missing")?;
     let branch = platform::source_identity::head_branch(&checked.root, &checked.source, branch)?;
-    ensure!(
-        object(&checked.root, &format!("refs/heads/{branch}"))? == checked.binding.head,
-        "actual PR head branch differs from the locally assessed source"
-    );
+    let live = &checked.binding.head;
+    let Some(local) = local_branch(&checked.root, &branch)? else {
+        return Err(platform::refusal::Refusal::new(
+            "pr.source",
+            format!(
+                "this checkout has no local branch {branch} to compare the PR head {live} with; run the command from the checkout that holds the branch"
+            ),
+            platform::refusal::command(&["git", "worktree", "list"]),
+        )
+        .evidence(format!(
+            "refs/heads/{branch} is missing in {}",
+            checked.root.display()
+        ))
+        .into());
+    };
+    let at_branch = local == *live;
+    let (held, complete) = if at_branch {
+        (Vec::new(), true)
+    } else {
+        held_commits(&checked.root, &local, &checked.binding)?
+    };
+    if rules::pr_merge_rules::live_head(at_branch, &held, complete)
+        == rules::pr_merge_rules::LiveHead::Diverged
+    {
+        let mut refusal = platform::refusal::Refusal::new(
+            "pr.source",
+            format!(
+                "the PR head {live} is neither the local branch {branch} at {local} nor a base update merge of it, so it holds work that this checkout didn't assess"
+            ),
+            platform::refusal::command(&["git", "log", "--oneline", &format!("{local}..{live}")]),
+        );
+        if let Some(replaced) = replaced.filter(|replaced| replaced.binding.head != *live) {
+            refusal = refusal.evidence(format!(
+                "the update merge moved the PR head from {} to {live}",
+                replaced.binding.head
+            ));
+        }
+        return Err(refusal.into());
+    }
     Ok(())
+}
+
+/// The commit of the local branch `branch`, or `None` when this checkout has no such branch.
+fn local_branch(root: &Path, branch: &str) -> Result<Option<String>> {
+    let reference = format!("refs/heads/{branch}");
+    let output = platform::tool::Tool::Git
+        .command()
+        .current_dir(root)
+        .args([
+            "--no-replace-objects",
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &reference,
+        ])
+        .output()?;
+    match output.status.code() {
+        Some(0) => object(root, &reference).map(Some),
+        Some(1) => Ok(None),
+        _ => anyhow::bail!(
+            "could not read {reference}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+    }
+}
+
+/// The commits that the bound head holds beyond the `local` branch head and the bound base, and whether the list is complete.
+fn held_commits(
+    root: &Path,
+    local: &str,
+    binding: &Binding,
+) -> Result<(Vec<rules::pr_merge_rules::HeldCommit>, bool)> {
+    let listed = git(
+        root,
+        &[
+            "rev-list",
+            "--parents",
+            &format!("--max-count={}", MAX_HELD_COMMITS + 1),
+            &binding.head,
+            &format!("^{local}"),
+            &format!("^{}", binding.base),
+            "--",
+        ],
+    )?;
+    let commits: Vec<Vec<&str>> = listed
+        .lines()
+        .map(|line| line.split_whitespace().collect())
+        .collect();
+    let names: BTreeSet<&str> = commits
+        .iter()
+        .filter_map(|commit| commit.first().copied())
+        .collect();
+    let mut held = Vec::new();
+    for commit in commits.iter().take(MAX_HELD_COMMITS) {
+        let parents = commit.get(1..).unwrap_or_default();
+        let merges_base = match parents {
+            [_, second] => platform::signed_git::is_ancestor(root, second, &binding.base)?,
+            _ => false,
+        };
+        held.push(rules::pr_merge_rules::HeldCommit {
+            merge: parents.len() == 2,
+            follows_branch: parents
+                .first()
+                .is_some_and(|first| *first == local || names.contains(first)),
+            merges_base,
+        });
+    }
+    Ok((held, commits.len() <= MAX_HELD_COMMITS))
 }
 
 pub(super) fn admit_ready(
@@ -1411,7 +1838,7 @@ pub(super) fn admit_ready(
     pr: u64,
     body: &str,
 ) -> Result<()> {
-    if checked.route == ReviewRoute::Pr {
+    if checked.route == ReviewRoute::Pr && checked.repository_policy == ReviewPolicy::Importance {
         ensure!(
             !paused(checked)?,
             "critical PR review is paused; keep this PR draft until its required route resumes"
@@ -1423,6 +1850,7 @@ pub(super) fn admit_ready(
         require_history(checked, target, github)?;
         require_resolved_threads(github, target, pr, &checked.binding.head)
     } else {
+        admit_publication(checked, body)?;
         completion(checked, target, github, pr)
     }
 }
@@ -1434,8 +1862,8 @@ fn previous(
     pr: u64,
     signer: &str,
     root: &Path,
-) -> Result<Option<Statement>> {
-    let Some(object) = evidence::remembered(&target.repo, pr)? else {
+) -> Result<Option<(Statement, ReviewPolicy)>> {
+    let Some((object, always_pr)) = evidence::remembered(&target.repo, pr)? else {
         return Ok(None);
     };
     let packet = evidence::object(&target.repo, &object)?;
@@ -1453,12 +1881,14 @@ fn previous(
         &prior.binding.head,
     )?;
     let signers = context::signers_for_login(github, signer)?;
-    Ok(Some(authenticate(
-        &current,
-        &packet,
-        signers.path(),
-        signer,
-    )?))
+    Ok(Some((
+        authenticate(&current, &packet, signers.path(), signer)?,
+        if always_pr {
+            ReviewPolicy::AlwaysPr
+        } else {
+            ReviewPolicy::Importance
+        },
+    )))
 }
 
 fn cli_binding(
@@ -1519,11 +1949,14 @@ fn prepare_history(
     };
     let live = super::live_document(github, target, pr)?;
     let signer = assessment_signer(github, target, &live.author, &live.source)?;
-    let Some(prior) = previous(github, target, pr, signer, &current.root)? else {
+    let Some((prior, prior_policy)) = previous(github, target, pr, signer, &current.root)? else {
         return Ok(None);
     };
-    if policy::route(prior.assessment.level.into()) == ReviewRoute::Cli
-        && policy::route(assessment.level.into()) != ReviewRoute::Cli
+    if policy::repository_route(prior.assessment.level.into(), prior_policy) == ReviewRoute::Cli
+        && policy::repository_route(
+            assessment.level.into(),
+            repository_policy(&evidence::home()?, &target.repo)?,
+        ) != ReviewRoute::Cli
     {
         let (object, findings) = historical_review(
             github,
@@ -1607,8 +2040,10 @@ pub(super) fn preserve_edit(
     pr: u64,
     checked: &Checked,
 ) -> Result<()> {
-    if let Some(prior) = previous(github, target, pr, &checked.signer, &checked.root)? {
-        if policy::route(prior.assessment.level.into()) == ReviewRoute::Cli
+    if let Some((prior, prior_policy)) =
+        previous(github, target, pr, &checked.signer, &checked.root)?
+    {
+        if policy::repository_route(prior.assessment.level.into(), prior_policy) == ReviewRoute::Cli
             && checked.route != ReviewRoute::Cli
         {
             let history = checked.history.as_ref().context("prior high review history must be carried into the signed reassessment; run assess --pr with --prior-cli-receipt")?;
@@ -1632,9 +2067,78 @@ pub(super) fn preserve_edit(
     require_history(checked, target, github)
 }
 
+pub(super) fn remember(checked: &Checked, target: &Target, github: &Github, pr: u64) -> Result<()> {
+    if checked.repository_policy == ReviewPolicy::AlwaysPr {
+        preserve_edit(github, target, pr, checked)?;
+    }
+    evidence::remember(
+        &target.repo,
+        pr,
+        &checked.object,
+        checked.repository_policy == ReviewPolicy::AlwaysPr,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repository_policy_defaults_and_selects_only_the_named_repository() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        assert_eq!(
+            repository_policy(home.path(), "P4suta/Hellooo")?,
+            ReviewPolicy::Importance
+        );
+        let directory = evidence::directory(home.path(), REVIEW_POLICIES, "P4suta/Hellooo")?;
+        fs::create_dir_all(&directory)?;
+        fs::write(directory.join(REVIEW_POLICY_FILE), br#"{"repository":"P4suta/Hellooo","review":"always_pr","reason":"Every PR requires review."}"#)?;
+        assert_eq!(
+            repository_policy(home.path(), "p4suta/hellooo")?,
+            ReviewPolicy::AlwaysPr
+        );
+        assert_eq!(
+            repository_policy(home.path(), "P4suta/dotfiles")?,
+            ReviewPolicy::Importance
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn repository_policy_refuses_invalid_or_unbounded_owner_input() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let directory = evidence::directory(home.path(), REVIEW_POLICIES, "P4suta/Hellooo")?;
+        fs::create_dir_all(&directory)?;
+        let path = directory.join(REVIEW_POLICY_FILE);
+        for input in [
+            "{truncated".to_owned(),
+            r#"{"repository":"P4suta/dotfiles","review":"always_pr","reason":"Review."}"#.into(),
+            r#"{"repository":"P4suta/Hellooo","review":"cli","reason":"Review."}"#.into(),
+            r#"{"repository":"P4suta/Hellooo","review":"always_pr","reason":""}"#.into(),
+            r#"{"repository":"P4suta/Hellooo","review":"always_pr","reason":"First\nSecond"}"#.into(),
+            r#"{"repository":"P4suta/Hellooo","review":"always_pr","reason":"Review.","paused":false}"#.into(),
+            r#"{"repository":"P4suta/Hellooo","review":"always_pr","review":"always_pr","reason":"Review."}"#.into(),
+            " ".repeat(usize::try_from(MAX_REVIEW_POLICY_BYTES)? + 1),
+        ] {
+            fs::write(&path, input)?;
+            assert!(repository_policy(home.path(), "P4suta/Hellooo").is_err());
+        }
+        platform::cleanup::remove_file(&path);
+        fs::create_dir(&path)?;
+        assert!(repository_policy(home.path(), "P4suta/Hellooo").is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_policy_refuses_a_dangling_symlink_instead_of_defaulting() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let directory = evidence::directory(home.path(), REVIEW_POLICIES, "P4suta/Hellooo")?;
+        fs::create_dir_all(&directory)?;
+        std::os::unix::fs::symlink("missing-policy", directory.join(REVIEW_POLICY_FILE))?;
+        assert!(repository_policy(home.path(), "P4suta/Hellooo").is_err());
+        Ok(())
+    }
 
     #[test]
     fn unrelated_source_failures_preserve_their_original_error_types() {
@@ -1752,7 +2256,288 @@ mod tests {
             context: REVIEW_CONTEXT.into(),
             state: state.into(),
             description: description.into(),
+            created_at: Some("2026-10-14T00:01:00Z".into()),
         }
+    }
+
+    fn no_comparison(_: &SubmittedReview) -> Result<ComparedReview> {
+        anyhow::bail!("a current-head full review must not need a comparison")
+    }
+
+    fn compared_review(binding: &Binding, paths: &[&str], same_pr_diff: bool) -> ComparedReview {
+        ComparedReview {
+            base: binding.base.clone(),
+            files: paths.iter().map(|path| (*path).to_owned()).collect(),
+            comparison_files: paths.len(),
+            same_pr_diff,
+        }
+    }
+
+    fn earlier_review_fixture() -> Result<(Binding, Assessment, SubmittedReview)> {
+        let (mut binding, assessment, mut review) = review_fixture()?;
+        binding.head = "d".repeat(40);
+        review.state = "CHANGES_REQUESTED".into();
+        Ok((binding, assessment, review))
+    }
+
+    #[test]
+    fn completed_clean_draft_head_reuses_the_prior_full_review() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        validate_pr_evidence(
+            &[review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &["README.md"], false)),
+        )
+    }
+
+    #[test]
+    fn unchanged_rebased_head_reuses_the_prior_full_review() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        validate_pr_evidence(
+            &[review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &[], false)),
+        )
+    }
+
+    #[test]
+    fn empty_current_head_approval_reuses_the_prior_full_review() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        let approval = SubmittedReview {
+            id: 2,
+            user: Bot {
+                login: REVIEW_BOT.into(),
+            },
+            commit_id: binding.head.clone(),
+            state: "APPROVED".into(),
+            submitted_at: Some("2026-10-14T00:02:00Z".into()),
+            body: String::new(),
+        };
+        validate_pr_evidence(
+            &[review, approval],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &["README.md"], false)),
+        )
+    }
+
+    #[test]
+    fn unchanged_pr_diff_reuses_review_after_upstream_files_change() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        validate_pr_evidence(
+            &[review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &["upstream.md"], true)),
+        )
+    }
+
+    #[test]
+    fn carried_review_refuses_changes_outside_the_selected_set() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        let error = validate_pr_evidence(
+            &[review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| {
+                Ok(compared_review(
+                    &binding,
+                    &["README.md", "unreviewed.rs"],
+                    false,
+                ))
+            },
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("outside the prior full"),
+            "{error:#}"
+        );
+        assert!(error.to_string().contains("unreviewed.rs"), "{error:#}");
+        Ok(())
+    }
+
+    #[test]
+    fn carried_review_requires_a_status_created_strictly_after_submission() -> Result<()> {
+        for (created_at, message) in [
+            (Some("2026-10-13T23:59:59Z"), "not created after"),
+            (Some("2026-10-14T00:00:00Z"), "not created after"),
+            (Some("2026-10-14T09:00:00+09:00"), "not created after"),
+            (None, "creation time is missing"),
+            (Some("unknown"), "creation time is malformed"),
+        ] {
+            let (binding, assessment, review) = earlier_review_fixture()?;
+            let mut terminal = status(1, "success", "Review completed");
+            terminal.created_at = created_at.map(str::to_owned);
+            let error =
+                validate_pr_evidence(&[review], &[terminal], &binding, &assessment, 17, |_| {
+                    Ok(compared_review(&binding, &[], false))
+                })
+                .unwrap_err();
+            assert!(
+                error.to_string().contains(message),
+                "{created_at:?}: {error:#}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn carried_review_refuses_missing_or_nonterminal_current_head_status() -> Result<()> {
+        for (statuses, message) in [
+            (vec![], "terminal status is unavailable"),
+            (
+                vec![status(1, "success", "Review skipped")],
+                "skipped, partial",
+            ),
+            (
+                vec![status(1, "pending", "Review in progress")],
+                "skipped, partial",
+            ),
+            (
+                vec![
+                    status(1, "success", "Review completed"),
+                    status(2, "failure", "Review failed"),
+                ],
+                "skipped, partial",
+            ),
+        ] {
+            let (binding, assessment, review) = earlier_review_fixture()?;
+            let error =
+                validate_pr_evidence(&[review], &statuses, &binding, &assessment, 17, |_| {
+                    Ok(compared_review(&binding, &[], false))
+                })
+                .unwrap_err();
+            assert!(error.to_string().contains(message), "{error:#}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn carried_review_refuses_incomplete_comparison_and_incorrect_prior_base() -> Result<()> {
+        for (comparison_files, base, message) in [
+            (policy::COMPARE_FILE_LIMIT, "a", "no partial review credit"),
+            (0, "e", "canonical PR base-to-head range"),
+        ] {
+            let (binding, assessment, review) = earlier_review_fixture()?;
+            let error = validate_pr_evidence(
+                &[review],
+                &[status(1, "success", "Review completed")],
+                &binding,
+                &assessment,
+                17,
+                |_| {
+                    Ok(ComparedReview {
+                        base: base.repeat(40),
+                        comparison_files,
+                        ..compared_review(&binding, &[], true)
+                    })
+                },
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains(message), "{error:#}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn carried_review_selects_the_full_body_with_the_highest_bot_review_id() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        let (_, _, mut newer) = earlier_review_fixture()?;
+        newer.id = review.id + 1;
+        newer.body = newer.body.replace("README.md", "other.md");
+        let error = validate_pr_evidence(
+            &[newer, review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &[], false)),
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("assessment evidence paths"),
+            "{error:#}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn carried_review_refuses_partial_metadata_and_dismissed_full_reviews() -> Result<()> {
+        for (body_change, state, submitted_at, message) in [
+            (
+                true,
+                "COMMENTED",
+                Some("2026-10-14T00:00:00Z"),
+                "no complete CodeRabbit full-review body",
+            ),
+            (
+                false,
+                "DISMISSED",
+                Some("2026-10-14T00:00:00Z"),
+                "pending, dismissed",
+            ),
+            (
+                false,
+                "CHANGES_REQUESTED",
+                None,
+                "submission time is missing",
+            ),
+            (
+                false,
+                "CHANGES_REQUESTED",
+                Some("unknown"),
+                "submission time is malformed",
+            ),
+        ] {
+            let (binding, assessment, mut review) = earlier_review_fixture()?;
+            review.state = state.into();
+            review.submitted_at = submitted_at.map(str::to_owned);
+            if body_change {
+                review.body = review
+                    .body
+                    .replace(REVIEW_RANGE, "Incrementally reviewing ");
+            }
+            let error = validate_pr_evidence(
+                &[review],
+                &[status(1, "success", "Review completed")],
+                &binding,
+                &assessment,
+                17,
+                |_| Ok(compared_review(&binding, &[], false)),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains(message), "{error:#}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn empty_approval_can_follow_a_full_review_of_the_same_head() -> Result<()> {
+        let (binding, assessment, review) = review_fixture()?;
+        let (_, _, mut approval) = review_fixture()?;
+        approval.id = review.id + 1;
+        approval.state = "APPROVED".into();
+        approval.body.clear();
+        validate_pr_evidence(
+            &[review, approval],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            |_| Ok(compared_review(&binding, &[], true)),
+        )
     }
 
     #[test]
@@ -1787,6 +2572,7 @@ mod tests {
             &binding,
             &assessment,
             1,
+            no_comparison,
         )?;
         Ok(())
     }
@@ -1801,6 +2587,7 @@ mod tests {
             &binding,
             &assessment,
             1,
+            no_comparison,
         )?;
         for latest in [
             status(2, "pending", "Review in progress"),
@@ -1814,6 +2601,7 @@ mod tests {
                     &binding,
                     &assessment,
                     1,
+                    no_comparison,
                 )
                 .is_err()
             );
@@ -1829,6 +2617,7 @@ mod tests {
                 &binding,
                 &assessment,
                 1,
+                no_comparison,
             )
             .is_err()
         );
@@ -1842,7 +2631,8 @@ mod tests {
         let statuses = [status(1, "success", "Review completed")];
         for (reviews, statuses) in [(&[][..], &statuses[..]), (&reviews[..], &[][..])] {
             let error =
-                validate_pr_evidence(reviews, statuses, &binding, &assessment, 17).unwrap_err();
+                validate_pr_evidence(reviews, statuses, &binding, &assessment, 17, no_comparison)
+                    .unwrap_err();
             let refusal = error
                 .downcast_ref::<platform::refusal::Refusal>()
                 .context("missing review needs its domain refusal")?;
@@ -1858,6 +2648,7 @@ mod tests {
             &binding,
             &assessment,
             17,
+            no_comparison,
         )
         .unwrap_err();
         assert!(error.downcast_ref::<platform::refusal::Refusal>().is_none());

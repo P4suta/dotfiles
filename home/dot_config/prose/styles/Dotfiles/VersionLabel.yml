@@ -1,0 +1,7 @@
+extends: existence
+message: "Name the design by its decision or the release by its product and number instead of the bare version label '%s'."
+level: error
+ignorecase: false
+nonword: true
+raw:
+  - '\bv[0-9]+(?:\s|$)'

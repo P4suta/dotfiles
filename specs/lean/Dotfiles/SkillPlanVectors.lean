@@ -9,12 +9,12 @@ namespace Dotfiles.SkillPlan.Vectors
 
 open Dotfiles.SkillPlan
 
-/-- The shared skills in sorted order: 0 adr, 1 apple-notarization, 2 apple-signing, 3 approval-boundaries, 4 checked-arguments, 5 ci-budget, 6 code-signing, 7 coderabbit, 8 coderabbit-review, 9 concise-source, 10 delegation, 11 development-assurance, 12 domyjob, 13 doppler, 14 dotfiles, 15 executable-policy, 16 formal-assurance, 17 functional-architecture, 18 gcp, 19 github-repository, 20 ideal-first-development, 21 ideal-specification, 22 japanese-lexicon, 23 just, 24 lefthook, 25 macos-pkg, 26 mise, 27 multi-machine, 28 mutation-testing, 29 nas, 30 ocomment, 31 orbstack, 32 oss-readme, 33 portable-skills, 34 pull-request, 35 registry-publishing, 36 release-evidence, 37 release-workflow, 38 reliability, 39 renovate, 40 resource-coordination, 41 rust-invariants, 42 rust-release, 43 rust-tooling, 44 skill-operations, 45 sslcom-esigner, 46 storage-scout, 47 synology-dsm, 48 systematic-fixes, 49 tailscale, 50 type-contracts, 51 verification-tools, 52 xtask. -/
+/-- The shared skills in sorted order: 0 adr, 1 apple-notarization, 2 apple-signing, 3 approval-boundaries, 4 checked-arguments, 5 ci-budget, 6 code-signing, 7 coderabbit, 8 coderabbit-review, 9 concise-source, 10 decision-naming, 11 delegation, 12 development-assurance, 13 domyjob, 14 doppler, 15 dotfiles, 16 executable-policy, 17 formal-assurance, 18 functional-architecture, 19 gcp, 20 github-repository, 21 ideal-first-development, 22 ideal-specification, 23 japanese-lexicon, 24 just, 25 lefthook, 26 macos-pkg, 27 mise, 28 monochrome-design, 29 multi-machine, 30 mutation-testing, 31 nas, 32 ocomment, 33 orbstack, 34 oss-readme, 35 portable-skills, 36 pull-request, 37 registry-publishing, 38 release-evidence, 39 release-workflow, 40 reliability, 41 renovate, 42 resource-coordination, 43 rust-invariants, 44 rust-release, 45 rust-tooling, 46 skill-operations, 47 sslcom-esigner, 48 storage-scout, 49 synology-dsm, 50 systematic-fixes, 51 tailscale, 52 type-contracts, 53 verification-tools, 54 xtask. -/
 def catalog : Deps
-  | 16 => [17]
-  | 44 => [33]
-  | 50 => [15]
-  | 51 => [50, 15]
+  | 17 => [18]
+  | 46 => [35]
+  | 52 => [16]
+  | 53 => [52, 16]
   | _ => []
 
 /-- Two skills that rely on each other. -/
@@ -28,11 +28,11 @@ def unknown : Deps
   | 0 => [2]
   | _ => []
 
-theorem plan_implementation_assurance : plan catalog 53 [11, 16, 17, 51] = .ok [11, 15, 17, 16, 50, 51] := by decide +kernel
+theorem plan_implementation_assurance : plan catalog 55 [12, 17, 18, 53] = .ok [12, 16, 18, 17, 52, 53] := by decide +kernel
 
-theorem plan_skill_maintenance : plan catalog 53 [33, 44] = .ok [33, 44] := by decide +kernel
+theorem plan_skill_maintenance : plan catalog 55 [35, 46] = .ok [35, 46] := by decide +kernel
 
-theorem plan_every_skill : plan catalog 53 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52] = .ok [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 16, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52] := by decide +kernel
+theorem plan_every_skill : plan catalog 55 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54] = .ok [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54] := by decide +kernel
 
 theorem plan_cycle : plan cyclic 2 [0] = .error .cycle := by decide +kernel
 

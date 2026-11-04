@@ -3,15 +3,19 @@
 extern crate alloc;
 
 pub const SSH_INCLUDE: &str = "Include ~/.config/dotfiles/ssh-agent.conf";
+/// The generated host logins precede the agent include, because the agent file ends inside `Host *`.
+pub const HOSTS_INCLUDE: &str = "Include ~/.local/state/hosts/ssh_config";
+const MANAGED_INCLUDES: [&str; 2] = [HOSTS_INCLUDE, SSH_INCLUDE];
 
 #[must_use]
 pub fn ssh_config_preserved(current: &str, rendered: &str) -> bool {
-    let host_line = |line: &&str| !line.trim().is_empty() && line.trim() != SSH_INCLUDE;
+    let host_line =
+        |line: &&str| !line.trim().is_empty() && !MANAGED_INCLUDES.contains(&line.trim());
     rendered
         .lines()
-        .filter(|line| line.trim() == SSH_INCLUDE)
-        .count()
-        == 1
+        .map(str::trim)
+        .filter(|line| MANAGED_INCLUDES.contains(line))
+        .eq(MANAGED_INCLUDES)
         && current
             .lines()
             .filter(host_line)
@@ -149,21 +153,23 @@ mod proofs {
     use super::*;
 
     #[kani::proof]
-    #[kani::unwind(128)]
+    #[kani::unwind(160)]
     fn ssh_merge_preserves_bounded_host_content_and_rejects_deletion() {
         let bytes: [u8; 8] = kani::any();
         let Ok(host) = core::str::from_utf8(&bytes) else {
             return;
         };
-        let rendered = alloc::format!("{SSH_INCLUDE}\n{host}");
+        let managed = alloc::format!("{HOSTS_INCLUDE}\n{SSH_INCLUDE}");
+        let rendered = alloc::format!("{managed}\n{host}");
         assert!(ssh_config_preserved(host, &rendered));
-        assert_eq!(
-            ssh_config_preserved(host, SSH_INCLUDE),
-            host.trim().is_empty()
-        );
+        assert_eq!(ssh_config_preserved(host, &managed), host.trim().is_empty());
         assert!(!ssh_config_preserved(
             host,
             &alloc::format!("{SSH_INCLUDE}\n{rendered}")
+        ));
+        assert!(!ssh_config_preserved(
+            host,
+            &alloc::format!("{SSH_INCLUDE}\n{HOSTS_INCLUDE}\n{host}")
         ));
         kani::cover!(!host.trim().is_empty());
         kani::cover!(host.trim().is_empty());
@@ -265,17 +271,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ssh_merge_changes_only_the_single_managed_include() {
+    fn ssh_merge_changes_only_the_two_managed_includes_in_order() {
         let host = "Include ~/.orbstack/ssh/config\nHost local\n HostName fixture.invalid\n";
-        let rendered = alloc::format!("{SSH_INCLUDE}\n{host}");
+        let rendered = alloc::format!("{HOSTS_INCLUDE}\n{SSH_INCLUDE}\n{host}");
         assert!(ssh_config_preserved(host, &rendered));
         assert!(ssh_config_preserved(&rendered, &rendered));
+        assert!(ssh_config_preserved(
+            &alloc::format!("{SSH_INCLUDE}\n{host}"),
+            &rendered
+        ));
         assert!(!ssh_config_preserved(
             host,
             &rendered.replace("fixture.invalid", "changed.invalid")
         ));
         assert!(!ssh_config_preserved(host, SSH_INCLUDE));
         assert!(!ssh_config_preserved(host, host));
+        assert!(!ssh_config_preserved(
+            host,
+            &alloc::format!("{SSH_INCLUDE}\n{host}")
+        ));
+        assert!(!ssh_config_preserved(
+            host,
+            &alloc::format!("{SSH_INCLUDE}\n{HOSTS_INCLUDE}\n{host}")
+        ));
     }
 
     #[test]

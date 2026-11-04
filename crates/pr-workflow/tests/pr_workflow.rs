@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -59,6 +60,7 @@ struct Fixture {
     base: String,
     head: String,
     level: &'static str,
+    always_pr: bool,
 }
 
 /// Run Git in a fixture checkout without the host's global hooks or identity.
@@ -141,6 +143,7 @@ impl Fixture {
             base: base_commit,
             head,
             level: "medium",
+            always_pr: false,
         })
     }
 
@@ -228,6 +231,7 @@ impl Fixture {
                 "state":"OPEN","isDraft":true
             }).to_string())
             .env("GH_FIXTURE_LEVEL", self.level)
+            .env("GH_FIXTURE_ALWAYS_PR", self.always_pr.to_string())
             .env("GH_FIXTURE_SIGNING_KEYS", serde_json::json!([{"id":17,"key":public.trim()}]).to_string())
             .env(
                 "GH_STACK_FIXTURE_LOG",
@@ -253,7 +257,8 @@ impl Fixture {
 
     /// The body with the standing review exclusion of a noncritical route, which carries no assessment.
     fn assessed_body(&self, body: &str) -> String {
-        let standing = if self.level != "critical"
+        let standing = if !self.always_pr
+            && self.level != "critical"
             && !body
                 .lines()
                 .any(|line| line.trim() == "@coderabbitai ignore")
@@ -315,9 +320,9 @@ impl Fixture {
             ])
             .output()?;
         anyhow::ensure!(diff.status.success(), "fixture diff capture failed");
-        let severe = (self.level == "critical").then(|| serde_json::json!({
+        let severe = matches!(self.level, "high" | "critical").then(|| serde_json::json!({
             "ground":"authorization_boundary",
-            "consequence":"A privileged operation could expose the complete fixture repository.", "consequence_kind":"catastrophic",
+            "consequence":"A privileged operation could expose the complete fixture repository.", "consequence_kind":if self.level == "critical" { "catastrophic" } else { "severe" },
             "likelihood":"The changed interface is directly reachable by an untrusted caller.", "likelihood_kind":"exposed",
             "blast_radius":"Every fixture account would be affected by the privileged operation.", "blast_radius_kind":"systemic",
             "rollback":"An exposed credential cannot be recalled after publication.", "rollback_kind":"irreversible"
@@ -1204,8 +1209,14 @@ fn a_new_local_project_prepares_unborn_scoped_work_without_github() -> Result<()
         ],
     )?;
     git(root, &["update-ref", "refs/heads/main", &unrelated])?;
+    let lost = platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home.path())
+        .expect_err("an unrelated head must refuse the local issue edit");
+    let lost = format!("{lost:#}");
     assert!(
-        platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home.path()).is_err()
+        lost.contains(&format!(
+            "local issue source {first_head} is not an ancestor of main at {unrelated}"
+        )) && !lost.contains("signed-evidence Git failed"),
+        "{lost}"
     );
     git(root, &["update-ref", "refs/heads/main", &first_head])?;
     platform::issue_context::guard_for(root, &[PathBuf::from("main.rs")], home.path())?;
@@ -1905,6 +1916,71 @@ fn an_initial_local_import_refuses_an_alternate_or_hidden_index() -> Result<()> 
     Ok(())
 }
 
+#[test]
+fn initial_import_ignores_only_selections_whose_source_commits_no_longer_exist() -> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    commit_first_local_source(root)?;
+    let head = git(root, &["rev-parse", "HEAD"])?;
+    let branch = git(root, &["symbolic-ref", "HEAD"])?;
+    let selected = fixture
+        .command(&["select", "--issue", "1", "--path", "main.rs"])?
+        .output()?;
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    let native = PathBuf::from(git(root, &["--exec-path"])?)
+        .join(format!("git{}", std::env::consts::EXE_SUFFIX));
+    let remove = |arguments: &[&str]| -> Result<()> {
+        let output = fixture_git::command(&native, &root.join("gitconfig"))
+            .current_dir(root)
+            .args(arguments)
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "fixture removal: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    };
+    remove(&["update-ref", "-d", &branch])?;
+    assert!(
+        fixture.preview().is_err(),
+        "an existing dangling commit still binds its selection"
+    );
+    remove(&["reflog", "expire", "--expire=now", "--all"])?;
+    remove(&["prune", "--expire=now"])?;
+    assert!(git(root, &["cat-file", "-e", &head]).is_err());
+    let state = fixture.state()?;
+    let before = fs::read(&state)?;
+    let preview = fixture.preview()?;
+    assert_eq!(
+        fs::read(&state)?,
+        before,
+        "preview must leave history unchanged"
+    );
+    fixture.signer()?;
+    let imported = fixture.import(preview["snapshot"].as_str().context("snapshot")?)?;
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    assert!(
+        fixture.preview().is_err(),
+        "an earlier signed import still prevents another import"
+    );
+    let stored: serde_json::Value = serde_json::from_slice(&fs::read(state)?)?;
+    assert_eq!(stored["selections"][0]["source"]["kind"], "unborn");
+    assert_eq!(
+        stored["selections"].as_array().context("selections")?.len(),
+        1
+    );
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn an_initial_local_import_refuses_paths_whose_normalization_changes_identity() -> Result<()> {
@@ -2016,6 +2092,110 @@ fn local_issues_keep_separate_scopes_and_refuse_closed_stale_or_late_work() -> R
     git(root, &["symbolic-ref", "HEAD", "refs/heads/other"])?;
     assert!(platform::issue_context::guard_for(root, &[PathBuf::from("second.rs")], home).is_err());
     assert!(!home.join("offline-gh.log").exists());
+    Ok(())
+}
+
+#[test]
+fn local_selection_names_missing_ignore_files_before_generated_paths() -> Result<()> {
+    let fixture = Fixture::new("Preserve effective project ignore rules.\n")?;
+    let root = fixture.directory.path();
+    let home = fixture.context_home.path();
+    git(root, &["remote", "remove", "origin"])?;
+    let ignore = "node_modules/\n.cloudflare/\n";
+    fs::write(root.join(".gitignore"), ignore)?;
+    git(root, &["add", ".gitignore"])?;
+    git(
+        root,
+        &["commit", "--quiet", "-m", "Ignore generated artifacts"],
+    )?;
+    assert!(
+        local_command(root, home, &["init"])?
+            .output()?
+            .status
+            .success()
+    );
+    let created = local_command(
+        root,
+        home,
+        &["create", "--title", "Preserve ignore rules", "--body-file"],
+    )?
+    .arg(&fixture.body)
+    .output()?;
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(
+        local_command(
+            root,
+            home,
+            &["select", "--issue", "1", "--path", ".gitignore"]
+        )?
+        .output()?
+        .status
+        .success()
+    );
+    for directory in ["node_modules/package", ".cloudflare/state"] {
+        fs::create_dir_all(root.join(directory))?;
+        fs::write(root.join(directory).join("generated.json"), "{}\n")?;
+    }
+    let selected = local_command(
+        root,
+        home,
+        &[
+            "select",
+            "--issue",
+            "1",
+            "--path",
+            ".gitignore",
+            "--path",
+            "main.rs",
+        ],
+    )?
+    .output()?;
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    fs::remove_file(root.join(".gitignore"))?;
+    for staged in [false, true] {
+        if staged {
+            git(root, &["add", "-u"])?;
+        }
+        let refused = local_command(root, home, &["select", "--issue", "1", "--path", "main.rs"])?
+            .output()?;
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(!refused.status.success());
+        assert!(
+            stderr.contains("missing ignore file .gitignore"),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("generated.json"), "{stderr}");
+    }
+    Ok(())
+}
+
+#[test]
+fn local_selection_detects_a_missing_indexed_ignore_file_without_a_head() -> Result<()> {
+    let fixture = InitialImportFixture::new()?;
+    let root = fixture.project.path();
+    fs::write(root.join(".gitignore"), "node_modules/\n")?;
+    git(root, &["add", ".gitignore"])?;
+    fs::remove_file(root.join(".gitignore"))?;
+    fs::create_dir_all(root.join("node_modules/package"))?;
+    fs::write(root.join("node_modules/package/generated.json"), "{}\n")?;
+    let refused = fixture
+        .command(&["select", "--issue", "1", "--path", "main.rs"])?
+        .output()?;
+    assert!(!refused.status.success());
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(
+        stderr.contains("missing ignore file .gitignore"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("generated.json"), "{stderr}");
     Ok(())
 }
 
@@ -2135,6 +2315,24 @@ fn readying_refuses_a_closed_published_or_failing_pr() -> Result<()> {
         .output()?;
     let record = refusal(&output);
     assert_eq!(record["rule"], "pr.checks");
+    assert_eq!(record["next"], "gh pr checks 17 --repo owner/project");
+    let fixture = Fixture::new(BODY)?;
+    let unreported = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true,
+        "statusCheckRollup":[]});
+    let output = fixture
+        .command("ready")?
+        .args(["--pr", "17"])
+        .env("GH_FIXTURE_VIEW", unreported.to_string())
+        .env(
+            "GH_FIXTURE_WORKFLOWS",
+            r#"{"data":{"repository":{"object":null}}}"#,
+        )
+        .output()?;
+    let record = refusal(&output);
+    assert_eq!(
+        record["rule"], "pr.checks-absent",
+        "a head without a workflow or a required check names the missing check"
+    );
     assert_eq!(record["next"], "gh pr checks 17 --repo owner/project");
     Ok(())
 }
@@ -2682,6 +2880,76 @@ fn every_worktree_of_a_repository_finds_the_context_of_its_branch() -> Result<()
         )
         .is_err(),
         "the parking branch of the first worktree has no context"
+    );
+    Ok(())
+}
+
+#[test]
+fn an_amended_start_commit_names_the_recorded_commit_and_a_working_recovery() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let root = platform::issue_context::checkout(fixture.directory.path())?;
+    let paths = [PathBuf::from("body.md")];
+    let mut start = fixture.personal_command("start")?;
+    start.args(["--issue", "23"]);
+    let variables: Vec<_> = start
+        .get_envs()
+        .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value.to_owned())))
+        .collect();
+    let started = start.output()?;
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let recorded = fixture.head.clone();
+    git(
+        &root,
+        &[
+            "commit",
+            "--quiet",
+            "--amend",
+            "--allow-empty",
+            "-m",
+            "amended",
+        ],
+    )?;
+    let amended = git(&root, &["rev-parse", "HEAD"])?;
+    fs::write(root.join("body.md"), "Work in progress.\n")?;
+    let named = |text: &str| {
+        text.contains(&format!(
+            "issue-context start commit {recorded} is not an ancestor of feature at {amended}"
+        )) && text.contains(&format!("git reset --soft {recorded}"))
+            && text.contains("start the issue on a new branch")
+            && !text.contains("signed-evidence Git failed")
+    };
+    let guarded = platform::issue_context::guard_for(&root, &paths, fixture.context_home.path())
+        .expect_err("an amended start commit must refuse the edit");
+    assert!(named(&format!("{guarded:#}")), "{guarded:#}");
+    let restarted = fixture
+        .personal_command("start")?
+        .args(["--issue", "23"])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&restarted.stderr);
+    assert!(!restarted.status.success() && named(&stderr), "{stderr}");
+    git(&root, &["add", "body.md"])?;
+    let checked = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), &root)
+        .current_dir(&root)
+        .envs(variables.iter().cloned())
+        .args(["change-check", "--staged"])
+        .output()?;
+    let stderr = String::from_utf8_lossy(&checked.stderr);
+    assert!(!checked.status.success() && named(&stderr), "{stderr}");
+    git(&root, &["reset", "--soft", &recorded])?;
+    platform::issue_context::guard_for(&root, &paths, fixture.context_home.path())?;
+    let recovered = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), &root)
+        .current_dir(&root)
+        .envs(variables.iter().cloned())
+        .args(["change-check", "--staged"])
+        .output()?;
+    assert!(
+        recovered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recovered.stderr)
     );
     Ok(())
 }
@@ -3452,6 +3720,276 @@ const PAUSES: [(Option<&str>, bool); 4] = [
 
 fn excluded() -> String {
     format!("{BODY}\n@coderabbitai ignore\n")
+}
+
+impl Fixture {
+    fn require_pr_review(&mut self, repository: &str) -> Result<()> {
+        self.always_pr = true;
+        let directory = self
+            .directory
+            .path()
+            .join(".local/state/pr-workflow/review-policies")
+            .join(repository.to_ascii_lowercase().replace('/', "__"));
+        fs::create_dir_all(&directory)?;
+        fs::write(
+            directory.join("policy.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "repository": repository,
+                "review": "always_pr",
+                "reason": "Every PR in this repository requires CodeRabbit PR review."
+            }))?,
+        )?;
+        Ok(())
+    }
+
+    fn pr_review(&self, command: &mut Command, head: &str) {
+        let body = format!(
+            "**Actionable comments posted: 0**\n- **Run ID**: `00000000-0000-0000-0000-000000000001`\nReviewing files that changed from the base of the PR and between {} and {head}.\n<summary>📒 Files selected for processing (1)</summary>\n* `body.md`\n</details>\n<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+            self.base
+        );
+        command.env(
+            "GH_FIXTURE_REVIEWS",
+            serde_json::json!([{
+                "id":1,"user":{"login":"coderabbitai[bot]"},"commit_id":head,
+                "state":"COMMENTED","submitted_at":"2026-10-26T00:00:00Z","body":body
+            }])
+            .to_string(),
+        );
+        command.env(
+            "GH_FIXTURE_STATUSES",
+            serde_json::json!([{
+                "id":1,"creator":{"login":"coderabbitai[bot]"},"context":"CodeRabbit",
+                "state":"success","description":"Review completed"
+            }])
+            .to_string(),
+        );
+    }
+}
+
+#[test]
+fn repository_pr_policy_publishes_every_level_without_suppression() -> Result<()> {
+    for level in ["low", "medium", "high", "critical"] {
+        let mut fixture = Fixture::new(BODY)?;
+        fixture.level = level;
+        fixture.require_pr_review("owner/project")?;
+        for operation in ["create", "edit"] {
+            let mut command = fixture.command(operation)?;
+            command
+                .args(["--title", "fix: preserve edits", "--body-file"])
+                .arg(&fixture.body);
+            command.args(if operation == "create" {
+                ["--head", "feature"]
+            } else {
+                ["--pr", "17"]
+            });
+            let output = command.output()?;
+            assert!(
+                output.status.success(),
+                "{level} {operation}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let log = fixture.log()?;
+        assert!(!log.contains("@coderabbitai ignore"), "{level}: {log}");
+        assert!(!log.contains("review:critical"), "{level}: {log}");
+    }
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_requires_current_head_review_before_ready() -> Result<()> {
+    for level in ["low", "medium", "high", "critical"] {
+        let mut fixture = Fixture::new(BODY)?;
+        fixture.level = level;
+        fixture.require_pr_review("owner/project")?;
+        for reviewed in [None, Some("stale"), Some(fixture.head.as_str())] {
+            let mut command = fixture.command("ready")?;
+            command.args(["--pr", "17"]);
+            if let Some(head) = reviewed {
+                fixture.pr_review(&mut command, head);
+            }
+            let output = command.output()?;
+            assert_eq!(
+                output.status.success(),
+                reviewed == Some(fixture.head.as_str()),
+                "{level} {reviewed:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_keeps_each_pause_scope_and_pool() -> Result<()> {
+    for (marker, paused) in PAUSES {
+        let mut fixture = Fixture::new(BODY)?;
+        fixture.require_pr_review("owner/project")?;
+        if let Some(marker) = marker {
+            fixture.pause(marker)?;
+        }
+        let mut command = fixture.command("ready")?;
+        command.args(["--pr", "17"]);
+        fixture.pr_review(&mut command, &fixture.head);
+        let output = command.output()?;
+        assert_eq!(
+            output.status.success(),
+            !paused,
+            "{marker:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if let Some(marker) = marker {
+            assert!(
+                fixture
+                    .directory
+                    .path()
+                    .join(".local/state/coderabbit-guard")
+                    .join(marker)
+                    .exists()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_does_not_change_another_repository() -> Result<()> {
+    let mut fixture = Fixture::new(BODY)?;
+    fixture.require_pr_review("owner/another")?;
+    let output = fixture
+        .command("create")?
+        .args([
+            "--title",
+            "fix: preserve edits",
+            "--head",
+            "feature",
+            "--body-file",
+        ])
+        .arg(&fixture.body)
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("standing CodeRabbit PR suppression"));
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_blocks_publication_during_a_pr_pause() -> Result<()> {
+    for marker in ["paused", "paused-pr"] {
+        let mut fixture = Fixture::new(BODY)?;
+        fixture.require_pr_review("owner/project")?;
+        fixture.pause(marker)?;
+        for operation in ["create", "edit"] {
+            let mut command = fixture.command(operation)?;
+            command
+                .args(["--title", "fix: preserve edits", "--body-file"])
+                .arg(&fixture.body);
+            command.args(if operation == "create" {
+                ["--head", "feature"]
+            } else {
+                ["--pr", "17"]
+            });
+            let output = command.output()?;
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains("paused by the owner"));
+        }
+        assert_eq!(mutations(&fixture.log()?), [] as [String; 0]);
+    }
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_merges_only_with_current_review_and_never_inserts_suppression() -> Result<()>
+{
+    for marker in [None, Some("paused-pr"), Some("paused-cli")] {
+        for reviewed in [false, true] {
+            let mut fixture = Fixture::new(BODY)?;
+            fixture.require_pr_review("P4suta/project")?;
+            if let Some(marker) = marker {
+                fixture.pause(marker)?;
+            }
+            let body = format!("{BODY}\nCloses #23.\n");
+            let draft = marker == Some("paused-pr");
+            let mut command = fixture.personal_command("merge")?;
+            command.args(["--pr", "17", "--interval", "0"]).env(
+                "GH_FIXTURE_VIEWS",
+                [
+                    read(17, &fixture.head, draft, &body, PASSING, "CLEAN"),
+                    read(17, &fixture.head, draft, &body, PASSING, "CLEAN"),
+                    read(17, &fixture.head, draft, &body, PASSING, "MERGED"),
+                ]
+                .join("\n"),
+            );
+            if reviewed {
+                fixture.pr_review(&mut command, &fixture.head);
+            }
+            let output = command.output()?;
+            let accepted = reviewed && marker != Some("paused-pr");
+            assert_eq!(
+                output.status.success(),
+                accepted,
+                "{marker:?} {reviewed}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let log = fixture.log()?;
+            assert_eq!(
+                mutations(&log),
+                if accepted {
+                    vec!["merge"]
+                } else {
+                    Vec::<&str>::new()
+                }
+            );
+            assert!(!log.contains("@coderabbitai ignore"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn repository_pr_policy_preserves_an_earlier_cli_route_until_history_is_carried() -> Result<()> {
+    let mut fixture = Fixture::new(BODY)?;
+    fixture.level = "high";
+    let output = fixture
+        .command("edit")?
+        .args([
+            "--pr",
+            "17",
+            "--title",
+            "fix: preserve edits",
+            "--body-file",
+        ])
+        .arg(&fixture.body)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fixture.require_pr_review("owner/project")?;
+    fs::write(&fixture.body, BODY)?;
+    for operation in ["edit", "check"] {
+        let mut command = fixture.command(operation)?;
+        command.args(["--pr", "17"]);
+        if operation == "edit" {
+            command
+                .args(["--title", "fix: preserve edits", "--body-file"])
+                .arg(&fixture.body);
+        }
+        let output = command.output()?;
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("prior high review history must be carried")
+        );
+    }
+    let record: serde_json::Value = serde_json::from_slice(&fs::read(
+        fixture
+            .directory
+            .path()
+            .join(".local/state/pr-workflow/assessments/owner__project/pr-17.json"),
+    )?)?;
+    assert_eq!(record["always_pr"], false);
+    Ok(())
 }
 
 fn pause_excluded() -> String {
@@ -4265,6 +4803,251 @@ fn work_unit_fixture() -> Result<(Fixture, PathBuf)> {
 }
 
 #[test]
+fn binary_refresh_needs_no_skill_catalog_and_preserves_unrelated_files() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let unrelated = home.path().join("personal-setting.txt");
+    fs::write(&unrelated, b"preserve the owner setting")?;
+    let binary = std::path::Path::new(env!("CARGO_BIN_EXE_pr-workflow"));
+    let source = platform::freshness::embedded().root;
+    pr_workflow::install_binary(&source, binary, home.path())?;
+    let installed = platform::freshness::Built::PrWorkflow.installed_binary(home.path());
+    assert_eq!(
+        Sha256::digest(fs::read(binary)?),
+        Sha256::digest(fs::read(&installed)?)
+    );
+    let record: serde_json::Value = serde_json::from_slice(&fs::read(
+        home.path()
+            .join(".local/state/dotfiles/installed/pr-workflow"),
+    )?)?;
+    let stamp = platform::freshness::verify_artifact(
+        &source,
+        &installed,
+        platform::freshness::Built::PrWorkflow,
+    )?;
+    assert_eq!(record["build"], serde_json::to_value(stamp)?);
+    assert_eq!(fs::read(unrelated)?, b"preserve the owner setting");
+    assert!(!home.path().join(".agents").exists());
+    assert!(!home.path().join(".config/skill-ops").exists());
+    Ok(())
+}
+
+#[test]
+fn binary_refresh_refuses_a_foreign_source_before_replacing_the_installation() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let source = tempfile::tempdir()?;
+    fs::create_dir_all(source.path().join("crates/platform"))?;
+    fs::write(
+        source.path().join("crates/platform/Cargo.toml"),
+        "[package]\nname = \"platform\"\n",
+    )?;
+    let installed = platform::freshness::Built::PrWorkflow.installed_binary(home.path());
+    fs::create_dir_all(installed.parent().context("installed binary parent")?)?;
+    fs::write(&installed, b"preserve the existing executable")?;
+    let error = pr_workflow::install_binary(
+        source.path(),
+        std::path::Path::new(env!("CARGO_BIN_EXE_pr-workflow")),
+        home.path(),
+    )
+    .expect_err("reject a different producing checkout");
+    assert!(
+        error.to_string().contains("producing checkout differs"),
+        "{error:#}"
+    );
+    assert_eq!(fs::read(installed)?, b"preserve the existing executable");
+    assert!(!home.path().join(".local/state/dotfiles/installed").exists());
+    Ok(())
+}
+
+fn work_command(
+    fixture: &Fixture,
+    checkout: &std::path::Path,
+    operation: &str,
+    pulls: &serde_json::Value,
+) -> Result<Command> {
+    let mut command = fixture.personal_command(operation)?;
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(name);
+        }
+    }
+    command
+        .current_dir(checkout)
+        .env("HOME", fixture.context_home.path())
+        .env("USERPROFILE", fixture.context_home.path())
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            fixture.directory.path().join("gitconfig"),
+        )
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("PWF_FIXTURE_FETCH_CHECKOUT", checkout)
+        .env(
+            "PWF_FIXTURE_FETCH_BARE",
+            fixture.directory.path().join("remote.git"),
+        )
+        .env("GH_FIXTURE_PULLS", pulls.to_string());
+    Ok(command)
+}
+
+#[test]
+fn stack_creation_retires_a_pending_independent_declaration() -> Result<()> {
+    let (fixture, checkout) = work_unit_fixture()?;
+    let parent = git(&checkout, &["rev-parse", "a"])?;
+    let feature = git(&checkout, &["rev-parse", "feature"])?;
+    fixture.assessment(&checkout, "P4suta/project", "feature", "member")?;
+    scoped_git(
+        &checkout,
+        fixture.directory.path(),
+        &["checkout", "-q", "member"],
+    );
+    let pulls = serde_json::json!([
+        owned_work(4, "a", "main", &parent, "P4suta/project"),
+        owned_work(5, "feature", "a", &feature, "P4suta/project")
+    ]);
+    let started = work_command(&fixture, &checkout, "start", &pulls)?
+        .args([
+            "--issue",
+            "23",
+            "--independent",
+            "Pending explicit stack membership",
+        ])
+        .output()?;
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let directory = fixture
+        .context_home
+        .path()
+        .join(".local/state/pr-workflow/independent/p4suta__project");
+    assert_eq!(fs::read_dir(&directory)?.count(), 1);
+    let open = serde_json::json!([
+        {"number":4,"headRefName":"a","baseRefName":"main","author":{"login":"P4suta"},"mergeable":"MERGEABLE"},
+        {"number":5,"headRefName":"feature","baseRefName":"a","author":{"login":"P4suta"},"mergeable":"MERGEABLE"}
+    ]);
+    let output = creation_among_open_prs_command(
+        &fixture,
+        &checkout,
+        "member",
+        &open.to_string(),
+        "feature",
+        "stack create",
+    )?
+    .env("HOME", fixture.context_home.path())
+    .env("USERPROFILE", fixture.context_home.path())
+    .env("GH_FIXTURE_PULLS", pulls.to_string())
+    .args(["--base", "feature"])
+    .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fixture
+            .stack_log()
+            .contains("gh-stack link --base main 4 5 17")
+    );
+    assert_eq!(fs::read_dir(directory)?.count(), 0);
+    Ok(())
+}
+
+#[test]
+fn stack_link_retires_independent_records_only_after_exact_readback() -> Result<()> {
+    for fault in ["none", "provider", "head", "base", "draft"] {
+        let (fixture, checkout) = dependency_fixture()?;
+        let parent = git(&checkout, &["rev-parse", "a"])?;
+        let child = git(&checkout, &["rev-parse", "feature"])?;
+        let assessments = fixture.assessment_records(
+            &checkout,
+            "P4suta/project",
+            &[("a", "main"), ("feature", "a")],
+        )?;
+        let pulls = serde_json::json!([
+            owned_work(4, "a", "main", &parent, "P4suta/project"),
+            owned_work(5, "feature", "main", &child, "P4suta/project")
+        ]);
+        for (branch, head) in [("a", &parent), ("feature", &child)] {
+            scoped_git(
+                &checkout,
+                fixture.directory.path(),
+                &["checkout", "-q", branch],
+            );
+            let started = work_command(&fixture, &checkout, "start", &pulls)?
+                .args([
+                    "--issue",
+                    "23",
+                    "--independent",
+                    "Temporarily separate work",
+                ])
+                .env("GH_FIXTURE_HEAD", head)
+                .output()?;
+            assert!(
+                started.status.success(),
+                "{}",
+                String::from_utf8_lossy(&started.stderr)
+            );
+        }
+        let directory = fixture
+            .context_home
+            .path()
+            .join(".local/state/pr-workflow/independent/p4suta__project");
+        assert_eq!(fs::read_dir(&directory)?.count(), 2);
+        let body = fixture.assessed_body(&fs::read_to_string(&fixture.body)?);
+        let view = |head: &str, base: &str, draft: bool| {
+            serde_json::json!({
+                "title":"fix: preserve edits", "body":body, "state":"OPEN", "isDraft":draft,
+                "headRefOid":head, "baseRefName":base
+            })
+        };
+        let after = view(
+            if fault == "head" { &parent } else { &child },
+            if fault == "base" { "main" } else { "a" },
+            fault != "draft",
+        );
+        let views = format!(
+            "4={}\n4={}\n5={}\n5={}",
+            view(&parent, "main", true),
+            view(&parent, "main", true),
+            view(&child, "main", true),
+            after
+        );
+        let branches = format!(
+            "repos/P4suta/project/branches/main={}\nrepos/P4suta/project/branches/a={}",
+            serde_json::json!({"name":"main","commit":{"sha":git(&checkout, &["rev-parse", "main"])?}}),
+            serde_json::json!({"name":"a","commit":{"sha":parent}})
+        );
+        let mut linking = work_command(&fixture, &checkout, "stack link", &pulls)?;
+        linking
+            .args(["--base", "main", "4", "5"])
+            .env("GH_FIXTURE_VIEWS", views)
+            .env("GH_FIXTURE_BRANCHES", branches)
+            .env("GH_FIXTURE_ASSESSMENTS", assessments);
+        if fault == "provider" {
+            linking.env("GH_STACK_FIXTURE_EXIT", "42");
+        }
+        let output = linking.output()?;
+        assert_eq!(
+            output.status.success(),
+            fault == "none",
+            "{fault}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_dir(&directory)?.count(),
+            if fault == "none" { 0 } else { 2 }
+        );
+        assert!(
+            fixture
+                .stack_log()
+                .contains("gh-stack link --base main 4 5")
+        );
+        assert!(!fixture.stack_log().contains("--open"));
+    }
+    Ok(())
+}
+
+#[test]
 fn a_stack_counts_once_and_independent_units_obey_the_limit() -> Result<()> {
     let (fixture, checkout) = work_unit_fixture()?;
     let scope = fixture.directory.path();
@@ -4897,6 +5680,247 @@ fn standing_suppression_never_hides_an_unresolved_outdated_bot_thread() -> Resul
         if !accepted {
             assert!(!fixture.log()?.contains("\nready\n"));
             assert!(String::from_utf8_lossy(&output.stderr).contains("unresolved"));
+        }
+    }
+    Ok(())
+}
+
+struct ReviewComparisonCase {
+    rebase: bool,
+    forward: serde_json::Value,
+    reverse: Option<serde_json::Value>,
+    unresolved: bool,
+    refusal: Option<&'static str>,
+}
+
+fn review_comparison_cases() -> Vec<ReviewComparisonCase> {
+    vec![
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::Value::Array(vec![
+                serde_json::json!({"filename":"body.md"});
+                rules::review_routing_rules::COMPARE_FILE_LIMIT
+            ]),
+            reverse: None,
+            unresolved: false,
+            refusal: Some("no partial review credit"),
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::Value::Null,
+            reverse: None,
+            unresolved: false,
+            refusal: Some("comparison file inventory is unavailable or malformed"),
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::json!([{"filename":"body.md"}]),
+            reverse: None,
+            unresolved: false,
+            refusal: None,
+        },
+        ReviewComparisonCase {
+            rebase: true,
+            forward: serde_json::json!([{"filename":"upstream.md"},{"filename":"body.md"}]),
+            reverse: Some(serde_json::json!([{"filename":"body.md"}])),
+            unresolved: false,
+            refusal: None,
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::json!([{"filename":"unreviewed.rs"}]),
+            reverse: None,
+            unresolved: false,
+            refusal: Some("outside the prior full"),
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::json!([{"filename":"body.md","previous_filename":"unreviewed.rs"}]),
+            reverse: None,
+            unresolved: false,
+            refusal: Some("unreviewed.rs"),
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::json!([]),
+            reverse: Some(serde_json::json!([{"filename":"unreviewed.rs"}])),
+            unresolved: false,
+            refusal: Some("unreviewed.rs"),
+        },
+        ReviewComparisonCase {
+            rebase: false,
+            forward: serde_json::json!([{"filename":"body.md"}]),
+            reverse: None,
+            unresolved: true,
+            refusal: Some("unresolved"),
+        },
+    ]
+}
+
+fn reviewed_head_fixture(rebase: bool) -> Result<(Fixture, String, serde_json::Value)> {
+    let mut fixture = Fixture::new(BODY)?;
+    fixture.level = "critical";
+    let root = fixture.directory.path();
+    let reviewed_head = fixture.head.clone();
+    let reviewed_base = fixture.base.clone();
+    if rebase {
+        git(root, &["checkout", "--quiet", "--detach", &reviewed_base])?;
+        fs::write(root.join("upstream.md"), "An upstream change.\n")?;
+        git(root, &["add", "upstream.md"])?;
+        git(root, &["commit", "--quiet", "-m", "upstream"])?;
+        fixture.base = git(root, &["rev-parse", "HEAD"])?;
+        fs::write(root.join("body.md"), BODY)?;
+    } else {
+        fs::write(
+            root.join("body.md"),
+            format!("{BODY}\nA reviewed correction.\n"),
+        )?;
+    }
+    git(root, &["add", "body.md"])?;
+    git(root, &["commit", "--quiet", "-m", "updated"])?;
+    fixture.head = git(root, &["rev-parse", "HEAD"])?;
+    let review_body = format!(
+        "**Actionable comments posted: 1**\n- **Run ID**: `00000000-0000-0000-0000-000000000001`\nReviewing files that changed from the base of the PR and between {reviewed_base} and {reviewed_head}.\n<summary>📒 Files selected for processing (1)</summary>\n* `body.md`\n</details>\n<!-- This is an auto-generated comment by CodeRabbit for review status -->"
+    );
+    let reviews = serde_json::json!([{
+        "id":1,"user":{"login":"coderabbitai[bot]"},"commit_id":reviewed_head,
+        "state":"CHANGES_REQUESTED","submitted_at":"2026-10-26T00:00:00Z","body":review_body
+    }]);
+    Ok((fixture, reviewed_head, reviews))
+}
+
+#[test]
+fn repository_pr_policy_accepts_carried_current_head_completion_before_ready() -> Result<()> {
+    for level in ["low", "medium", "high", "critical"] {
+        for approval in [false, true] {
+            let (mut fixture, reviewed_head, mut reviews) = reviewed_head_fixture(false)?;
+            fixture.level = level;
+            fixture.require_pr_review("owner/project")?;
+            if approval {
+                reviews
+                    .as_array_mut()
+                    .context("submitted review array")?
+                    .push(serde_json::json!({
+                        "id":2,"user":{"login":"coderabbitai[bot]"},"commit_id":fixture.head,
+                        "state":"APPROVED","submitted_at":"2026-10-26T00:02:00Z","body":""
+                    }));
+            }
+            let endpoint = format!(
+                "repos/owner/project/compare/{reviewed_head}...{}?per_page=1&page=1",
+                fixture.head
+            );
+            let mut command = fixture.command("ready")?;
+            command
+                .args(["--pr", "17"])
+                .env("GH_FIXTURE_REVIEWS", reviews.to_string())
+                .env("GH_FIXTURE_STATUSES", serde_json::json!([{
+                    "id":1,"creator":{"login":"coderabbitai[bot]"},"context":"CodeRabbit",
+                    "state":"success","description":"Review completed","created_at":"2026-10-26T00:03:00Z"
+                }]).to_string())
+                .env(
+                    "GH_FIXTURE_COMPARISONS",
+                    format!("{endpoint}={}", serde_json::json!({
+                        "base_commit":{"sha":reviewed_head},"behind_by":0,
+                        "files":[{"filename":"body.md"}]
+                    })),
+                );
+            let output = command.output()?;
+            assert!(
+                output.status.success(),
+                "{level}, approval={approval}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let log = fixture.log()?;
+            assert_eq!(mutations(&log), ["ready"], "{log}");
+            assert!(log.contains(&endpoint), "{log}");
+            assert!(!log.contains("@coderabbitai ignore"), "{log}");
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn final_review_evidence_compares_reviewed_heads_and_preserves_thread_obligations() -> Result<()> {
+    for ReviewComparisonCase {
+        rebase,
+        forward,
+        reverse,
+        unresolved,
+        refusal,
+    } in review_comparison_cases()
+    {
+        let (fixture, reviewed_head, reviews) = reviewed_head_fixture(rebase)?;
+        let statuses = serde_json::json!([{
+            "id":1,"creator":{"login":"coderabbitai[bot]"},"context":"CodeRabbit",
+            "state":"success","description":"Review completed","created_at":"2026-10-26T00:01:00Z"
+        }]);
+        let forward_endpoint = format!(
+            "repos/owner/project/compare/{reviewed_head}...{}?per_page=1&page=1",
+            fixture.head
+        );
+        let reverse_endpoint = format!(
+            "repos/owner/project/compare/{}...{reviewed_head}?per_page=1&page=1",
+            fixture.head
+        );
+        let mut comparisons = format!(
+            "{forward_endpoint}={}",
+            serde_json::json!({
+                "base_commit":{"sha":reviewed_head},"behind_by":u8::from(reverse.is_some()),"files":forward
+            })
+        );
+        if let Some(files) = &reverse {
+            write!(
+                comparisons,
+                "\n{reverse_endpoint}={}",
+                serde_json::json!({
+                    "base_commit":{"sha":fixture.head},"behind_by":1,"files":files
+                })
+            )?;
+        }
+        let mut command = fixture.command("check")?;
+        command
+            .args(["--pr", "17", "--final"])
+            .env(
+                "GH_FIXTURE_VIEW",
+                serde_json::json!({
+                    "title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":false,
+                    "labels":[{"name":"review:critical"}]
+                })
+                .to_string(),
+            )
+            .env("GH_FIXTURE_REVIEWS", reviews.to_string())
+            .env("GH_FIXTURE_STATUSES", statuses.to_string())
+            .env("GH_FIXTURE_COMPARISONS", comparisons);
+        if unresolved {
+            command.env("GH_FIXTURE_GRAPHQL", serde_json::json!({"data":{"repository":{"pullRequest":{
+                "headRefOid":fixture.head,"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{
+                    "id":"unresolved-bot-thread","isResolved":false,"isOutdated":true,
+                    "comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"author":{"login":"coderabbitai"},"body":"A finding remains open."}]}
+                }]}
+            }}}}).to_string());
+        }
+        let output = command.output()?;
+        let error = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            output.status.success(),
+            refusal.is_none(),
+            "rebase={rebase}, reverse={reverse:?}: {error}"
+        );
+        if let Some(refusal) = refusal {
+            assert!(error.contains(refusal), "{error}");
+        }
+        let log = fixture.log()?;
+        assert!(mutations(&log).is_empty(), "{log}");
+        if !unresolved {
+            assert!(log.contains(&forward_endpoint), "{log}");
+            assert_eq!(log.contains(&reverse_endpoint), reverse.is_some(), "{log}");
+            assert!(
+                log.contains(&format!(
+                    "git fetch --quiet https://github.com/owner/project.git {} {reviewed_head}",
+                    fixture.base
+                )),
+                "{log}"
+            );
         }
     }
     Ok(())
@@ -5542,6 +6566,7 @@ fn independent_prs_merge_in_order_through_update_checks_ready_and_the_verified_h
     let output = fixture
         .personal_command("merge")?
         .args(["--pr", "17", "--pr", "18", "--interval", "0"])
+        .env("GH_FIXTURE_LIST", r#"[{"number":17,"headRefName":"feature","baseRefName":"main"},{"number":18,"headRefName":"second","baseRefName":"main"},{"number":30,"headRefName":"unrelated","baseRefName":"main"}]"#)
         .env("GH_FIXTURE_VIEWS", views)
         .env("GH_FIXTURE_ASSESSMENTS", records)
         .env("GH_FIXTURE_BEHIND", &old)
@@ -5564,6 +6589,47 @@ fn independent_prs_merge_in_order_through_update_checks_ready_and_the_verified_h
         "\nmerge\n--repo\nP4suta/project\n18\n--squash\n--match-head-commit\n{other}\n"
     )));
     assert!(!log.contains(PAUSE_MARKER));
+    Ok(())
+}
+
+#[test]
+fn merge_sends_a_stack_member_to_stack_merge_before_any_github_mutation() -> Result<()> {
+    let list = r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":17,"headRefName":"topic","baseRefName":"parent"},{"number":30,"headRefName":"unrelated","baseRefName":"main"}]"#;
+    let body = format!("{BODY}\nCloses #23.\n\n@coderabbitai ignore\n");
+    for (pr, relation) in [(17, "parent #5 (parent)"), (5, "child #17 (topic)")] {
+        let fixture = Fixture::new(BODY)?;
+        let head = fixture.head.as_str();
+        let records = fixture.assessment_records(
+            fixture.directory.path(),
+            "P4suta/project",
+            &[(head, "origin/main")],
+        )?;
+        // GitHub refuses the synchronous merge of a stack member, as the injected failure stands for.
+        let output = fixture
+            .personal_command("merge")?
+            .args(["--pr", &pr.to_string(), "--interval", "0"])
+            .env("GH_FIXTURE_LIST", list)
+            .env(
+                "GH_FIXTURE_VIEWS",
+                read(pr, head, false, &body, PASSING, "CLEAN"),
+            )
+            .env("GH_FIXTURE_ASSESSMENTS", records)
+            .env("GH_FIXTURE_FAILURE", "merge")
+            .output()?;
+        let refused = refusal(&output);
+        assert_eq!(refused["rule"], "pr.stack", "#{pr}: {refused}");
+        assert_eq!(
+            refused["next"],
+            format!("pr-workflow stack merge --repo P4suta/project --pr {pr}")
+        );
+        assert!(
+            refused["evidence"].to_string().contains(relation),
+            "#{pr}: {refused}"
+        );
+        let log = fixture.log()?;
+        assert_eq!(mutations(&log), Vec::<String>::new(), "#{pr}");
+        assert!(!log.contains("merge-async"), "#{pr}");
+    }
     Ok(())
 }
 
@@ -5629,6 +6695,275 @@ fn merge_carries_the_signed_assessment_after_an_update_only_when_the_diff_matche
                 serde_json::from_str(raw.split_once("\n\n").context("signed payload")?.1)?;
             assert_eq!(statement["binding"]["head"], new);
             assert_eq!(statement["signer"], "P4suta");
+        }
+    }
+    Ok(())
+}
+
+/// How the head of PR 17 changes after `gh pr update-branch`.
+#[derive(Clone, Copy, Debug)]
+enum HeadUpdate {
+    /// An update merge of a base that adds another file.
+    OtherFile,
+    /// An update merge of a base that edits a region of the shared file outside the PR hunk's context.
+    DistantRegion,
+    /// An update merge of a base that edits a line inside the PR hunk's context.
+    HunkContext,
+    /// A plain commit with the same tree on top of the local branch.
+    PlainCommit,
+}
+
+/// One read of PR 17 with the head source fields that `gh pr view` returns.
+fn sourced_read(head: &str, body: &str, merge: &str) -> String {
+    format!(
+        "17={}",
+        serde_json::json!({
+            "title":"fix: preserve edits","body":body,
+            "state":if merge == "MERGED" {"MERGED"} else {"OPEN"},"isDraft":false,
+            "headRefOid":head,"baseRefName":"main",
+            "mergeable":"MERGEABLE","mergeStateStatus":merge,
+            "statusCheckRollup":serde_json::from_str::<serde_json::Value>(PASSING).unwrap(),
+            "closingIssuesReferences":[{"number":23}],
+            "headRefName":"feature","headRepository":{"name":"project"},
+            "headRepositoryOwner":{"login":"P4suta"},"isCrossRepository":false
+        })
+    )
+}
+
+/// Commits `file` with `contents` on the checked-out branch and returns the new commit.
+fn commit_file(
+    root: &std::path::Path,
+    file: &str,
+    contents: &str,
+    message: &str,
+) -> Result<String> {
+    fs::write(root.join(file), contents)?;
+    git(root, &["add", file])?;
+    git(root, &["commit", "--quiet", "-m", message])?;
+    git(root, &["rev-parse", "HEAD"])
+}
+
+/// Twenty numbered lines with the listed lines replaced.
+fn numbered(replaced: &[(usize, &str)]) -> String {
+    (1..=20)
+        .map(|number| {
+            replaced
+                .iter()
+                .find(|(line, _)| *line == number)
+                .map_or_else(
+                    || format!("line {number}\n"),
+                    |(_, text)| format!("{text}\n"),
+                )
+        })
+        .collect()
+}
+
+/// The commits of PR 17 around one update: its base, the local branch head, the base GitHub merges in, and the live head.
+struct UpdatedHistory {
+    base: String,
+    local: String,
+    advanced: String,
+    head: String,
+}
+
+impl UpdatedHistory {
+    /// Commits a twenty-line file on the base, edits its line 15 on `feature`, and builds the live head that `update` describes.
+    /// `feature` stays checked out at the edit.
+    fn new(fixture: &Fixture, update: HeadUpdate) -> Result<Self> {
+        let root = fixture.directory.path();
+        git(
+            root,
+            &["checkout", "--quiet", "-B", "feature", &fixture.base],
+        )?;
+        let base = commit_file(root, "shared.txt", &numbered(&[]), "shared base")?;
+        let edited = [(15, "line 15 from the pull request")];
+        let local = commit_file(root, "shared.txt", &numbered(&edited), "pull request edit")?;
+        git(root, &["checkout", "--quiet", "-b", "trunk", &base])?;
+        let advanced = match update {
+            HeadUpdate::PlainCommit => None,
+            HeadUpdate::OtherFile => Some(commit_file(root, "other.txt", "Other.\n", "other")?),
+            HeadUpdate::DistantRegion => {
+                // The inserted line moves the PR hunk down by one line.
+                let text = numbered(&[(3, "line 3 from main\nline 3a from main")]);
+                Some(commit_file(root, "shared.txt", &text, "distant main edit")?)
+            }
+            HeadUpdate::HunkContext => {
+                let text = numbered(&[(12, "line 12 from main")]);
+                Some(commit_file(root, "shared.txt", &text, "nearby main edit")?)
+            }
+        };
+        git(root, &["checkout", "--quiet", "feature"])?;
+        let (advanced, head) = if let Some(advanced) = advanced {
+            let tree = git(root, &["merge-tree", "--write-tree", &local, &advanced])?;
+            let message = "Merge branch 'main' into feature";
+            let arguments = [
+                "commit-tree",
+                &tree,
+                "-p",
+                &local,
+                "-p",
+                &advanced,
+                "-m",
+                message,
+            ];
+            let head = git(root, &arguments)?;
+            (advanced, head)
+        } else {
+            let tree = git(root, &["rev-parse", &format!("{local}^{{tree}}")])?;
+            let head = git(root, &["commit-tree", &tree, "-p", &local, "-m", "plain"])?;
+            (base.clone(), head)
+        };
+        Ok(Self {
+            base,
+            local,
+            advanced,
+            head,
+        })
+    }
+}
+
+#[test]
+fn merge_carries_the_assessment_through_an_update_merge_that_keeps_the_hunks() -> Result<()> {
+    for update in [
+        HeadUpdate::DistantRegion,
+        HeadUpdate::OtherFile,
+        HeadUpdate::HunkContext,
+        HeadUpdate::PlainCommit,
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let root = fixture.directory.path();
+        let UpdatedHistory {
+            base,
+            local,
+            advanced,
+            head,
+        } = UpdatedHistory::new(&fixture, update)?;
+        let mut command = fixture.personal_command("merge")?;
+        fixture.assessment(root, "P4suta/project", &base, &local)?;
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let output = command
+            .args(["--pr", "17", "--interval", "0"])
+            .env("GH_FIXTURE_BEHIND", &local)
+            .env(
+                "GH_FIXTURE_BASES",
+                format!("{local}={base}\n{head}={advanced}"),
+            )
+            .env(
+                "GH_FIXTURE_VIEWS",
+                [
+                    sourced_read(&local, &body, "BEHIND"),
+                    sourced_read(&head, &body, "CLEAN"),
+                    sourced_read(&head, &body, "MERGED"),
+                ]
+                .join("\n"),
+            )
+            .output()?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let log = fixture.log().unwrap_or_default();
+        assert!(!log.is_empty(), "{update:?}: {stderr}");
+        assert_eq!(git(root, &["rev-parse", "refs/heads/feature"])?, local);
+        match update {
+            HeadUpdate::OtherFile | HeadUpdate::DistantRegion => {
+                assert!(output.status.success(), "{update:?}: {stderr}");
+                assert_eq!(mutations(&log), ["update-branch", "merge"], "{update:?}");
+                assert!(log.contains(&format!("--match-head-commit\n{head}\n")));
+                let directory = root.join(".local/state/pr-workflow/assessments/p4suta__project");
+                let carried = fs::read_dir(directory)?
+                    .filter_map(Result::ok)
+                    .find(|entry| entry.file_name().to_string_lossy().starts_with(&head))
+                    .context("the updated head needs its own signed assessment")?;
+                let packet: serde_json::Value = serde_json::from_slice(&fs::read(carried.path())?)?;
+                let raw = packet["raw"].as_str().context("signed raw commit")?;
+                let statement: serde_json::Value =
+                    serde_json::from_str(raw.split_once("\n\n").context("signed payload")?.1)?;
+                assert_eq!(statement["binding"]["head"], head.as_str());
+                assert_eq!(statement["binding"]["base"], advanced.as_str());
+            }
+            HeadUpdate::HunkContext => {
+                assert!(!output.status.success(), "{update:?}");
+                assert!(!mutations(&log).contains(&"merge".into()));
+                assert!(
+                    stderr.contains("assessment is missing"),
+                    "{update:?}: {stderr}"
+                );
+            }
+            HeadUpdate::PlainCommit => {
+                assert!(!output.status.success(), "{update:?}");
+                assert_eq!(mutations(&log), ["update-branch"], "{update:?}");
+                assert!(stderr.contains(r#""rule":"pr.source""#), "{stderr}");
+                assert!(
+                    stderr.contains(&format!(
+                        "the PR head {head} is neither the local branch feature at {local}"
+                    )),
+                    "{stderr}"
+                );
+                assert!(
+                    stderr.contains(&format!(
+                        "the update merge moved the PR head from {local} to {head}"
+                    )),
+                    "{stderr}"
+                );
+                assert!(
+                    stderr.contains(&format!(r#""next":"git log --oneline {local}..{head}""#)),
+                    "{stderr}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A checkout that holds `feature` while its worktree sits on another branch still carries the assessment through the update merge.
+/// A checkout without `feature` refuses before the update merge, because it has no local source to compare the head with.
+#[test]
+fn merge_refuses_before_the_update_merge_in_a_checkout_without_the_pr_branch() -> Result<()> {
+    for holds in [true, false] {
+        let fixture = Fixture::new(BODY)?;
+        let root = fixture.directory.path();
+        let UpdatedHistory {
+            base,
+            local,
+            advanced,
+            head,
+        } = UpdatedHistory::new(&fixture, HeadUpdate::OtherFile)?;
+        let mut command = fixture.personal_command("merge")?;
+        fixture.assessment(root, "P4suta/project", &base, &local)?;
+        git(root, &["checkout", "--quiet", "trunk"])?;
+        if !holds {
+            // The guarded Git refuses branch deletion, so a rename stands in for a clone that never had the branch.
+            git(root, &["branch", "--quiet", "-m", "feature", "parked"])?;
+        }
+        let body = fixture.assessed_body(&format!("{BODY}\nCloses #23.\n"));
+        let output = command
+            .args(["--pr", "17", "--interval", "0"])
+            .env("GH_FIXTURE_BEHIND", &local)
+            .env(
+                "GH_FIXTURE_BASES",
+                format!("{local}={base}\n{head}={advanced}"),
+            )
+            .env(
+                "GH_FIXTURE_VIEWS",
+                [
+                    sourced_read(&local, &body, "BEHIND"),
+                    sourced_read(&head, &body, "CLEAN"),
+                    sourced_read(&head, &body, "MERGED"),
+                ]
+                .join("\n"),
+            )
+            .output()?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let log = fixture.log().unwrap_or_default();
+        if holds {
+            assert!(output.status.success(), "{stderr}");
+            assert_eq!(mutations(&log), ["update-branch", "merge"]);
+            assert!(log.contains(&format!("--match-head-commit\n{head}\n")));
+        } else {
+            assert!(!output.status.success());
+            assert!(mutations(&log).is_empty(), "{log}");
+            assert!(stderr.contains(r#""rule":"pr.source""#), "{stderr}");
+            assert!(stderr.contains("no local branch feature"), "{stderr}");
+            assert!(stderr.contains(&local), "{stderr}");
+            assert!(stderr.contains(r#""next":"git worktree list""#), "{stderr}");
         }
     }
     Ok(())
@@ -5895,6 +7230,14 @@ fn a_merge_stops_with_a_structured_refusal_and_merges_nothing() -> Result<()> {
         ),
         (PASSING, "CLEAN", closed.as_str(), false, "120", "pr.review"),
         ("[]", "BLOCKED", excluded.as_str(), true, "0", "pr.timeout"),
+        (
+            "[]",
+            "BLOCKED",
+            excluded.as_str(),
+            true,
+            "120",
+            "pr.checks-absent",
+        ),
     ] {
         let mut fixture = Fixture::new(BODY)?;
         if rule == "pr.review" {
@@ -5904,11 +7247,17 @@ fn a_merge_stops_with_a_structured_refusal_and_merges_nothing() -> Result<()> {
         if paused {
             fixture.pause("paused-pr")?;
         }
-        let output = fixture
-            .personal_command("merge")?
+        let mut command = fixture.personal_command("merge")?;
+        command
             .args(["--pr", "17", "--interval", "0", "--timeout", timeout])
-            .env("GH_FIXTURE_VIEWS", view)
-            .output()?;
+            .env("GH_FIXTURE_VIEWS", view);
+        if rule == "pr.checks-absent" {
+            command.env(
+                "GH_FIXTURE_WORKFLOWS",
+                r#"{"data":{"repository":{"object":null}}}"#,
+            );
+        }
+        let output = command.output()?;
         assert_eq!(
             refusal(&output)["rule"],
             rule,
@@ -5917,6 +7266,11 @@ fn a_merge_stops_with_a_structured_refusal_and_merges_nothing() -> Result<()> {
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(mutations(&fixture.log()?).is_empty(), "{rule}");
+        assert_eq!(
+            fixture.log()?.contains("workflows-read"),
+            checks == "[]",
+            "only an empty report reads the head's workflows: {rule}"
+        );
     }
     Ok(())
 }
@@ -5996,7 +7350,18 @@ fn create_among_open_prs_command(
     open: &str,
     assessment_base: &str,
 ) -> Result<Command> {
-    let mut command = fixture.personal_command("create")?;
+    creation_among_open_prs_command(fixture, checkout, head, open, assessment_base, "create")
+}
+
+fn creation_among_open_prs_command(
+    fixture: &Fixture,
+    checkout: &std::path::Path,
+    head: &str,
+    open: &str,
+    assessment_base: &str,
+    operation: &str,
+) -> Result<Command> {
+    let mut command = fixture.personal_command(operation)?;
     let (packet, _) = fixture.assessment(
         checkout,
         "P4suta/project",
@@ -6414,9 +7779,8 @@ fn existing_pr_start_rejects_foreign_and_invalid_subjects() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn start_requires_the_open_stack_tip_or_an_independent_declaration() -> Result<()> {
-    let fixture = Fixture::new(BODY)?;
+/// Opens owned PR #4 on a branch that `feature` doesn't include, and returns its head and the open PR listing.
+fn divergent_tip(fixture: &Fixture) -> Result<(String, serde_json::Value)> {
     git(
         fixture.directory.path(),
         &[
@@ -6445,11 +7809,49 @@ fn start_requires_the_open_stack_tip_or_an_independent_declaration() -> Result<(
         &parent,
         "owner/project"
     )]);
+    Ok((parent, pulls))
+}
+
+/// The independent work records `start` keeps for the fixture repository, with their paths.
+fn independent_records(fixture: &Fixture) -> Result<Vec<(PathBuf, serde_json::Value)>> {
+    let directory = fixture
+        .context_home
+        .path()
+        .join(".local/state/pr-workflow/independent/owner__project");
+    if !directory.try_exists()? {
+        return Ok(Vec::new());
+    }
+    fs::read_dir(directory)?
+        .map(|entry| {
+            let path = entry?.path();
+            let record = serde_json::from_slice(&fs::read(&path)?)?;
+            Ok((path, record))
+        })
+        .collect()
+}
+
+#[test]
+fn start_requires_the_open_stack_tip_or_an_independent_declaration() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let (parent, pulls) = divergent_tip(&fixture)?;
     let output = fixture
         .command("start")?
         .env("GH_FIXTURE_PULLS", pulls.to_string())
         .output()?;
-    assert_eq!(refusal(&output)["rule"], "pr.stack-tip");
+    let refused = refusal(&output);
+    assert_eq!(refused["rule"], "pr.stack-tip");
+    assert_eq!(
+        refused["cause"],
+        "feature must include open stack tip #4 (divergent-parent) before new work starts; merge the tip for related work, or declare unrelated work with --independent <reason>"
+    );
+    assert_eq!(refused["next"], format!("git merge --no-edit {parent}"));
+    assert_eq!(
+        refused["evidence"],
+        serde_json::json!([format!(
+            "open stack tip #4 (divergent-parent) at {parent} is not an ancestor of feature at {}",
+            fixture.head
+        )])
+    );
     let independent = fixture
         .command("start")?
         .env("GH_FIXTURE_PULLS", pulls.to_string())
@@ -6463,6 +7865,192 @@ fn start_requires_the_open_stack_tip_or_an_independent_declaration() -> Result<(
         "{}",
         String::from_utf8_lossy(&independent.stderr)
     );
+    Ok(())
+}
+
+#[test]
+fn a_start_refresh_keeps_its_independent_declaration_on_the_same_and_descendant_commits()
+-> Result<()> {
+    let mut fixture = Fixture::new(BODY)?;
+    let (_, pulls) = divergent_tip(&fixture)?;
+    let reason = "Urgent correction unrelated to the divergent parent";
+    let declared = fixture
+        .command("start")?
+        .env("GH_FIXTURE_PULLS", pulls.to_string())
+        .args(["--independent", reason])
+        .output()?;
+    assert!(
+        declared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&declared.stderr)
+    );
+    let started_at = fixture.head.clone();
+    for descendant in [false, true] {
+        if descendant {
+            fs::write(
+                fixture.directory.path().join("work.txt"),
+                "Independent change.\n",
+            )?;
+            git(fixture.directory.path(), &["add", "work.txt"])?;
+            git(
+                fixture.directory.path(),
+                &["commit", "--quiet", "-m", "work"],
+            )?;
+            fixture.head = git(fixture.directory.path(), &["rev-parse", "HEAD"])?;
+        }
+        let refreshed = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", pulls.to_string())
+            .output()?;
+        assert!(
+            refreshed.status.success(),
+            "descendant {descendant}: {}",
+            String::from_utf8_lossy(&refreshed.stderr)
+        );
+        let records = independent_records(&fixture)?;
+        assert_eq!(records.len(), 1, "descendant {descendant}");
+        let (_, record) = &records[0];
+        assert_eq!(record["reason"], reason);
+        assert_eq!(record["started_at"], started_at.as_str());
+        assert!(record["pr"].is_null());
+    }
+    Ok(())
+}
+
+/// The record field a refresh must match, or the head move that leaves the declared history.
+#[derive(Clone, Copy, Debug)]
+enum OtherWork {
+    Login,
+    Destination,
+    SourceId,
+    SourceName,
+    Branch,
+    Issue,
+    History,
+}
+
+impl OtherWork {
+    const ALL: [Self; 7] = [
+        Self::Login,
+        Self::Destination,
+        Self::SourceId,
+        Self::SourceName,
+        Self::Branch,
+        Self::Issue,
+        Self::History,
+    ];
+
+    /// Rewrites the fixture's one independent record, or moves `feature` off its starting commit, and returns the record path.
+    fn apply(self, fixture: &mut Fixture) -> Result<PathBuf> {
+        let records = independent_records(fixture)?;
+        anyhow::ensure!(records.len() == 1, "{self:?}: {records:?}");
+        let (path, mut record) = records.into_iter().next().context("record")?;
+        match self {
+            Self::Login => record["login"] = "someone-else".into(),
+            Self::Destination => record["repository_id"] = 38.into(),
+            Self::SourceId => record["source_id"] = 38.into(),
+            Self::SourceName => record["source"] = "other/project".into(),
+            Self::Branch => record["branch"] = "other".into(),
+            Self::Issue => record["issue"] = 99.into(),
+            Self::History => {
+                let sibling = fixture.sibling_head("sibling")?;
+                git(
+                    fixture.directory.path(),
+                    &["update-ref", "refs/heads/feature", &sibling],
+                )?;
+                fixture.head = sibling;
+            }
+        }
+        fs::write(&path, serde_json::to_vec(&record)?)?;
+        Ok(path)
+    }
+}
+
+#[test]
+fn a_start_refresh_for_other_work_still_needs_its_own_declaration() -> Result<()> {
+    for other in OtherWork::ALL {
+        let mut fixture = Fixture::new(BODY)?;
+        let (_, pulls) = divergent_tip(&fixture)?;
+        let declared = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", pulls.to_string())
+            .args(["--independent", "Urgent correction for other work"])
+            .output()?;
+        assert!(
+            declared.status.success(),
+            "{other:?}: {}",
+            String::from_utf8_lossy(&declared.stderr)
+        );
+        let path = other.apply(&mut fixture)?;
+        let stored = fs::read(&path)?;
+        let refreshed = fixture
+            .command("start")?
+            .env("GH_FIXTURE_PULLS", pulls.to_string())
+            .output()?;
+        assert_eq!(refusal(&refreshed)["rule"], "pr.stack-tip", "{other:?}");
+        assert_eq!(fs::read(&path)?, stored, "{other:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_start_refresh_without_open_work_still_drops_a_declaration_for_other_work() -> Result<()> {
+    for other in OtherWork::ALL {
+        let mut fixture = Fixture::new(BODY)?;
+        let declared = fixture
+            .command("start")?
+            .args(["--independent", "Urgent correction for other work"])
+            .output()?;
+        assert!(
+            declared.status.success(),
+            "{other:?}: {}",
+            String::from_utf8_lossy(&declared.stderr)
+        );
+        other.apply(&mut fixture)?;
+        let refreshed = fixture.command("start")?.output()?;
+        assert!(
+            refreshed.status.success(),
+            "{other:?}: {}",
+            String::from_utf8_lossy(&refreshed.stderr)
+        );
+        assert!(independent_records(&fixture)?.is_empty(), "{other:?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn a_creation_refuses_a_start_declaration_for_other_work() -> Result<()> {
+    for other in OtherWork::ALL {
+        let mut fixture = Fixture::new(BODY)?;
+        let declared = fixture
+            .command("start")?
+            .args(["--independent", "Urgent correction for other work"])
+            .output()?;
+        assert!(
+            declared.status.success(),
+            "{other:?}: {}",
+            String::from_utf8_lossy(&declared.stderr)
+        );
+        other.apply(&mut fixture)?;
+        let created = fixture
+            .command("create")?
+            .env("HOME", fixture.context_home.path())
+            .env("USERPROFILE", fixture.context_home.path())
+            .args(["--title", "fix: preserve edits", "--body-file"])
+            .arg(&fixture.body)
+            .args(["--head", "feature"])
+            .output()?;
+        let expected = match other {
+            OtherWork::History => "feature no longer descends from its independent start",
+            _ => "independent start belongs to another source or issue",
+        };
+        let stderr = String::from_utf8_lossy(&created.stderr);
+        assert!(
+            !created.status.success() && stderr.contains(expected),
+            "{other:?}: {stderr}"
+        );
+        assert!(!fixture.log()?.contains("\ncreate\n"), "{other:?}");
+    }
     Ok(())
 }
 
@@ -6833,6 +8421,161 @@ fn prune_merged_deletes_only_branches_that_merged() -> Result<()> {
     Ok(())
 }
 
+/// The open stack of `stack_checkout`, bottom first.
+const RESTACKED_PULLS: &str = r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":11,"headRefName":"prior-topic","baseRefName":"parent"},{"number":17,"headRefName":"topic","baseRefName":"prior-topic"}]"#;
+
+/// Replays `commit` onto `parent` and returns the rebased commit, leaving `topic` checked out.
+fn replay(
+    checkout: &std::path::Path,
+    scope: &std::path::Path,
+    commit: &str,
+    parent: &str,
+) -> String {
+    scoped_git(checkout, scope, &["switch", "--quiet", "--detach", parent]);
+    scoped_git(checkout, scope, &["cherry-pick", commit]);
+    let replayed = scoped_git(checkout, scope, &["rev-parse", "HEAD"]);
+    scoped_git(checkout, scope, &["switch", "--quiet", "topic"]);
+    replayed
+}
+
+/// Starts issue 23 for `body.md` on `topic` inside the stack checkout and returns the environment of that start.
+fn start_in_stack(
+    fixture: &Fixture,
+    checkout: &std::path::Path,
+) -> Result<Vec<(std::ffi::OsString, std::ffi::OsString)>> {
+    let key = fixture.signing_key()?;
+    for (name, value) in [
+        ("gpg.format", "ssh"),
+        (
+            "user.signingkey",
+            key.to_str().context("fixture signing key path")?,
+        ),
+        (
+            "url.https://github.com/P4suta/project.git.insteadOf",
+            "https://github.com/P4suta/project.git",
+        ),
+    ] {
+        scoped_git(
+            checkout,
+            fixture.directory.path(),
+            &["config", "--local", name, value],
+        );
+    }
+    let mut start = fixture.personal_command("start")?;
+    for (name, _) in std::env::vars_os() {
+        if name.to_string_lossy().starts_with("GIT_") {
+            start.env_remove(name);
+        }
+    }
+    start
+        .current_dir(checkout)
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            fixture.directory.path().join("gitconfig"),
+        )
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .args(["--issue", "23"]);
+    let variables = start
+        .get_envs()
+        .filter_map(|(key, value)| value.map(|value| (key.to_owned(), value.to_owned())))
+        .collect();
+    let started = start.output()?;
+    anyhow::ensure!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    Ok(variables)
+}
+
+#[test]
+fn a_leased_restack_carries_the_issue_context_of_an_unchanged_branch() -> Result<()> {
+    for (action, keeps_change) in [("sync", true), ("rebase", true), ("sync", false)] {
+        let fixture = Fixture::new(BODY)?;
+        let scope = fixture.directory.path();
+        let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+        let variables = start_in_stack(&fixture, &checkout)?;
+        let topic = git(&checkout, &["rev-parse", "topic"])?;
+        let prior = git(&checkout, &["rev-parse", "prior-topic"])?;
+        let parent = git(&checkout, &["rev-parse", "parent"])?;
+        scoped_git(
+            &checkout,
+            scope,
+            &["switch", "--quiet", "--detach", &parent],
+        );
+        fs::write(checkout.join("upstream.txt"), "Updated parent.\n")?;
+        scoped_git(&checkout, scope, &["add", "upstream.txt"]);
+        scoped_git(
+            &checkout,
+            scope,
+            &["commit", "--quiet", "-m", "updated parent"],
+        );
+        let new_parent = scoped_git(&checkout, scope, &["rev-parse", "HEAD"]);
+        scoped_git(&checkout, scope, &["switch", "--quiet", "topic"]);
+        let new_prior = replay(&checkout, scope, &prior, &new_parent);
+        let new_topic = if keeps_change {
+            replay(&checkout, scope, &topic, &new_prior)
+        } else {
+            scoped_git(
+                &checkout,
+                scope,
+                &["switch", "--quiet", "--detach", &new_prior],
+            );
+            fs::write(checkout.join("topic.txt"), "A different topic change.\n")?;
+            scoped_git(
+                &checkout,
+                scope,
+                &["commit", "--quiet", "-am", "different topic"],
+            );
+            let changed = scoped_git(&checkout, scope, &["rev-parse", "HEAD"]);
+            scoped_git(&checkout, scope, &["switch", "--quiet", "topic"]);
+            changed
+        };
+        let output = fixture
+            .stack_command(&checkout, &lease, &[action])?
+            .env("HOME", fixture.context_home.path())
+            .env("USERPROFILE", fixture.context_home.path())
+            .env("GH_FIXTURE_LIST", RESTACKED_PULLS)
+            .env(
+                "GH_STACK_FIXTURE_REWRITE",
+                format!("parent={new_parent}\nprior-topic={new_prior}\ntopic={new_topic}"),
+            )
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{action}, keeps change {keeps_change}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(git(&checkout, &["rev-parse", "HEAD"])?, new_topic);
+        let root = platform::issue_context::checkout(&checkout)?;
+        let paths = [PathBuf::from("body.md")];
+        let guarded =
+            platform::issue_context::guard_for(&root, &paths, fixture.context_home.path());
+        if !keeps_change {
+            let error = guarded.expect_err("a changed restack must leave the context behind");
+            assert!(
+                format!("{error:#}").contains(&format!("issue-context start commit {topic}")),
+                "{error:#}"
+            );
+            continue;
+        }
+        guarded?;
+        fs::write(checkout.join("body.md"), "Work after the restack.\n")?;
+        scoped_git(&checkout, scope, &["add", "body.md"]);
+        let checked = fixture_process::command(env!("CARGO_BIN_EXE_pr-workflow"), &checkout)
+            .current_dir(&checkout)
+            .envs(variables.iter().cloned())
+            .args(["change-check", "--staged"])
+            .output()?;
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn stack_sync_and_rebase_run_gh_stack_under_the_lease_and_release_it() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
@@ -6921,7 +8664,7 @@ fn stack_resolves_the_owner_installation_and_refuses_an_unexpected_version() -> 
 
 #[test]
 fn stack_merge_refuses_a_ready_member_without_its_own_open_issue_before_merging() -> Result<()> {
-    for issue in [None, Some(24)] {
+    for (issue, reported) in [(None, false), (Some(24), true), (Some(24), false)] {
         let fixture = Fixture::new(BODY)?;
         let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
         let parent = git(&checkout, &["rev-parse", "parent"])?;
@@ -6939,6 +8682,7 @@ fn stack_merge_refuses_a_ready_member_without_its_own_open_issue_before_merging(
         )?;
         member["closingIssuesReferences"] = serde_json::json!(
             issue
+                .filter(|_| reported)
                 .map(|number| serde_json::json!({"number":number}))
                 .into_iter()
                 .collect::<Vec<_>>()
@@ -6968,6 +8712,12 @@ fn stack_merge_refuses_a_ready_member_without_its_own_open_issue_before_merging(
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("stack member #17"), "{stderr}");
+        if let Some(number) = issue {
+            assert!(
+                stderr.contains(&format!("#{number}: state closed")),
+                "reported {reported}: {stderr}"
+            );
+        }
         assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());
         assert!(!fixture.log()?.contains("/merge-async"));
     }
@@ -6976,7 +8726,8 @@ fn stack_merge_refuses_a_ready_member_without_its_own_open_issue_before_merging(
 
 #[test]
 fn stack_merge_checks_three_members_own_issues_or_the_explicit_common_issue() -> Result<()> {
-    for common in [false, true] {
+    // GitHub reports no closing reference for a PR whose base isn't the default branch, so upper members rely on their bodies.
+    for (common, reported) in [(false, true), (true, true), (false, false), (true, false)] {
         let fixture = Fixture::new(BODY)?;
         let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
         let trunk = git(&checkout, &["rev-parse", "origin/main"])?;
@@ -6998,7 +8749,11 @@ fn stack_merge_checks_three_members_own_issues_or_the_explicit_common_issue() ->
                 let mut document: serde_json::Value =
                     serde_json::from_str(response.split_once('=').unwrap().1)?;
                 document["baseRefName"] = serde_json::json!(base);
-                document["closingIssuesReferences"] = serde_json::json!([{"number":issue}]);
+                document["closingIssuesReferences"] = if reported || base == "main" {
+                    serde_json::json!([{"number":issue}])
+                } else {
+                    serde_json::json!([])
+                };
                 views.push(format!("{pr}={document}"));
             }
         }
@@ -7020,14 +8775,15 @@ fn stack_merge_checks_three_members_own_issues_or_the_explicit_common_issue() ->
         let output = command.output()?;
         assert!(
             output.status.success(),
-            "{}",
+            "common {common}, reported {reported}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
         let log = fixture.log()?;
         for number in [23, 24, 25] {
             assert_eq!(
                 log.contains(&format!("\nrepos/P4suta/project/issues/{number}\n")),
-                !common || number == 23
+                !common || number == 23,
+                "common {common}, reported {reported}, issue {number}"
             );
         }
         let stdout = String::from_utf8_lossy(&output.stdout);

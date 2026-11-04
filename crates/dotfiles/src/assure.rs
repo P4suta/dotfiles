@@ -170,6 +170,10 @@ pub fn catalog(path: &Path) -> Result<Catalog> {
 /// Returns a refusal naming `chezmoi apply` when the host lacks the catalog, and an error when it doesn't parse.
 pub fn installed() -> Result<Catalog> {
     let home = platform::home::home().context("native home is unavailable")?;
+    installed_at(&home)
+}
+
+pub(crate) fn installed_at(home: &Path) -> Result<Catalog> {
     let path = home.join(CATALOG);
     if !path.is_file() {
         return Err(Refusal::new(
@@ -188,10 +192,10 @@ fn digest(bytes: &[u8]) -> String {
     platform::build_inputs::hex(&Sha256::digest(bytes))
 }
 
-/// The owner-side map for the checkout's GitHub origin, or none for an unsupported origin.
+/// The owner-side map for a GitHub origin or an originless canonical local checkout, or none for an unsupported origin.
 ///
 /// # Errors
-/// Returns an error when Git can't read the checkout's origin.
+/// Returns an error when Git can't read the checkout's origin or the originless checkout has no canonical UTF-8 path.
 pub fn owner_path(root: &Path, catalog: &Catalog) -> Result<Option<PathBuf>> {
     let output = Tool::Git
         .command()
@@ -201,7 +205,17 @@ pub fn owner_path(root: &Path, catalog: &Catalog) -> Result<Option<PathBuf>> {
         .output()
         .context("read checkout origin")?;
     if output.status.code() == Some(1) {
-        return Ok(None);
+        let checkout = platform::paths::canonical(root).context("canonicalize local checkout")?;
+        let identity = checkout
+            .to_str()
+            .context("local checkout path is not UTF-8")?;
+        return Ok(Some(
+            catalog
+                .directory
+                .join(REPOS)
+                .join("local")
+                .join(format!("{}.toml", digest(identity.as_bytes()))),
+        ));
     }
     ensure!(output.status.success(), "cannot read checkout origin");
     let origin = std::str::from_utf8(&output.stdout)?.trim();
@@ -1750,8 +1764,8 @@ fn upstream_base(
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RequestBaseline {
-    root: PathBuf,
-    commit: String,
+    pub(crate) root: PathBuf,
+    pub(crate) commit: String,
 }
 
 fn worktree_snapshot(root: &Path) -> Result<RequestBaseline> {
@@ -1836,6 +1850,45 @@ fn request_stop(
 pub fn stop(root: &Path, catalog: &Catalog) -> Result<Outcome> {
     let head = Tree::Commit(resolve(root, "HEAD")?);
     decide(root, catalog, Point::Stop, &head, &Tree::WorkingTree)
+}
+
+pub(crate) fn check_request(
+    root: &Path,
+    baseline: &str,
+    cwd: &Path,
+    catalog: &Catalog,
+) -> Result<()> {
+    ensure!(
+        shape_rules::commit_id(baseline.as_bytes()),
+        "invalid answer assurance baseline commit"
+    );
+    let root = platform::paths::canonical(root)?;
+    ensure!(
+        git(
+            &root,
+            &["rev-parse", "--is-inside-work-tree", "--show-prefix"]
+        )? == b"true\n\n",
+        "answer assurance root is not a repository root"
+    );
+    ensure!(
+        git(&root, &["rev-parse", "--absolute-git-dir"])?
+            == git(cwd, &["rev-parse", "--absolute-git-dir"])?,
+        "answer assurance belongs to another repository"
+    );
+    ensure!(
+        resolve(&root, baseline)?.is_some_and(|resolved| resolved.eq_ignore_ascii_case(baseline)),
+        "answer assurance baseline commit is missing or abbreviated"
+    );
+    enforce(
+        catalog,
+        &decide(
+            &root,
+            catalog,
+            Point::Stop,
+            &Tree::Commit(Some(baseline.to_owned())),
+            &Tree::WorkingTree,
+        )?,
+    )
 }
 
 /// The session start report: every gap of the working tree with its next action, or nothing when it has none.
@@ -1960,6 +2013,20 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                     reasons.push(format!("Reply line {}: {}", finding.line, finding.message));
                 }
             }
+            if matches!(language, Some(Language::Japanese)) {
+                for hit in dotguard::lang::scan(
+                    input.last_assistant_message.as_deref().unwrap_or_default(),
+                    dotguard::lang::Mode::Japanese,
+                ) {
+                    reasons.push(format!(
+                        "Reply line {}: {:?} U+{:04X} is {}; write the Japanese form or name the character by its code point.",
+                        hit.line, hit.ch, hit.ch as u32, hit.kind
+                    ));
+                }
+                reasons.extend(japanese_word_reasons(
+                    input.last_assistant_message.as_deref().unwrap_or_default(),
+                ));
+            }
             if let Some(language) = language
                 && reply_language_rules::check(
                     language,
@@ -2003,6 +2070,28 @@ struct StopInput {
     #[serde(default)]
     stop_hook_active: bool,
     last_assistant_message: Option<String>,
+}
+
+/// The refusals of the installed Japanese word rules for a Japanese reply.
+/// A host without the prose configuration reports that on standard error and refuses nothing for it.
+#[must_use]
+pub fn japanese_word_reasons(reply: &str) -> Vec<String> {
+    match prose::Bundle::installed().and_then(|bundle| prose::japanese::WordRules::read(&bundle)) {
+        Ok(rules) => rules
+            .findings("reply", reply)
+            .into_iter()
+            .map(|finding| {
+                format!(
+                    "Reply line {}: {}: {}",
+                    finding.line, finding.rule, finding.message
+                )
+            })
+            .collect(),
+        Err(error) => {
+            eprintln!("dotfiles: the Japanese word rules are unavailable: {error:#}");
+            Vec::new()
+        }
+    }
 }
 
 /// The client's stop hook answer: block once with the reason, and end the turn incomplete when the agent already continued once.

@@ -1,7 +1,7 @@
 {
-  "revision": "21a99546207fee53d0d7690cf71e3932cb1c8c0c7274ed8c1edf574e1940ab32",
+  "revision": "0787bfe6094579308bfdf7e4f951f008d03c13687fc7fe21258ee83ac586e1d2",
   "outcome": "implemented",
-  "reason": "Use the accountable importance assessment to select one CodeRabbit pool and keep severe classifications exceptional.\nKeep service setup separate from findings, preserve billing and capacity controls, and verify effective opt-in settings before claiming adoption.\nThis revision clarifies prose without changing review selection.\nThe four prepared configuration files passed the official schema, and source-bound Kani checks passed for the two exclusive review cores.\nEffective organization settings, service review, complete native gates, and rollout remain pending.",
+  "reason": "Use signed importance with an optional owner-local repository policy that selects PR review for every level.\nKeep service setup separate from findings and preserve separate pool capacity, adaptive thresholds, billing controls, and owner-controlled pauses.\nThe local policy selects a review route without claiming effective service configuration or allowance.",
   "evidence": [
     "home/dot_agents/skills/coderabbit/SKILL.md",
     "home/dot_agents/skills/pull-request/references/importance.md",
@@ -13,7 +13,12 @@
     "docs/adr/0015-scoped-coderabbit-pause.md",
     "crates/rules/src/review_rules.rs",
     "home/dot_agents/skills/coderabbit/tools.toml",
-    "xtask/tests/tool_inventory.rs"
+    "xtask/tests/tool_inventory.rs",
+    "docs/adr/require-pr-review-by-repository-policy.md",
+    "crates/pr-workflow/src/review_policy.rs",
+    "crates/pr-workflow/src/evidence.rs",
+    "crates/pr-workflow/tests/pr_workflow.rs",
+    "crates/rules/src/review_routing_rules.rs"
   ],
   "revisit": null
 }

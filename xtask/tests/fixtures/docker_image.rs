@@ -1,11 +1,18 @@
-//! A Docker image store with a native platform and an observed build.
+//! A Docker image store with an observed command sequence.
 
 use std::fs;
+use std::io::Write as _;
 
 fn main() {
     let executable = std::env::current_exe().unwrap();
     let platform = executable.with_extension("platform");
     let arguments: Vec<_> = std::env::args().skip(1).collect();
+    let mut calls = fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(executable.with_extension("calls"))
+        .unwrap();
+    writeln!(calls, "{}", arguments.join(" ")).unwrap();
     match arguments.first().map(String::as_str) {
         Some("image") => {
             assert_eq!(arguments.get(1).map(String::as_str), Some("inspect"));

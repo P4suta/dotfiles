@@ -397,6 +397,14 @@ struct Installation {
     symlinked_to: Option<PathBuf>,
 }
 
+impl Installation {
+    /// mise reports a release requested by a `v`-prefixed tag, such as `v0.3.0`, under its version without the prefix.
+    fn resolves_its_request(&self) -> bool {
+        self.version == self.requested_version
+            || self.requested_version.strip_prefix('v') == Some(self.version.as_str())
+    }
+}
+
 #[cfg(windows)]
 #[derive(Debug, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -838,7 +846,7 @@ impl CodeEnvironment {
                     (tool.active || !tool.installed)
                         && tool.source.r#type == MISE_CONFIG
                         && canonical(&tool.source.path)? == self.configuration
-                        && tool.version == tool.requested_version,
+                        && tool.resolves_its_request(),
                     "{name} does not resolve to its exact active project pin"
                 );
             }
@@ -873,7 +881,7 @@ impl CodeEnvironment {
                         tool.active,
                         tool.source.r#type == MISE_CONFIG
                             && canonical(&tool.source.path)? == self.configuration,
-                        tool.version == tool.requested_version,
+                        tool.resolves_its_request(),
                     ]),
                     "{name} does not resolve to its installed project pin: {tool:?}"
                 );
@@ -1625,7 +1633,7 @@ fn exact_project_pin<'a>(
     ensure!(
         tool.source.r#type == MISE_CONFIG
             && canonical(&tool.source.path)? == configuration
-            && tool.version == tool.requested_version,
+            && tool.resolves_its_request(),
         "{name} does not resolve to the exact private project pin"
     );
     Ok(&tool.requested_version)
@@ -1660,7 +1668,7 @@ fn require_inherited_pins(
                     tool.active,
                     tool.source.r#type == MISE_CONFIG
                         && canonical(&tool.source.path)? == configuration,
-                    tool.version == tool.requested_version,
+                    tool.resolves_its_request(),
                 ]),
                 "{name} does not resolve to its installed project pin: {tool:?}"
             );
@@ -1953,6 +1961,37 @@ fn base_directories() -> Vec<PathBuf> {
         ]
     } else {
         UNIX_BASE.map(PathBuf::from).into()
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+
+    fn installation(version: &str, requested_version: &str) -> Installation {
+        Installation {
+            version: version.into(),
+            requested_version: requested_version.into(),
+            install_path: PathBuf::from("/installs/tool"),
+            source: Source {
+                r#type: MISE_CONFIG.into(),
+                path: PathBuf::from("/project/mise.toml"),
+            },
+            installed: true,
+            active: true,
+            symlinked_to: None,
+        }
+    }
+
+    #[test]
+    fn a_tag_request_resolves_only_to_its_own_release() {
+        assert!(installation("0.3.0", "0.3.0").resolves_its_request());
+        assert!(installation("0.3.0", "v0.3.0").resolves_its_request());
+        assert!(installation("v0.3.0", "v0.3.0").resolves_its_request());
+        assert!(!installation("0.3.1", "v0.3.0").resolves_its_request());
+        assert!(!installation("v0.3.0", "0.3.0").resolves_its_request());
+        assert!(!installation("0.3.0", "vv0.3.0").resolves_its_request());
+        assert!(!installation("latest", "0.3.0").resolves_its_request());
     }
 }
 

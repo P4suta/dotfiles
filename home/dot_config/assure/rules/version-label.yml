@@ -1,0 +1,29 @@
+id: version-label
+language: rust
+severity: error
+message: An identifier carries a version label instead of the decision or property it embodies.
+note: >-
+  Name the distinguishing decision or property, as the `decision-naming` skill describes; a stored format keeps its number beside the code that reads it.
+  The segments `v4` and `v6` stay admitted because they name IP protocol versions.
+  Standard UUIDv7 generator calls retain their upstream API name.
+metadata:
+  cwe: CWE-1099
+  ruleset: decision-naming
+ignores:
+  - "**/tests/**"
+  - "**/benches/**"
+  - "**/fixtures/**"
+  - "**/testdata/**"
+  - "**/tests.rs"
+  - "**/*_tests.rs"
+rule:
+  any:
+    - kind: identifier
+    - kind: type_identifier
+  regex: '(^|_)[vV]([0-35789]|[1-9][0-9]+)(_|$)|[a-z]V([0-35789]|[1-9][0-9]+)([A-Z]|$)|^v([0-35789]|[1-9][0-9]+)[A-Z]'
+  not:
+    any:
+      - inside:
+          pattern: Uuid::now_v7
+      - inside:
+          pattern: uuid::Uuid::now_v7

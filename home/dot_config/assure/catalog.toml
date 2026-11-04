@@ -6,6 +6,13 @@
 languages = ["rust", "shell", "typescript", "powershell"]
 
 [[pattern]]
+id = "version-label"
+weakness = "CWE-1099"
+rust = "ast-grep:version-label"
+typescript = "ast-grep:typescript-version-label"
+uncovered = { shell = "the shared shell templates name no versioned identifier", powershell = "ast-grep has no PowerShell grammar and PSScriptAnalyzer no such rule" }
+
+[[pattern]]
 id = "magic-number"
 weakness = "CWE-1106"
 rust = "ast-grep:magic-number"

@@ -9,6 +9,10 @@ Every pure decision lives in `crates/rules/`, which has no dependency and no sta
 One Cargo workspace at the root builds them with one lockfile, one toolchain from `mise.toml`, and one lint policy.
 [ADR 0023](adr/0023-repository-layout-and-target-architecture.md) records this layout and the steps that remain.
 
+`dotfiles repository check --remote origin` resolves the named Git remote's URL to its GitHub owner/name before checking the description.
+The `--remote` option also accepts an explicit GitHub owner/name.
+`dotfiles repository generate --remote origin` uses the same resolution to update the description.
+
 ## Render flow
 
 1. `.chezmoiroot` names `home/`, so chezmoi reads the source state there while every command passes the checkout root as `--source`.
@@ -45,6 +49,7 @@ The plan runs, in order:
 6. For `commit-msg`, the prose checker on the message.
 7. For `pre-commit`, the global Lefthook configuration, then for every hook but `post-commit` and `reference-transaction`, the repository's own Lefthook configuration.
    A repository with its own Lefthook configuration first has its mise configuration trusted, because mise runs in paranoid mode and the hook runs that repository's commands anyway.
+   The hook asks `mise trust --show` until no new file appears, so it also trusts an idiomatic version file such as `global.json` that a trusted `mise.toml` enables, and it trusts nothing outside the repository.
 8. For `pre-commit`, a refusal when a hook changed the staged tree.
 9. For `pre-push`, the Renovate freshness gate.
 10. For `post-commit` and `post-merge`, the reinstallation of tools built from changed sources.
@@ -55,6 +60,7 @@ The plan runs, in order:
 Agent mutation hooks run `dotfiles lint-hook` over only the written paths.
 The same bounded linter adapter checks scripts before the Bash guard admits execution.
 The pure `lint_hook_rules` selects file types, linters, configuration sources, and admission, while repository configuration keeps its supported exclusions.
+Every file type ends with the OComment check, so comment findings reach the agent in the same turn as the edit.
 Missing linters, timeouts, and findings block with reproducing commands.
 
 The Bash guard collects GitHub publication bodies during the same bounded shell traversal that inspects legacy commands.

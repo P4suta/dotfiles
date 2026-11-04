@@ -133,7 +133,38 @@ fn edit_checkout(path: &Path) -> Result<PathBuf> {
         .ancestors()
         .find(|directory| directory.is_dir())
         .context("edit has no existing parent directory")?;
-    platform::issue_context::checkout(existing)
+    let existing = crate::canonical(existing)?;
+    let boundary = existing
+        .ancestors()
+        .find(|directory| directory.join(".git").exists())
+        .context("edit has no checkout boundary")?;
+    platform::issue_context::checkout(boundary)
+}
+
+fn refuse_git_metadata(root: &Path, absolute: &Path) -> Result<()> {
+    let directories = platform::issue_context::git(
+        root,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+            "--git-common-dir",
+        ],
+        None,
+    )?;
+    if absolute.starts_with(root.join(".git"))
+        || directories
+            .lines()
+            .any(|directory| absolute.starts_with(directory))
+    {
+        return Err(platform::refusal::Refusal::without_next(
+            "pr.git-metadata",
+            "Git metadata writes are outside implementation issue authority",
+        )
+        .evidence(format!("edit path: {}", absolute.display()))
+        .into());
+    }
+    Ok(())
 }
 
 /// # Errors
@@ -185,6 +216,7 @@ pub fn check(input: &str) -> Result<()> {
     for path in checked {
         let root = edit_checkout(&path)?;
         let absolute = platform::issue_context::edit_path(&root, &path)?;
+        refuse_git_metadata(&root, &absolute)?;
         let relative = absolute
             .strip_prefix(&root)
             .context("edit path lies outside the repository")?;
@@ -302,6 +334,27 @@ mod tests {
                 && !error.contains("escapes the checkout"),
             "{error}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn git_metadata_writes_get_a_structured_refusal_before_worktree_queries() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let repository = scope.path().join("repository");
+        self::repository(&repository, true)?;
+        for target in [".git/info/exclude", ".git", ".git/objects/new/object"] {
+            let packet = serde_json::json!({
+                "cwd": repository,
+                "tool_name": "Write",
+                "tool_input": {"file_path": repository.join(target)}
+            });
+            let error = check(&packet.to_string()).unwrap_err();
+            assert!(
+                error.downcast_ref::<platform::refusal::Refusal>().is_some(),
+                "{target}: {error:#}"
+            );
+            assert!(format!("{error:#}").contains("Git metadata"), "{error:#}");
+        }
         Ok(())
     }
 

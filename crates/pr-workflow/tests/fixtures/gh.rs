@@ -144,6 +144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GH_FIXTURE_REPOSITORY" => Some("GH_FIXTURE_REPOSITORIES"),
             "GH_FIXTURE_BRANCH" => Some("GH_FIXTURE_BRANCHES"),
             "GH_FIXTURE_ISSUE" => Some("GH_FIXTURE_ISSUES"),
+            "GH_FIXTURE_COMPARE" => Some("GH_FIXTURE_COMPARISONS"),
             _ => None,
         };
         if let Some(responses) = responses
@@ -184,6 +185,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .count();
                 writeln!(log, "queue-read {number}")?;
                 println!("{}", states[reads.min(states.len() - 1)]);
+                return Ok(());
+            }
+            if let Some(index) = args.iter().position(|arg| arg == "--input")
+                && std::fs::read_to_string(&args[index + 1])?.contains("object(expression")
+            {
+                writeln!(log, "workflows-read")?;
+                println!(
+                    "{}",
+                    std::env::var("GH_FIXTURE_WORKFLOWS").unwrap_or_else(|_| {
+                        r#"{"data":{"repository":{"object":{"entries":[{"name":"ci.yml"}]}}}}"#
+                            .into()
+                    })
+                );
                 return Ok(());
             }
             let head = current_graph_head(&args, &log_path)?;
@@ -287,9 +301,9 @@ fn endpoint_response(
     responses
         .lines()
         .find_map(|line| {
-            line.split_once('=')
-                .filter(|(key, _)| *key == endpoint)
-                .map(|(_, response)| response.to_owned())
+            line.strip_prefix(endpoint)
+                .and_then(|suffix| suffix.strip_prefix('='))
+                .map(str::to_owned)
         })
         .map(Some)
         .ok_or_else(|| format!("no owned response for {endpoint}").into())
@@ -485,6 +499,7 @@ fn view_fields(mut view: String) -> Result<String, Box<dyn std::error::Error>> {
     // An assessed head carries only the standing exclusion of a noncritical route, because the assessment stays in owner-local state.
     if let (Some(_), Some((start, end))) = (assessment, string_field(&view, "body"))
         && std::env::var("GH_FIXTURE_LEVEL").as_deref() != Ok("critical")
+        && std::env::var("GH_FIXTURE_ALWAYS_PR").as_deref() != Ok("true")
         && !view[start..end].contains("@coderabbitai ignore")
     {
         view.insert_str(end, "\\n@coderabbitai ignore\\n");

@@ -35,6 +35,45 @@ pub enum Generation {
     Refused,
 }
 
+/// The exact license state a package manifest may declare.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(kani, derive(kani::Arbitrary))]
+pub enum LicenseExpression {
+    MitOrApache,
+    ApacheOnly,
+    MitOnly,
+    AgplOnly,
+    AgplOrLater,
+    Unlicensed,
+}
+
+const MAX_LICENSE_EXPRESSION_BYTES: usize = 17;
+
+/// Whether an expression length is within the longest recognized declaration.
+#[must_use]
+const fn supported_license_expression_length(length: usize) -> bool {
+    length <= MAX_LICENSE_EXPRESSION_BYTES
+}
+
+/// Whether a package manifest declares the exact expression for its license state.
+#[must_use]
+pub fn matches_license_expression(state: LicenseExpression, expression: &[u8]) -> bool {
+    if !supported_license_expression_length(expression.len()) {
+        return false;
+    }
+
+    match state {
+        LicenseExpression::MitOrApache => {
+            expression == b"MIT OR Apache-2.0" || expression == b"Apache-2.0 OR MIT"
+        }
+        LicenseExpression::ApacheOnly => expression == b"Apache-2.0",
+        LicenseExpression::MitOnly => expression == b"MIT",
+        LicenseExpression::AgplOnly => expression == b"AGPL-3.0-only",
+        LicenseExpression::AgplOrLater => expression == b"AGPL-3.0-or-later",
+        LicenseExpression::Unlicensed => false,
+    }
+}
+
 /// Selects generated artifacts from the license state and its reviewed assets.
 #[must_use]
 pub fn generation(assets: LicenseAssets) -> Generation {
@@ -78,6 +117,50 @@ pub fn drift(license: bool, consent: bool, generated: bool, description: bool) -
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_license_expression(state: LicenseExpression, expression: &[u8]) {
+        let expected = match state {
+            LicenseExpression::MitOrApache => {
+                expression == b"MIT OR Apache-2.0" || expression == b"Apache-2.0 OR MIT"
+            }
+            LicenseExpression::ApacheOnly => expression == b"Apache-2.0",
+            LicenseExpression::MitOnly => expression == b"MIT",
+            LicenseExpression::AgplOnly => expression == b"AGPL-3.0-only",
+            LicenseExpression::AgplOrLater => expression == b"AGPL-3.0-or-later",
+            LicenseExpression::Unlicensed => false,
+        };
+        assert_eq!(matches_license_expression(state, expression), expected);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(20)]
+    fn every_bounded_expression_matches_only_its_exact_license_state() {
+        let state: LicenseExpression = kani::any();
+        let bytes: [u8; MAX_LICENSE_EXPRESSION_BYTES] = kani::any();
+        let length: usize = kani::any();
+        kani::assume(length <= MAX_LICENSE_EXPRESSION_BYTES);
+        let expression = &bytes[..length];
+        spec_license_expression(state, expression);
+        kani::cover!(matches_license_expression(state, expression));
+        kani::cover!(!matches_license_expression(state, expression));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(20)]
+    fn expressions_longer_than_the_supported_bound_are_rejected() {
+        let state: LicenseExpression = kani::any();
+        let bytes: [u8; MAX_LICENSE_EXPRESSION_BYTES + 1] = kani::any();
+        assert!(!matches_license_expression(state, &bytes));
+
+        let length: usize = kani::any();
+        assert_eq!(
+            supported_license_expression_length(length),
+            length <= MAX_LICENSE_EXPRESSION_BYTES
+        );
+        kani::cover!(length > MAX_LICENSE_EXPRESSION_BYTES);
+    }
 
     pub fn spec_generation(assets: LicenseAssets) {
         let result = generation(assets);
@@ -182,5 +265,39 @@ mod tests {
             super::drift(true, true, false, false),
             super::Drift::Generated
         );
+    }
+
+    #[test]
+    fn every_license_expression_fixture_meets_the_specification() {
+        for state in [
+            super::LicenseExpression::MitOrApache,
+            super::LicenseExpression::ApacheOnly,
+            super::LicenseExpression::MitOnly,
+            super::LicenseExpression::AgplOnly,
+            super::LicenseExpression::AgplOrLater,
+            super::LicenseExpression::Unlicensed,
+        ] {
+            let expressions: [&[u8]; 12] = [
+                b"MIT OR Apache-2.0".as_slice(),
+                b"Apache-2.0 OR MIT",
+                b"Apache-2.0",
+                b"MIT",
+                b"AGPL-3.0-only",
+                b"AGPL-3.0-or-later",
+                b"agpl-3.0-or-later",
+                b"MIT ",
+                b"AGPL-3.0-or-later ",
+                b"",
+                &[0xff],
+                b"unknown license expression",
+            ];
+            for expression in expressions {
+                super::proofs::spec_license_expression(state, expression);
+            }
+        }
+        assert!(!super::matches_license_expression(
+            super::LicenseExpression::MitOnly,
+            b"AGPL-3.0-or-later extra"
+        ));
     }
 }

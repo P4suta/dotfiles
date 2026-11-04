@@ -1,0 +1,11 @@
+{
+  "revision": "ae125e3d89eeb22e20221c83c9b48464a734ad15576329155add63b00d35c5c5",
+  "outcome": "implemented",
+  "reason": "The owner requested black-and-white designs, literal service headings, and meaningful typography; this revision records those defaults, adds canonical discovery and a common policy reference, and requires browser checks with positive and negative fixtures while preserving semantic clarity as a human review boundary.",
+  "evidence": [
+    "home/dot_agents/skills/monochrome-design/SKILL.md",
+    "home/dot_claude/skills/symlink_monochrome-design",
+    "home/.chezmoitemplates/partials/agent_policy"
+  ],
+  "revisit": null
+}

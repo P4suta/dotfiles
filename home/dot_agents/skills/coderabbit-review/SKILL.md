@@ -12,8 +12,9 @@ Keep owner-side service review and publication policy separate from the project'
 Keep the user's commit, push, PR comment, and approval boundaries.
 Never start a second independent model review or a cloud coding task to fetch findings.
 Use the authenticated PR importance assessment to select the required route.
-`low` and `medium` require no CodeRabbit review, `high` requires the guarded CLI, and `critical` requires GitHub PR review.
-Use only the assessed route.
+By default, `low` and `medium` require no CodeRabbit review, `high` requires the guarded CLI, and `critical` requires GitHub PR review.
+The `pull-request` owner-local repository policy selects GitHub PR review for every level without changing the assessment.
+Use only the selected route.
 Keep existing supported findings regardless of a changed classification.
 Use the `pull-request` importance criteria and checked workflow rather than inventing another threshold.
 An explicit local review request still needs its exact authorized scope and guarded capacity.
@@ -69,8 +70,9 @@ Fix its supported CodeRabbit findings.
 Use `gh` to identify the exact repository, PR, base, and current head SHA before reading CodeRabbit comments.
 Poll the automatic review read-only with bounds, and post progress updates while it runs.
 Use `gh pr checks` for check state, and read the bot's review and summary for completion at the current head.
-Only a current `critical` assessment requires a PR review.
-Keep `@coderabbitai ignore` in every noncritical description and keep its critical opt-in label absent.
+A current `critical` assessment or the repository PR policy requires PR review.
+Keep `@coderabbitai ignore` for routes other than PR review and keep their critical opt-in label absent.
+Under the repository PR policy, remove the ignore line, require current-head review before readiness, and use no critical opt-in label.
 When the owner pauses the required pool, report the blocked route and continue independent work without starting it.
 After resumption, `pr-workflow check --pr` reports the missing evidence for the current diff.
 Missing, skipped, stale, failed, incomplete, and rate-limited required reviews stay pending.

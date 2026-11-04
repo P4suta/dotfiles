@@ -248,18 +248,12 @@ const LEFTHOOK_CONFIGURATIONS: [&str; 8] = [
     ".lefthook.json",
 ];
 
-/// The project configurations mise loads from a repository root.
-const MISE_CONFIGURATIONS: [&str; 9] = [
-    "mise.toml",
-    "mise.local.toml",
-    ".mise.toml",
-    ".mise.local.toml",
-    "mise/config.toml",
-    ".mise/config.toml",
-    ".config/mise.toml",
-    ".config/mise/config.toml",
-    ".tool-versions",
-];
+/// The status `mise trust --show` reports for a configuration that paranoid mode refuses to load.
+const UNTRUSTED: &str = "untrusted";
+
+/// How many times the hook asks mise for configurations before it leaves the rest to mise's own refusal.
+/// A trusted `mise.toml` can enable an idiomatic version file, which mise reports only on the next request.
+const TRUST_REQUESTS: usize = 4;
 
 /// The root of the repository whose own Lefthook configuration the hook runs, with its mise configuration trusted.
 /// `post-commit` and `reference-transaction` run no repository configuration.
@@ -281,13 +275,36 @@ fn lefthook_repository(native: &mut Real, hook: Hook) -> Result<Option<PathBuf>>
 /// mise's paranoid mode loads a repository's configuration only after a trust that records its current contents.
 /// Until then, a mise shim there starts no tool, not even Lefthook.
 /// The hook runs that repository's own Lefthook commands anyway, so trusting the configuration beside them grants them nothing more.
+/// mise names every file it loads there, including an idiomatic version file such as a .NET `global.json`.
+/// The hook trusts the untrusted ones inside the repository and leaves those of its parent directories alone.
 fn trust_repository(native: &mut Real, root: &Path) -> Result<()> {
     if !native.available(Tool::Mise) {
         return Ok(());
     }
-    for name in MISE_CONFIGURATIONS {
-        let configuration = root.join(name);
-        if configuration.is_file() {
+    let mut show = args(&["--cd"]);
+    show.push(root.into());
+    show.extend(args(&["trust", "--show"]));
+    let canonical_root = crate::canonical(root)?;
+    let mut trusted = std::collections::BTreeSet::new();
+    for _ in 0..TRUST_REQUESTS {
+        let reply = native.run(Tool::Mise, &show)?;
+        ensure!(
+            reply.success,
+            "mise could not report the trust of the configuration in {}",
+            root.display()
+        );
+        let pending: Vec<_> = untrusted_within(
+            &String::from_utf8(reply.bytes)?,
+            &canonical_root,
+            &native.home,
+        )
+        .into_iter()
+        .filter(|configuration| !trusted.contains(configuration))
+        .collect();
+        if pending.is_empty() {
+            break;
+        }
+        for configuration in pending {
             let mut arguments = args(&["trust", "--quiet"]);
             arguments.push(configuration.clone().into());
             ensure!(
@@ -295,9 +312,30 @@ fn trust_repository(native: &mut Real, root: &Path) -> Result<()> {
                 "mise could not trust {}",
                 configuration.display()
             );
+            trusted.insert(configuration);
         }
     }
     Ok(())
+}
+
+/// The untrusted configurations inside `root` among the `PATH: STATUS` lines of `mise trust --show`.
+/// mise writes a path under the home directory with a leading `~`, which names `home`.
+fn untrusted_within(report: &str, root: &Path, home: &Path) -> Vec<PathBuf> {
+    report
+        .lines()
+        .filter_map(|line| line.rsplit_once(": "))
+        .filter(|(_, status)| status.trim() == UNTRUSTED)
+        .map(|(path, _)| {
+            path.strip_prefix('~')
+                .filter(|rest| rest.is_empty() || rest.starts_with(['/', '\\']))
+                .map_or_else(
+                    || PathBuf::from(path),
+                    |rest| home.join(rest.trim_start_matches(['/', '\\'])),
+                )
+        })
+        .filter_map(|path| crate::canonical(&path).ok())
+        .filter(|path| path.starts_with(root))
+        .collect()
 }
 
 fn delegate(
@@ -404,7 +442,16 @@ pub fn run(hook: Hook, arguments: &[OsString]) -> Result<()> {
     };
     let configured = run.configured()?;
     for gate in hook_rules::plan(hook.rule(), configured).gates() {
-        if let Err(error) = run.gate(*gate) {
+        let started = std::time::Instant::now();
+        let result = run.gate(*gate);
+        crate::claude_timing::record_gate(
+            &run.native.home,
+            hook.name(),
+            hook_rules::gate_name(*gate),
+            started.elapsed(),
+            result.is_ok(),
+        );
+        if let Err(error) = result {
             if !hook_rules::notification(*gate) {
                 return Err(error);
             }

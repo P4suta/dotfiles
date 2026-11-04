@@ -30,12 +30,45 @@ pub enum Linter {
     TaploCheck,
     Hadolint,
     Just,
+    Ocomment,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Configuration {
     Repository,
     Strict,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BiomeSource {
+    Global,
+    Project,
+    Missing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ActionlintDeclaration {
+    Absent,
+    Unique,
+    Ambiguous,
+}
+
+#[must_use]
+pub fn actionlint_declaration(count: usize) -> ActionlintDeclaration {
+    match count {
+        0 => ActionlintDeclaration::Absent,
+        1 => ActionlintDeclaration::Unique,
+        _ => ActionlintDeclaration::Ambiguous,
+    }
+}
+
+#[must_use]
+pub fn biome_source(declared: bool, installed: bool) -> BiomeSource {
+    match (declared, installed) {
+        (false, _) => BiomeSource::Global,
+        (true, true) => BiomeSource::Project,
+        (true, false) => BiomeSource::Missing,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,18 +132,23 @@ pub fn classify(path: &str, first_line: &str) -> FileType {
     }
 }
 
+/// The linters of a file type, ending with the comment check that every type receives.
+///
+/// `OComment` selects languages by its own table and skips the rest, so an unknown type still runs it.
 #[must_use]
 pub fn linters(kind: FileType) -> &'static [Linter] {
     match kind {
-        FileType::Shell => &[Linter::Shellcheck, Linter::Shfmt],
-        FileType::Zsh => &[Linter::Zsh],
-        FileType::Python => &[Linter::RuffCheck, Linter::RuffFormat],
-        FileType::JavaScript => &[Linter::Biome],
-        FileType::Workflow | FileType::Action => &[Linter::Actionlint, Linter::Zizmor],
-        FileType::Toml => &[Linter::TaploFormat, Linter::TaploCheck],
-        FileType::Dockerfile => &[Linter::Hadolint],
-        FileType::Justfile => &[Linter::Just],
-        FileType::Other => &[],
+        FileType::Shell => &[Linter::Shellcheck, Linter::Shfmt, Linter::Ocomment],
+        FileType::Zsh => &[Linter::Zsh, Linter::Ocomment],
+        FileType::Python => &[Linter::RuffCheck, Linter::RuffFormat, Linter::Ocomment],
+        FileType::JavaScript => &[Linter::Biome, Linter::Ocomment],
+        FileType::Workflow | FileType::Action => {
+            &[Linter::Actionlint, Linter::Zizmor, Linter::Ocomment]
+        }
+        FileType::Toml => &[Linter::TaploFormat, Linter::TaploCheck, Linter::Ocomment],
+        FileType::Dockerfile => &[Linter::Hadolint, Linter::Ocomment],
+        FileType::Justfile => &[Linter::Just, Linter::Ocomment],
+        FileType::Other => &[Linter::Ocomment],
     }
 }
 
@@ -311,6 +349,57 @@ pub fn bash4_features(line: &str) -> Vec<BashFeature> {
 mod proofs {
     use super::*;
 
+    fn spec_actionlint_declaration(count: usize) {
+        let selected = actionlint_declaration(count);
+        assert_eq!(selected == ActionlintDeclaration::Absent, count == 0);
+        assert_eq!(selected == ActionlintDeclaration::Unique, count == 1);
+        assert_eq!(selected == ActionlintDeclaration::Ambiguous, count > 1);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn actionlint_requires_one_project_declaration() {
+        let count = kani::any();
+        spec_actionlint_declaration(count);
+        kani::cover!(actionlint_declaration(count) == ActionlintDeclaration::Absent);
+        kani::cover!(actionlint_declaration(count) == ActionlintDeclaration::Unique);
+        kani::cover!(actionlint_declaration(count) == ActionlintDeclaration::Ambiguous);
+    }
+
+    #[test]
+    fn actionlint_selection_covers_absent_unique_and_ambiguous_declarations() {
+        for count in [0, 1, 2, usize::MAX] {
+            spec_actionlint_declaration(count);
+        }
+    }
+
+    fn spec_biome_source(declared: bool, installed: bool) {
+        let selected = biome_source(declared, installed);
+        assert_eq!(selected == BiomeSource::Global, !declared);
+        assert_eq!(selected == BiomeSource::Project, declared && installed);
+        assert_eq!(selected == BiomeSource::Missing, declared && !installed);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn declared_biome_never_falls_back_to_a_global_installation() {
+        let declared = kani::any();
+        let installed = kani::any();
+        spec_biome_source(declared, installed);
+        kani::cover!(biome_source(declared, installed) == BiomeSource::Missing);
+        kani::cover!(biome_source(declared, installed) == BiomeSource::Project);
+        kani::cover!(biome_source(declared, installed) == BiomeSource::Global);
+    }
+
+    #[test]
+    fn biome_selection_covers_declarations_and_installations() {
+        for declared in [false, true] {
+            for installed in [false, true] {
+                spec_biome_source(declared, installed);
+            }
+        }
+    }
+
     pub fn spec_admission(outcomes: &[Outcome]) {
         let blocked = outcomes
             .iter()
@@ -359,7 +448,7 @@ mod proofs {
     fn any_finding_or_missing_linter_blocks_and_unknown_types_are_admitted() {
         let outcomes = [outcome(), outcome(), outcome()];
         spec_admission(&outcomes);
-        assert!(linters(FileType::Other).is_empty());
+        assert_eq!(linters(FileType::Other), &[Linter::Ocomment]);
         assert_eq!(admission(&[]), Admission::Admit);
         kani::cover!(admission(&outcomes) == Admission::Block);
         kani::cover!(admission(&outcomes) == Admission::Admit);
@@ -373,7 +462,8 @@ mod proofs {
     fn linter_choice_and_configuration_cover_every_type() {
         let kind = kind();
         let present: bool = kani::any();
-        assert_eq!(linters(kind).is_empty(), kind == FileType::Other);
+        assert_eq!(linters(kind).last(), Some(&Linter::Ocomment));
+        assert_eq!(linters(kind).len() == 1, kind == FileType::Other);
         assert_eq!(configuration(present) == Configuration::Repository, present);
         kani::cover!(present && kind == FileType::Shell);
         kani::cover!(!present && kind == FileType::Other);
@@ -522,7 +612,12 @@ mod tests {
             (FileType::Justfile, &[Linter::Just][..]),
             (FileType::Other, &[][..]),
         ] {
-            assert_eq!(linters(kind), expected);
+            let (language, comment) = linters(kind)
+                .split_last()
+                .map(|(last, rest)| (rest, *last))
+                .expect("every type ends with the comment check");
+            assert_eq!(language, expected);
+            assert_eq!(comment, Linter::Ocomment);
         }
         assert_eq!(configuration(true), Configuration::Repository);
         assert_eq!(configuration(false), Configuration::Strict);

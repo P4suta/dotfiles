@@ -33,15 +33,16 @@ When publication becomes authorized, link the actual local history with checked 
 The new remote start supplies no retroactive authority for earlier local edits.
 
 Assess every PR using the [importance criteria](references/importance.md) before publication.
-The checked workflow requires an authenticated current-diff assessment and routes `low` and `medium` to no CodeRabbit review, `high` to the guarded CLI, and `critical` to PR review.
+The checked workflow requires an authenticated current-diff assessment and defaults to no CodeRabbit for `low` and `medium`, guarded CLI for `high`, and PR review for `critical`.
+An [owner-local repository policy](references/workflow.md#repository-pr-review-policy) selects PR review for every level without changing importance.
 The workflow keeps its assessments, pause records, and issue contexts in owner-local state, and published documents and tracked files never carry them.
 Keep severe levels exceptional and explain concrete consequences rather than escalating by filename or diff size.
 `coderabbit --guard-status --json` reports the separate PR and CLI pause scopes.
 A paused required route remains pending and never changes its classification.
 Use `coderabbit-review` for the selected route and existing supported findings.
-Keep the standalone PR description exclusion for all noncritical levels, and permit CodeRabbit generation only for the PR route.
+Keep the standalone PR description exclusion for routes other than PR review, and permit CodeRabbit generation only for the PR route.
 Read [commands and generation](references/workflow.md) for the placeholders, the PR review budget, and the optional configuration example.
-Write the document locally when the service fails or the destination requires a document it fails to produce.
+Write locally when generation fails or omits a required document.
 Local creation always starts as a draft, and moving it to review needs separate authorization.
 The workflow policy caps work units at three per person and repository by default.
 One open stack counts as one unit, and each declared independent PR counts as one unit.

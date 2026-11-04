@@ -214,7 +214,7 @@ mod tests {
 
     const PROJECT_CONFIG: &str = "mise.toml";
     const CONFIG_PARSE_DIAGNOSTICS: [&str; 2] =
-        ["mise::config::parse_error", "error parsing config file"];
+        ["mise::config::parse_error", "unclosed table, expected `]`"];
 
     fn assert_ancestor_isolation(
         scratch: &crate::host_checks::Scratch,
@@ -222,20 +222,31 @@ mod tests {
         root: &Path,
     ) -> Result<()> {
         let ancestor = root.join(PROJECT_CONFIG);
+        let ceiling = root.parent().context("fixture ancestor ceiling")?;
         std::fs::write(&ancestor, "[tools\n")?;
+        let trusted = scratch
+            .command("mise")
+            .args(["trust", "--quiet"])
+            .arg(&ancestor)
+            .output()?;
+        ensure!(
+            trusted.status.success(),
+            "trust the owned ancestor control: {}",
+            String::from_utf8_lossy(&trusted.stderr)
+        );
         for ci in [false, true] {
             let mut command = scratch.command("mise");
             command.env_remove("CI");
             if ci {
                 command.env("CI", "true");
             }
-            let unbounded = command
+            let control = command
                 .current_dir(project)
-                .env_remove("MISE_CEILING_PATHS")
+                .env("MISE_CEILING_PATHS", ceiling)
                 .args(["ls", "--json"])
                 .output()?;
-            assert!(!unbounded.status.success());
-            let error = String::from_utf8(unbounded.stderr)?;
+            assert!(!control.status.success());
+            let error = String::from_utf8(control.stderr)?;
             assert!(
                 error.contains(ancestor.to_string_lossy().as_ref()),
                 "{error}"

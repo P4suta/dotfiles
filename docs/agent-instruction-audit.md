@@ -127,6 +127,19 @@ Choosing a descriptive name still requires reading the decision.
 
 Follow-up F8: the dotfiles index has a generator, but no shared gate checks index drift and historical reference preservation across personal repositories.
 
+> - Use decision-naming before labeling a plan, design, diagram, branch, API, schema, or file, so names carry the decision or property instead of v1, v2, new, old, final, or next.
+
+Judgment: choosing a descriptive name and naming files and directories have no check.
+The prose checker refuses bare version labels in English documents through `Dotfiles.VersionLabel`.
+The assurance catalog refuses versioned identifier segments in Rust and TypeScript through `version-label`.
+The Stop hook and `dotfiles answer check` refuse a Han character outside the Japanese Industrial Standards X 0208 and X 0213 repertoire in Japanese replies through `dotguard::lang` and the Unihan-derived table in `crates/dotguard/src/jis_kanji_table.rs`.
+The word rules in `japanese.toml` wait for a reply checker that reads them.
+
+> - Use monochrome-design for every visual design task, including interfaces, websites, diagrams, and documents.
+
+Judgment: whether an artifact is a visual design task, and whether its hierarchy reads as intended, stays a design review.
+The `monochrome-design` skill states the defaults, and a project's browser checks with positive and negative fixtures cover the computed styles.
+
 > - For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
 
 Judgment: selecting relevant skill instructions and checking their verification obligations requires a review of the implementation and its evidence.

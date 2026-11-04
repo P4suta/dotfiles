@@ -49,7 +49,7 @@ pub(super) struct Dependency {
     pub(super) current_digest: Option<String>,
     pub(super) locked_version: Option<String>,
     pub(super) current_version: Option<String>,
-    replace_string: Option<String>,
+    pub(super) replace_string: Option<String>,
     pub(super) skip_reason: Option<String>,
     pub(super) datasource: Option<String>,
     pub(super) package_name: Option<String>,
@@ -370,7 +370,7 @@ fn problems(value: Option<&Value>, location: &str) -> Result<usize, ReportError>
     Ok(problems.len())
 }
 
-fn skip(dependency: &Dependency) -> LookupSkip {
+pub(super) fn skip(dependency: &Dependency) -> LookupSkip {
     if !dependency.enabled
         || matches!(
             dependency.skip_reason.as_deref(),
@@ -441,6 +441,7 @@ fn covered(records: &[Record], record: &Record, found: Option<&super::Found>) ->
         || matrix
         || covered_backend(records, record, found)
         || super::ci_pin::covers(records, record, found)
+        || super::tarball::covers(records, record, found)
 }
 
 fn matrix_input(value: &str) -> bool {
@@ -535,7 +536,7 @@ fn covered_backend(records: &[Record], record: &Record, found: Option<&super::Fo
 }
 
 /// Duplicate keys must not replace evidence that would refuse a push.
-struct Document(Value);
+pub(super) struct Document(pub(super) Value);
 
 impl<'de> Deserialize<'de> for Document {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {

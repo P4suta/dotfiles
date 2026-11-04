@@ -60,6 +60,9 @@ enum Action {
         /// Refuses a stale generated file instead of writing it.
         #[arg(long)]
         check: bool,
+        /// Vendors the Japanese kanji repertoire from this verified `Unihan_IRGSources.txt` first.
+        #[arg(long)]
+        irg_sources: Option<PathBuf>,
     },
     /// Compares every profile, signing, and role rendering with its committed manifest and lists the scripts that depend on the command line.
     ProfileSnapshots {
@@ -134,6 +137,8 @@ enum Action {
     InstallReviewGuard,
     InstallSkillOps,
     InstallPrWorkflow,
+    /// Refresh the verified PR workflow executable without applying shared skills.
+    InstallPrWorkflowBinary,
     /// Build the pinned answer proof image and record its immutable identity on this host.
     InstallAnswerProver,
     /// Verify the answer gate's registered Kani contracts, rejecting probes, and parser corpus.
@@ -407,11 +412,15 @@ fn check_profiles(root: &Path, checks: &mut Checks) {
     checks.run("profiles.inputs", || xtask::input_audit::check(root));
 }
 
-fn generate(root: &Path, check: bool) -> Result<()> {
+fn generate(root: &Path, check: bool, irg_sources: Option<&Path>) -> Result<()> {
+    if let Some(irg_sources) = irg_sources {
+        xtask::kanji_repertoire::refresh(root, irg_sources)?;
+    }
     xtask::adr::generate(root, check)?;
     xtask::profiles::data_schema(root, check)?;
     xtask::obligations::schemas(root, check)?;
     xtask::lean::vectors(root, check)?;
+    xtask::kanji_repertoire::table(root, check)?;
     xtask::manifest_model::instance(root, check)?;
     xtask::launchers::generate(root, check)?;
     xtask::njutest_assessment::generate(root, check)?;
@@ -499,22 +508,17 @@ fn run() -> Result<()> {
         } => observe_benchmarks(&cli.root, &output, metadata_only)?,
         Action::BenchmarksObserveReport => report_benchmark_observation(&cli.root)?,
         Action::BenchmarksCpuFeatures => xtask::benchmark_profile::print_processor_features()?,
-        Action::Gen { check } => generate(&cli.root, check)?,
+        Action::Gen { check, irg_sources } => generate(&cli.root, check, irg_sources.as_deref())?,
         Action::ThemeGrids { write } => xtask::profiles::write_theme_grids(&cli.root, write)?,
         Action::FzfGrid => fzf_grid(&cli.root)?,
         Action::ThemePixels(request) => xtask::pixels::advisory(&request),
         Action::StartupPrograms { profile, home } => {
             xtask::profiles::print_startup(&cli.root, profile.as_deref(), home.as_deref())?;
         }
-        Action::ProfileSnapshots { write } => {
-            if write {
-                xtask::profile_snapshot::write(&cli.root)?;
-            }
-            xtask::profile_snapshot::check(&cli.root)?;
-            xtask::input_audit::check(&cli.root)?;
-        }
+        Action::ProfileSnapshots { write } => profile_snapshots(&cli.root, write)?,
         Action::PublicAudit { denylist } => xtask::profiles::audit_private(&cli.root, &denylist)?,
         Action::InstallPrWorkflow => install_pr_workflow(&cli.root)?,
+        Action::InstallPrWorkflowBinary => install_pr_workflow_binary(&cli.root)?,
         Action::InstallAnswerProver => install_answer_prover(&cli.root)?,
         Action::AnswerProofs { policy } => {
             xtask::skill_proofs::verify_answer(&cli.root, policy.as_deref())?;
@@ -718,6 +722,19 @@ fn install_pr_workflow(root: &Path) -> Result<()> {
             .context("scoped PR skill installation failed")
     })?;
     platform::freshness::record_installation(&user_directory, root, Built::PrWorkflow)
+}
+
+fn install_pr_workflow_binary(root: &Path) -> Result<()> {
+    let binary = release_binary(root, "pr-workflow", "pr-workflow")?;
+    pr_workflow::install_binary(root, &binary, &user_directory()?)
+}
+
+fn profile_snapshots(root: &Path, write: bool) -> Result<()> {
+    if write {
+        xtask::profile_snapshot::write(root)?;
+    }
+    xtask::profile_snapshot::check(root)?;
+    xtask::input_audit::check(root)
 }
 
 fn install_answer_prover(root: &Path) -> Result<()> {

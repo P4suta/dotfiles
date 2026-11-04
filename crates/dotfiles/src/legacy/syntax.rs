@@ -564,7 +564,9 @@ fn decode_powershell_in<'a>(
         tree.source == source,
         "PowerShell metadata names another source"
     );
-    ensure!(tree.errors.is_empty(), "PowerShell source has parse errors");
+    if !tree.errors.is_empty() {
+        return Err(crate::lint_hook::SyntaxRejected(tree.errors.join("; ")).into());
+    }
     let mut calls = Vec::new();
     let flow = super::directory::Flow::Sequence(
         tree.flow

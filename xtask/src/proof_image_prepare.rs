@@ -38,8 +38,12 @@ const SHA256_LENGTH: usize = 64;
 const BUILDER_PREFIX: &str = "dotfiles-proof-156-";
 const LINUX_AMD64: &str = "linux/amd64";
 const BUILDKIT_IMAGE: &str = "docker.io/moby/buildkit@sha256:3ad6bb9bc8c78c0069d03247adb9a59b3b43d68e55353e876e558b888c6c1768";
+/// The image ID of the pinned builder under Docker's classic image store, which names the image configuration.
 const BUILDKIT_CONFIG: &str =
     "sha256:f27f9c00a3aca2c219642d1500610eade3ddcb6b873ea8847852ab156663d32f";
+/// The image ID of the same pin under the containerd image store, which names the pinned manifest.
+const BUILDKIT_DIGEST: &str =
+    "sha256:3ad6bb9bc8c78c0069d03247adb9a59b3b43d68e55353e876e558b888c6c1768";
 const RESTART_POLICY: &str = "no";
 const BUILD_INODES: u64 = 2_000_000;
 const FLOOR_INODES: u64 = 100_000;
@@ -291,7 +295,7 @@ impl CapturedBuildKit {
     fn require_limits(&self) -> Result<()> {
         let server = &self.server;
         ensure!(
-            server.image == BUILDKIT_CONFIG && server.running,
+            [BUILDKIT_CONFIG, BUILDKIT_DIGEST].contains(&server.image.as_str()) && server.running,
             "BuildKit image or initial state is unexpected"
         );
         ensure!(
@@ -452,7 +456,7 @@ impl Observation {
                         "observed inodes crossed the protected floor or declared allocation"
                     );
                 }
-                (Inodes::NotApplicable, Inodes::NotApplicable) if cfg!(windows) => {}
+                (Inodes::NotApplicable, Inodes::NotApplicable) => {}
                 _ => anyhow::bail!("current inode observation is unknown"),
             }
         }
@@ -701,6 +705,8 @@ enum Monitor<'a> {
 }
 
 const DF: &str = "/bin/df";
+const MOUNT: &str = "/sbin/mount";
+const APFS: &str = "apfs";
 const SYSCTL: &str = "/usr/sbin/sysctl";
 const VM_STAT: &str = "/usr/bin/vm_stat";
 const GUEST_DF: &str = "/bin/df";
@@ -1207,7 +1213,8 @@ impl Docker {
         let mut command = platform::process::command(DF);
         command.arg("-i").arg(&self.directory);
         let inode = self.call("host-inodes", command, None)?;
-        let host_inodes = Inodes::Available(df_available(&Self::text(&inode)?, "ifree")?);
+        let mounts = self.call("host-mounts", platform::process::command(MOUNT), None)?;
+        let host_inodes = host_inodes(&Self::text(&inode)?, &Self::text(&mounts)?)?;
         let state = if owned.is_some() { BUILDKIT_STATE } else { "/" };
         let guest_bytes = df_available(
             &self.guest("guest-bytes", owned, GUEST_DF, &["-Pk", state])?,
@@ -1215,10 +1222,8 @@ impl Docker {
         )?
         .checked_mul(KIB_BYTES)
         .context("guest capacity overflow")?;
-        let guest_inodes = Inodes::Available(df_available(
-            &self.guest("guest-inodes", owned, GUEST_DF, &["-Pi", state])?,
-            "IFree",
-        )?);
+        let guest_inodes =
+            df_inodes(&self.guest("guest-inodes", owned, GUEST_DF, &["-Pi", state])?)?;
         let host_memory = self.call("host-memory", platform::process::command(VM_STAT), None)?;
         let host_memory_available = mac_free_memory(&Self::text(&host_memory)?)?;
         let guest_memory_available =
@@ -1616,6 +1621,54 @@ fn df_available(text: &str, heading: &str) -> Result<u64> {
         minimum = Some(minimum.map_or(value, |previous: u64| previous.min(value)));
     }
     minimum.context("capacity output has no measured row")
+}
+
+/// The inode capacity of the host volume that a macOS `df -i` report names, given the `mount` table.
+/// An `apfs` volume has no inode table and reports a free count that scales with free space, which the byte check already bounds.
+fn host_inodes(df: &str, mounts: &str) -> Result<Inodes> {
+    let mut lines = df.lines().filter(|line| !line.trim().is_empty());
+    let header: Vec<&str> = lines
+        .next()
+        .context("capacity output has no header")?
+        .split_whitespace()
+        .collect();
+    let row: Vec<&str> = lines
+        .next()
+        .context("capacity output has no measured row")?
+        .split_whitespace()
+        .collect();
+    ensure!(
+        lines.next().is_none(),
+        "capacity output names more than one volume"
+    );
+    let mounted = header
+        .iter()
+        .position(|word| *word == "Mounted")
+        .context("capacity output has no mount point column")?;
+    let device = row.first().context("capacity row has no device")?;
+    let point = row
+        .get(mounted..)
+        .context("capacity row has no mount point")?
+        .join(" ");
+    let entry = format!("{device} on {point} (");
+    let kind = mounts
+        .lines()
+        .find_map(|line| line.strip_prefix(entry.as_str()))
+        .and_then(|options| options.split([',', ')']).next())
+        .context("the mount table doesn't name the measured volume")?;
+    if kind == APFS {
+        Ok(Inodes::NotApplicable)
+    } else {
+        Ok(Inodes::Available(df_available(df, "ifree")?))
+    }
+}
+
+/// The inode capacity of a Linux `df -Pi` report, which names the inode total of each row.
+/// The coreutils df heads the free count `IFree`, and the busybox df inside the builder heads it `Available`.
+fn df_inodes(text: &str) -> Result<Inodes> {
+    let total = df_available(text, "Inodes")?;
+    let free = df_available(text, "IFree").or_else(|_| df_available(text, "Available"))?;
+    Ok(resource_rules::reported_inodes(total, free))
 }
 
 fn memory_available(text: &str) -> Result<u64> {
@@ -2142,6 +2195,73 @@ mod tests {
         assert!(df_available("Filesystem Available\nx not-a-count", "Available").is_err());
         assert!(load_admitted("18\n{ NaN 0 0 }", "0 0 0 1/1 1", 8).is_err());
         assert!(!load_admitted("18\n{ 17 0 0 }", "0 0 0 1/1 1", 8)?);
+        Ok(())
+    }
+
+    #[test]
+    fn a_guest_without_an_inode_table_is_admitted_and_a_fixed_table_keeps_its_shortfall()
+    -> Result<()> {
+        let header = "Filesystem     Inodes IUsed IFree IUse% Mounted on";
+        let tableless = format!("{header}\noverlay             0     0     0     - /");
+        assert_eq!(df_inodes(&tableless)?, Inodes::NotApplicable);
+        let short = format!("{header}\n/dev/vda1     3300000 1 3299999   1% /");
+        assert_eq!(df_inodes(&short)?, Inodes::Available(3_299_999));
+        let inconsistent = format!("{header}\noverlay             0     0     5     - /");
+        assert_eq!(df_inodes(&inconsistent)?, Inodes::Unmeasured);
+        assert!(df_inodes("Filesystem IFree\noverlay 0").is_err());
+        let busybox = "Filesystem              Inodes      Used Available Capacity Mounted on";
+        let builder = format!(
+            "{busybox}\n/dev/vdb1                    0         0         0   0% /etc/hostname"
+        );
+        assert_eq!(df_inodes(&builder)?, Inodes::NotApplicable);
+        let fixed = format!("{busybox}\n/dev/vdb1              4000000    100000   3900000   3% /");
+        assert_eq!(df_inodes(&fixed)?, Inodes::Available(3_900_000));
+        assert!(df_inodes("Filesystem Inodes Used\n/dev/vdb1 0 0").is_err());
+        let mut current = observation()?;
+        current.capacity.guest_inodes = df_inodes(&tableless)?;
+        current.admit()?;
+        let initial = observation()?;
+        let mut tableless_initial = observation()?;
+        tableless_initial.capacity.guest_inodes = Inodes::NotApplicable;
+        current.continuing(&tableless_initial)?;
+        assert!(current.continuing(&initial).is_err());
+        current.capacity.guest_inodes = df_inodes(&short)?;
+        assert!(current.admit().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn an_apfs_host_has_no_inode_table_and_another_host_keeps_its_free_count() -> Result<()> {
+        let df = "Filesystem   512-blocks       Used Available Capacity iused      ifree %iused  Mounted on\n/dev/disk3s5 1942597960 1585403712 301694912    85% 9844575 1508474560    1%   /System/Volumes/Data";
+        let apfs = "/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)\n/dev/disk3s5 on /System/Volumes/Data (apfs, local, journaled, nobrowse, protect, root data)";
+        assert_eq!(host_inodes(df, apfs)?, Inodes::NotApplicable);
+        let hfs = "/dev/disk3s5 on /System/Volumes/Data (hfs, local, journaled)";
+        assert_eq!(host_inodes(df, hfs)?, Inodes::Available(1_508_474_560));
+        assert!(host_inodes(df, "/dev/disk3s1s1 on / (apfs, sealed)").is_err());
+        assert!(host_inodes("Filesystem ifree\n", apfs).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn buildkit_identity_accepts_only_the_pinned_config_or_manifest_digest() -> Result<()> {
+        assert_eq!(
+            BUILDKIT_IMAGE.rsplit_once('@').map(|(_, digest)| digest),
+            Some(BUILDKIT_DIGEST)
+        );
+        for (image, admitted) in [
+            (BUILDKIT_CONFIG, true),
+            (BUILDKIT_DIGEST, true),
+            (
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                false,
+            ),
+            ("", false),
+        ] {
+            let mut current = server(&PendingBuilder::new(NONCE)?);
+            current.image = image.to_owned();
+            let owned = PendingBuilder::new(NONCE)?.capture_identity(current)?;
+            assert_eq!(owned.require_limits().is_ok(), admitted, "{image}");
+        }
         Ok(())
     }
 

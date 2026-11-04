@@ -20,6 +20,63 @@ pub const fn introduced(pushed: bool, authored: bool) -> bool {
     pushed && authored
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeclarationBinding {
+    Bound,
+    Unbound,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TarballFacts {
+    pub declaration: DeclarationBinding,
+    pub unique: bool,
+    pub source: bool,
+    pub version: bool,
+    pub lookup: LookupEvidence,
+}
+
+#[must_use]
+pub const fn verified_tarball(facts: TarballFacts) -> bool {
+    matches!(facts.declaration, DeclarationBinding::Bound)
+        && facts.unique
+        && facts.source
+        && facts.version
+        && matches!(facts.lookup, LookupEvidence::Verified)
+}
+
+#[cfg(test)]
+#[test]
+fn every_tarball_coverage_fact_is_required() {
+    for [declaration, unique, source, version, lookup] in crate::domain::flags() {
+        proofs::spec_tarball(TarballFacts {
+            declaration: if declaration {
+                DeclarationBinding::Bound
+            } else {
+                DeclarationBinding::Unbound
+            },
+            unique,
+            source,
+            version,
+            lookup: if lookup {
+                LookupEvidence::Verified
+            } else {
+                LookupEvidence::Missing
+            },
+        });
+        proofs::spec_tarball(TarballFacts {
+            declaration: if declaration {
+                DeclarationBinding::Bound
+            } else {
+                DeclarationBinding::Unbound
+            },
+            unique,
+            source,
+            version,
+            lookup: LookupEvidence::NotApplicable,
+        });
+    }
+}
+
 /// The verified facts of one offered revision's dependency check.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Facts {
@@ -129,6 +186,42 @@ pub fn verdict(facts: Facts) -> Verdict {
 #[cfg(any(test, kani))]
 mod proofs {
     use super::*;
+
+    pub fn spec_tarball(facts: TarballFacts) {
+        assert_eq!(
+            verified_tarball(facts),
+            facts.declaration == DeclarationBinding::Bound
+                && facts.unique
+                && facts.source
+                && facts.version
+                && facts.lookup == LookupEvidence::Verified
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn tarball_coverage_requires_every_bound_fact() {
+        let (declaration, unique, source, version): (bool, bool, bool, bool) = kani::any();
+        let lookup = match kani::any::<u8>() {
+            0 => LookupEvidence::Verified,
+            1 => LookupEvidence::Missing,
+            _ => LookupEvidence::NotApplicable,
+        };
+        let facts = TarballFacts {
+            declaration: if declaration {
+                DeclarationBinding::Bound
+            } else {
+                DeclarationBinding::Unbound
+            },
+            unique,
+            source,
+            version,
+            lookup,
+        };
+        spec_tarball(facts);
+        kani::cover!(verified_tarball(facts));
+        kani::cover!(!verified_tarball(facts));
+    }
 
     pub fn spec_introduced(pushed: bool, authored: bool) {
         let result = introduced(pushed, authored);

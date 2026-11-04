@@ -22,6 +22,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+pub mod japanese;
+
 pub const POLICY: &str = "policy/prose.toml";
 pub const SOURCE_CONFIG: &str = "home/dot_config/prose";
 const INSTALL: &str = "just install-prose";
@@ -197,13 +199,14 @@ impl Bundle {
         for name in [
             "vale.ini",
             "styles/Dotfiles/Attribution.yml",
-            "japanese.toml",
+            japanese::RULES,
         ] {
             ensure!(
                 self.config.join(name).is_file(),
                 "{name} is missing from the prose configuration; run `{INSTALL}` in the dotfiles source"
             );
         }
+        japanese::WordRules::read(self)?;
         for package in &lock.package {
             ensure!(
                 !package.version.is_empty()

@@ -884,6 +884,23 @@ fn renovate_excludes_dependencies_imported_from_the_actual_default_branch() {
 }
 
 #[test]
+fn renovate_skips_the_lookup_for_a_merge_that_changes_no_manifest_of_its_own() {
+    let (repository, base, offered) =
+        integrated_manifest_fixture("renovate-merge-without-manifest", true);
+    let merged = repository.git(&["rev-parse", &format!("{offered}^")]);
+    let mut report = current_renovate_report();
+    report["repositories"]["local"]["packageFiles"]["cargo"][0]["deps"][0]["updates"] =
+        serde_json::json!([{"updateType":"patch","newValue":"1.0.2"}]);
+    let output = report_gate_on(&repository, &base, &merged, &report, "dependency");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!repository.scope.join("arguments").exists());
+}
+
+#[test]
 fn renovate_keeps_unpublished_parents_in_scope_despite_a_cached_default_ref() {
     let (repository, base, offered) =
         integrated_manifest_fixture("renovate-unpublished-default", false);

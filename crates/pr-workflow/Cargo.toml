@@ -17,6 +17,7 @@ clap = { version = "4.6", features = ["derive", "env"] }
 coderabbit-guard = { path = "../coderabbit-guard" }
 dotfiles = { path = "../dotfiles" }
 dotguard = { path = "../dotguard" }
+jiff = "0.2.37"
 platform = { path = "../platform" }
 prose = { path = "../prose" }
 pulldown-cmark = "0.13"

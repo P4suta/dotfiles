@@ -10,6 +10,7 @@
 experimental = true
 {{- if eq .profile "windows" }}
 exec_auto_install = false
+dotnet.isolated = true
 {{- end }}
 # A project's configuration loads only after `mise trust` records its exact contents.
 paranoid = true

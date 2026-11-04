@@ -18,6 +18,7 @@ const DOCUMENTATION_INDEX: &str = "docs/README.md";
 const README_PATH: &str = "README.md";
 const MIT_PATH: &str = "LICENSE-MIT";
 const APACHE_PATH: &str = "LICENSE-APACHE";
+const GITHUB_REPOSITORY_PREFIX: &str = "https://github.com/";
 
 /// The license texts, which the Rust API Guidelines recommend shipping side by side.
 const MIT: &str = include_str!("../assets/repository/LICENSE-MIT");
@@ -107,7 +108,7 @@ fn license_section(metadata: &Repository) -> String {
             }
             section
         }
-        License::ApacheOnly | License::AgplOnly => {
+        License::ApacheOnly | License::MitOnly | License::AgplOnly | License::AgplOrLater => {
             let links = metadata
                 .preserved_licenses
                 .as_ref()
@@ -201,7 +202,7 @@ fn artifacts(root: &Path, metadata: &Repository) -> Result<Generated> {
                     }
                 })
         }
-        License::ApacheOnly | License::AgplOnly => {
+        License::ApacheOnly | License::MitOnly | License::AgplOnly | License::AgplOrLater => {
             if let Some(preserved) = &metadata.preserved_licenses {
                 for asset in &preserved.assets {
                     if !tracked
@@ -287,12 +288,13 @@ pub fn write(root: &Path) -> Result<()> {
 /// Returns an error when the metadata or the GitHub update fails.
 pub fn write_description(root: &Path, remote: &str) -> Result<()> {
     let metadata = metadata(root)?;
+    let repository = github_repository(root, remote)?;
     let status = Tool::Gh
         .command()
         .args([
             "repo",
             "edit",
-            remote,
+            &repository,
             "--description",
             metadata.summary.trim_end_matches('.'),
         ])
@@ -418,12 +420,14 @@ fn cargo_declaration_matches(
         };
         let preserved = metadata.preserved_licenses.as_ref();
         return Some(
-            matches!(metadata.license, License::ApacheOnly | License::AgplOnly)
-                && preserved.is_some_and(|preserved| {
-                    preserved.assets.iter().any(|asset| {
-                        asset.path == path && license_matches(root, &asset.path, &asset.sha256)
-                    })
-                }),
+            matches!(
+                metadata.license,
+                License::ApacheOnly | License::MitOnly | License::AgplOnly | License::AgplOrLater
+            ) && preserved.is_some_and(|preserved| {
+                preserved.assets.iter().any(|asset| {
+                    asset.path == path && license_matches(root, &asset.path, &asset.sha256)
+                })
+            }),
         );
     }
     license.map(|value| {
@@ -537,12 +541,15 @@ fn inherited_workspace_package(
     Ok(None)
 }
 
-/// The authors in the history besides the copyright holder and bots, which need recorded consent before relicensing.
+/// The authors in the history that `HEAD` contains besides the copyright holder and bots, which need recorded consent before relicensing.
 fn contributors(root: &Path, metadata: &Repository) -> Result<Vec<String>> {
+    if platform::local_issues::source(root)? == platform::local_issues::Source::Unborn {
+        return Ok(Vec::new());
+    }
     let log = Tool::Git
         .command()
         .current_dir(root)
-        .args(["log", "--all", "--format=%an"])
+        .args(["log", "--format=%an", "HEAD", "--"])
         .output()?;
     let mut found: Vec<String> = String::from_utf8_lossy(&log.stdout)
         .lines()
@@ -562,6 +569,23 @@ fn contributors(root: &Path, metadata: &Repository) -> Result<Vec<String>> {
             })
         })
         .collect())
+}
+
+fn github_repository(root: &Path, remote: &str) -> Result<String> {
+    let url = platform::signed_git::git(root, &["remote", "get-url", "--", remote], None);
+    let candidate = match &url {
+        Ok(url) => url.trim().to_owned(),
+        Err(_) => format!("{GITHUB_REPOSITORY_PREFIX}{remote}"),
+    };
+    platform::source_identity::github_slug(&candidate).ok_or_else(|| {
+        Refusal::new(
+            "repository.remote",
+            "--remote requires a Git remote naming a GitHub repository or an explicit owner/name",
+            "choose a configured GitHub remote or an explicit owner/name",
+        )
+        .evidence(format!("remote: {remote}"))
+        .into()
+    })
 }
 
 /// The GitHub description of `repository`, through `gh`.
@@ -610,7 +634,10 @@ pub fn check(root: &Path, remote: Option<&str>) -> Result<()> {
         Vec::new()
     };
     let described = match remote {
-        Some(repository) => description(repository)? == metadata.summary.trim_end_matches('.'),
+        Some(remote) => {
+            description(&github_repository(root, remote)?)?
+                == metadata.summary.trim_end_matches('.')
+        }
         None => true,
     };
     let (rule, cause, next, evidence) = match drift(off.is_empty(), missing.is_empty(), stale.is_empty(), described) {
@@ -709,6 +736,46 @@ mod tests {
             .clone()
     }
 
+    fn git_as(root: &Path, contributor: &str, arguments: &[&str]) {
+        let global = root.join(".git").join("fixture.gitconfig");
+        fs::write(
+            &global,
+            format!("[user]\n\tname = {contributor}\n\temail = fixture@example.invalid\n[commit]\n\tgpgsign = false\n"),
+        )
+        .unwrap();
+        let status = crate::fixture_git::command("git", &global)
+            .current_dir(root)
+            .args(arguments)
+            .status()
+            .unwrap();
+        assert!(status.success(), "{arguments:?}");
+    }
+
+    #[test]
+    fn consent_covers_only_the_history_head_contains() {
+        let directory = fixture();
+        let root = directory.path();
+        git_as(root, "Owner", &["commit", "--quiet", "-m", "start"]);
+        git_as(root, "Owner", &["switch", "--quiet", "-c", "elsewhere"]);
+        git_as(
+            root,
+            "Contributor",
+            &["commit", "--quiet", "--allow-empty", "-m", "elsewhere"],
+        );
+        git_as(root, "Owner", &["switch", "--quiet", "-"]);
+        check(root, None).unwrap();
+        git_as(
+            root,
+            "Owner",
+            &["merge", "--quiet", "--ff-only", "elsewhere"],
+        );
+        let refusal = refused(root);
+        assert_eq!(
+            (refusal.rule.as_str(), refusal.evidence.as_slice()),
+            ("repository.consent", ["Contributor".to_owned()].as_slice())
+        );
+    }
+
     fn preserve_licenses(root: &Path) -> [(&'static str, Vec<u8>); 2] {
         let assets = [
             (
@@ -734,6 +801,10 @@ mod tests {
     }
 
     fn preserved_license_fixture(expression: &str) -> tempfile::TempDir {
+        preserved_license_fixture_at(expression, "LICENSE")
+    }
+
+    fn preserved_license_fixture_at(expression: &str, license_path: &str) -> tempfile::TempDir {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         let git = |args: &[&str]| {
@@ -753,12 +824,12 @@ mod tests {
         };
         git(&["init", "-q"]);
         let license = b"Reviewed existing license grant\nCopyright remains unchanged\n";
-        fs::write(root.join("LICENSE"), license).unwrap();
+        fs::write(root.join(license_path), license).unwrap();
         let digest = platform::build_inputs::hex(Sha256::digest(license).as_ref());
         fs::write(
             root.join(FILE),
             format!(
-                "name = \"fixture\"\nsummary = \"A fixture repository\"\ninstall = \"cargo install fixture\"\nusage = \"fixture --help\"\nlicense = \"{expression}\"\n\n[preserved_licenses]\n[[preserved_licenses.assets]]\npath = \"LICENSE\"\nsha256 = \"{digest}\"\n"
+                "name = \"fixture\"\nsummary = \"A fixture repository\"\ninstall = \"cargo install fixture\"\nusage = \"fixture --help\"\nlicense = \"{expression}\"\n\n[preserved_licenses]\n[[preserved_licenses.assets]]\npath = \"{license_path}\"\nsha256 = \"{digest}\"\n"
             ),
         )
         .unwrap();
@@ -905,8 +976,8 @@ mod tests {
     }
 
     #[test]
-    fn existing_apache_and_agpl_assets_survive_readme_generation() {
-        for expression in ["Apache-2.0", "AGPL-3.0-only"] {
+    fn existing_single_license_assets_survive_readme_generation() {
+        for expression in ["Apache-2.0", "MIT", "AGPL-3.0-only", "AGPL-3.0-or-later"] {
             let directory = preserved_license_fixture(expression);
             let root = directory.path();
             let license = fs::read(root.join("LICENSE")).unwrap();
@@ -923,8 +994,32 @@ mod tests {
     }
 
     #[test]
+    fn mit_license_file_and_readme_link_are_preserved() {
+        let directory = preserved_license_fixture_at("MIT", "LICENSE-MIT");
+        let root = directory.path();
+        fs::write(root.join(README_PATH), "Old README\n").unwrap();
+
+        write(root).unwrap();
+        check(root, None).unwrap();
+
+        assert_eq!(
+            fs::read(root.join("LICENSE-MIT")).unwrap(),
+            b"Reviewed existing license grant\nCopyright remains unchanged\n"
+        );
+        let readme = fs::read_to_string(root.join(README_PATH)).unwrap();
+        assert!(readme.contains("The existing license terms are in [LICENSE-MIT](LICENSE-MIT)."));
+        assert!(!root.join("LICENSE-APACHE").exists());
+    }
+
+    #[test]
     fn untracked_preserved_assets_refuse_before_readme_write_and_staged_assets_pass() {
-        for expression in ["Apache-2.0", "MIT OR Apache-2.0"] {
+        for expression in [
+            "Apache-2.0",
+            "MIT",
+            "AGPL-3.0-only",
+            "AGPL-3.0-or-later",
+            "MIT OR Apache-2.0",
+        ] {
             let directory = if expression == "MIT OR Apache-2.0" {
                 fixture()
             } else {
@@ -959,14 +1054,16 @@ mod tests {
 
     #[test]
     fn changed_single_license_asset_refuses_before_rewriting_the_readme() {
-        let directory = preserved_license_fixture("Apache-2.0");
-        let root = directory.path();
-        let marker = "Keep this README\n";
-        fs::write(root.join(README_PATH), marker).unwrap();
-        fs::write(root.join("LICENSE"), "Changed grant\n").unwrap();
-        let error = write(root).unwrap_err().to_string();
-        assert!(error.contains("LICENSE"), "{error}");
-        assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+        for expression in ["Apache-2.0", "MIT", "AGPL-3.0-only", "AGPL-3.0-or-later"] {
+            let directory = preserved_license_fixture(expression);
+            let root = directory.path();
+            let marker = "Keep this README\n";
+            fs::write(root.join(README_PATH), marker).unwrap();
+            fs::write(root.join("LICENSE"), "Changed grant\n").unwrap();
+            let error = write(root).unwrap_err().to_string();
+            assert!(error.contains("LICENSE"), "{error}");
+            assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+        }
     }
 
     #[test]
@@ -1095,29 +1192,64 @@ mod tests {
     }
 
     #[test]
+    fn npm_manifest_matches_only_the_exact_single_license_state() {
+        for (expression, other) in [
+            ("MIT", "Apache-2.0"),
+            ("AGPL-3.0-or-later", "AGPL-3.0-only"),
+        ] {
+            let directory = preserved_license_fixture(expression);
+            let root = directory.path();
+            let package_json = root.join("package.json");
+            fs::write(
+                &package_json,
+                format!("{{\"name\":\"fixture\",\"license\":\"{expression}\"}}\n"),
+            )
+            .unwrap();
+            stage(root, "package.json");
+            write(root).unwrap();
+            check(root, None).unwrap();
+
+            let marker = "Keep the README unchanged\n";
+            fs::write(root.join(README_PATH), marker).unwrap();
+            fs::write(
+                &package_json,
+                format!("{{\"name\":\"fixture\",\"license\":\"{other}\"}}\n"),
+            )
+            .unwrap();
+
+            let error = write(root).unwrap_err().to_string();
+
+            assert!(error.contains("package.json"), "{error}");
+            assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+        }
+    }
+
+    #[test]
     fn cargo_license_file_is_preserved_only_when_its_asset_digest_is_reviewed() {
-        let directory = preserved_license_fixture("Apache-2.0");
-        let root = directory.path();
-        fs::write(
-            root.join("Cargo.toml"),
-            "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nlicense-file = \"LICENSE\"\n",
-        )
-        .unwrap();
-        write(root).unwrap();
-        check(root, None).unwrap();
+        for expression in ["Apache-2.0", "MIT", "AGPL-3.0-only", "AGPL-3.0-or-later"] {
+            let directory = preserved_license_fixture(expression);
+            let root = directory.path();
+            fs::write(
+                root.join("Cargo.toml"),
+                "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nlicense-file = \"LICENSE\"\n",
+            )
+            .unwrap();
+            write(root).unwrap();
+            check(root, None).unwrap();
 
-        let marker = "Keep the README unchanged\n";
-        fs::write(root.join(README_PATH), marker).unwrap();
-        fs::write(
-            root.join("Cargo.toml"),
-            "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nlicense-file = \"COPYING\"\n",
-        )
-        .unwrap();
+            let marker = "Keep the README unchanged\n";
+            fs::write(root.join(README_PATH), marker).unwrap();
+            fs::write(
+                root.join("Cargo.toml"),
+                "[package]\nname = \"fixture\"\nversion = \"0.1.0\"\nlicense-file = \"COPYING\"\n",
+            )
+            .unwrap();
 
-        let error = write(root).unwrap_err().to_string();
+            let error = write(root).unwrap_err().to_string();
 
-        assert!(error.contains("Cargo.toml"), "{error}");
-        assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+            assert!(error.contains("Cargo.toml"), "{error}");
+            assert_eq!(fs::read_to_string(root.join(README_PATH)).unwrap(), marker);
+        }
     }
 
     #[test]
@@ -1450,7 +1582,9 @@ mod tests {
                 License::ApacheOnly,
                 Some(single_preserved("LICENSE-APACHE")),
             ),
+            (License::MitOnly, Some(single_preserved("LICENSE-MIT"))),
             (License::AgplOnly, Some(single_preserved("LICENSE"))),
+            (License::AgplOrLater, Some(single_preserved("LICENSE"))),
             (License::Unlicensed, None),
         ];
 

@@ -1,0 +1,19 @@
+id: version-label
+valid:
+  - "fn note_id() -> uuid::Uuid { uuid::Uuid::now_v7() }"
+  - "use uuid::Uuid; fn note_id() -> Uuid { Uuid::now_v7() }"
+  - "fn ipv6_prefix(address: u128) -> u128 { address }"
+  - "const IPV4_VERSION: u8 = 4;"
+  - "const NON_PUBLIC_V4: &[u32] = &[];"
+  - "fn in_v6(address: u128) -> bool { address > 0 }"
+  - "struct FeedPoller { url: String }"
+  - "fn on_demand_fetch() {}"
+invalid:
+  - "fn now_v7() {}"
+  - "fn create_note_v7() {}"
+  - "fn create() { Document::now_v7(); }"
+  - "fn fetch_v2() {}"
+  - "struct FeedV2 { url: String }"
+  - "const API_V2: &str = \"items\";"
+  - "fn v3Handler() {}"
+  - "const SCHEMA_V10: u8 = 10;"

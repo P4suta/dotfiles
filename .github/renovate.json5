@@ -6,7 +6,7 @@
   // A release waits three days before Renovate proposes it, so a pulled release never reaches a host.
   minimumReleaseAge: '3 days',
   // Version changes arrive only through these managers, as pull requests that pass the required checks.
-  enabledManagers: ['github-actions', 'mise', 'cargo', 'npm', 'dockerfile', 'custom.regex'],
+  enabledManagers: ['github-actions', 'mise', 'cargo', 'bun', 'npm', 'dockerfile', 'custom.regex'],
   // Renovate finds no conda result for zsh, so zsh moves by hand.
   ignoreDeps: ['conda:zsh'],
   customManagers: [
@@ -63,6 +63,13 @@
       matchUpdateTypes: ['major'],
       automerge: false,
       labels: ['breaking-change'],
+    },
+    {
+      // Quint fetches the Apalache release in its DEFAULT_APALACHE_VERSION_TAG, and the image bundles that release by digest, so a person moves both together.
+      matchPackageNames: ['@informalsystems/quint'],
+      groupName: 'Quint',
+      automerge: false,
+      prBodyNotes: ['Set `APALACHE_VERSION` and `APALACHE_SHA256` in `xtask/proofs/quint/Dockerfile` to the Apalache release that this Quint names in `DEFAULT_APALACHE_VERSION_TAG`.'],
     },
   ],
 }

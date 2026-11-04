@@ -176,7 +176,7 @@ For `high` and `critical`, replace `severe` with the required concrete ground, c
 The executable rejects unknown fields, unsupported levels, and an assessment that fails the severe threshold.
 The assessment's factual accuracy remains the accountable agent's responsibility.
 
-For a required `high` review, pass the guard's signed private receipt with `--cli-receipt PATH` to the publication command.
+For a selected CLI route, pass the guard's signed private receipt with `--cli-receipt PATH` to the publication command.
 Produce it on the managed review executor with:
 
 ```console
@@ -192,12 +192,47 @@ Keep that private prior receipt available to later checks.
 Its authenticated findings remain obligations while its old completion supplies no credit for the new diff.
 Put every returned finding's ID, resolved or unsupported disposition, concrete reason, and current-source evidence in the signed assessment.
 
+## Repository PR review policy
+
+Record a repository that requires CodeRabbit PR review for every change in owner-local state.
+Use `~/.local/state/pr-workflow/review-policies/OWNER__REPO/policy.json`, with the owner and repository in lowercase in the directory name.
+On Windows, use the same relative path beneath the owner's home directory.
+For example:
+
+```json
+{
+  "repository": "P4suta/Hellooo",
+  "review": "always_pr",
+  "reason": "Every PR in this repository requires CodeRabbit PR review."
+}
+```
+
+The workflow loads this policy for the destination repository on every command that checks the review route.
+An absent policy keeps the importance routes below.
+The workflow refuses malformed policies, unknown fields, mismatched repositories, missing reasons, oversize files, and symlinks.
+Keep this file outside tracked projects and keep the signed assessment at its actual importance.
+The policy replaces the default route with PR review, including for `high`, and needs no CLI receipt or `review:critical` label.
+Create and edit use a completed body without `@coderabbitai ignore`.
+Ready, final validation, and merge require observed current-head full PR review and resolved supported findings.
+An earlier CLI route still requires its signed history before changing routes.
+A high assessment reviewed through PR keeps that PR route in the historical record.
+The policy doesn't clear the owner's pause, spend capacity, or configure CodeRabbit.
+A PR pause blocks create, edit, ready, and merge under this policy without inserting an ignore line.
+Only the owner resumes reviews.
+
+Check the effective repository service configuration.
+Enable automatic review and draft review, and remove positive label filters.
+Readiness requires review first.
+Removing an ignore line restores automatic review on the next commit, according to the [service commands](https://docs.coderabbit.ai/guides/commands).
+For an existing head, request `@coderabbitai full review` only after the owner resumes and the PR pool has verified capacity.
+The separate pools and adaptive thresholds below still apply.
+
 ## CodeRabbit generation
 
 Complete local checks and the authenticated importance assessment before the selected review.
 `coderabbit --guard-status --json` reports the owner's pause scope: `reviews.pr` and `reviews.cli` each read `paused` or `allowed`.
-Keep the standalone `@coderabbitai ignore` description line for `low`, `medium`, and `high`, with no `review:critical` opt-in label.
-Only the current `critical` route permits CodeRabbit generation and PR opt-in.
+Without the repository PR policy, keep the standalone `@coderabbitai ignore` description line for `low`, `medium`, and `high`, with no `review:critical` opt-in label.
+The current PR route permits CodeRabbit generation and PR opt-in.
 An owner pause blocks the selected required route rather than lifting its obligation.
 The live check and `ready` report the current route and any missing evidence.
 The guard preserves its CLI budget and pause.
@@ -229,9 +264,10 @@ pr-workflow ready --repo OWNER/REPO --generation coderabbit --pr 17
 pr-workflow check --repo OWNER/REPO --pr 17 --final
 ```
 
-CodeRabbit creation also starts as a draft with a current critical assessment.
+CodeRabbit creation also starts as a draft with a current assessment selecting PR review.
 A permitted ready transition must meet the selected route and the destination's checks.
-For `critical`, readiness can precede the PR review, but final validation and merge require its observed completion.
+For the default `critical` route, readiness can precede PR review, but final validation and merge require its observed completion.
+The repository PR policy requires completion before readiness too.
 Add the critical opt-in label or request a full review only after verifying the corresponding capacity and authorization.
 The final check rejects remaining placeholders.
 Check the generated document for destination rules, intent, and truthful validation results, then correct it with `edit` when authorized.

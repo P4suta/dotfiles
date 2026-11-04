@@ -20,6 +20,16 @@ Keep the command independent of experimental skill maintenance.
 
 A UserPromptSubmit hook creates a new request generation.
 The checker covers each nonempty draft line with a declared claim and binds completed evidence to that generation, prompt, draft, and producer.
+The request reader also accepts the saved `assurance` context containing an absolute native repository root and a full baseline commit identity.
+Unknown fields and malformed context remain errors.
+Before completing a contextual request, the gate checks the repository identity, resolves the exact baseline, and enforces the installed assurance catalog over its changes.
+Observation capture remains available while those changes are incomplete.
+Observations and answer receipts use retained format 2 and hash the complete validated request, including its context.
+Changing the prompt or context without renewing the generation invalidates retained evidence.
+Earlier retained records need fresh observation capture and answer checking; the request itself needs no renewal or rewrite.
+The existing Kani binding and completion harnesses check the pure decision under the supplied identity predicates.
+JSON decoding, SHA-256 collision resistance, Git, and native filesystem identity remain external semantic assumptions.
+Native regression tests and the bounded answer parser corpus check those adapters, including context mutation and assurance refusal.
 Source checks retrieve identified textual records from registered authority classes over HTTPS.
 The evidence records hashes of the retrieved contents.
 Lexical checks distinguish reading evidence from the spelling standard and refuse unsupported conversion.

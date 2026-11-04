@@ -1,7 +1,7 @@
 {
-  "revision": "d87ff6b6db775961746a9ba706505967dc7527faeb8f904a9e0a42b8ac955335",
+  "revision": "49c4344c880bc49484961d1b66ba9ec3484a10ffabe39e1e75a35eff38374e72",
   "outcome": "implemented",
-  "reason": "Gate queue updates and findings on audited organization ownership, preserve personal strict checks and legacy snapshots, and enumerate all sixteen queue decisions with audit and plan regressions.",
+  "reason": "The repo-settings helper manifest admits base64 0.23 releases, and its lockfile selects base64 0.23.1. Repository governance code is unchanged, and this lockfile update does not claim current-source build or test verification.",
   "evidence": [
     "home/dot_agents/skills/github-repository/SKILL.md",
     "home/dot_agents/skills/github-repository/assets/baseline.json",
