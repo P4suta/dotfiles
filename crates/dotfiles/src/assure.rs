@@ -12,7 +12,7 @@ use crate::shape_rules::{
 };
 use crate::tool::Tool;
 use anyhow::{Context, Result, bail, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
@@ -1316,21 +1316,17 @@ fn reverted_commit(message: &str) -> Option<&str> {
     })
 }
 
-fn comparison_commit(root: &Path, base: &str, tree: &str) -> Result<String> {
-    let output = Tool::Git
-        .command()
+fn comparison_commit(root: &Path, base: Option<&str>, tree: &str) -> Result<String> {
+    let mut command = Tool::Git.command();
+    command
         .arg("-C")
         .arg(root)
-        .args([
-            "-c",
-            "commit.gpgSign=false",
-            "commit-tree",
-            tree,
-            "-p",
-            base,
-            "-m",
-            COMPARISON_MESSAGE,
-        ])
+        .args(["-c", "commit.gpgSign=false", "commit-tree", tree]);
+    if let Some(base) = base {
+        command.args(["-p", base]);
+    }
+    let output = command
+        .args(["-m", COMPARISON_MESSAGE])
         .env("GIT_AUTHOR_NAME", COMPARISON_NAME)
         .env("GIT_COMMITTER_NAME", COMPARISON_NAME)
         .env("GIT_AUTHOR_EMAIL", COMPARISON_EMAIL)
@@ -1357,8 +1353,8 @@ fn restored(root: &Path, reverted: &str, onto: &str) -> Result<Option<String>> {
     let Some(parent) = resolve(root, &format!("{reverted}^"))? else {
         return Ok(None);
     };
-    let left = comparison_commit(root, reverted, &format!("{onto}^{{tree}}"))?;
-    let right = comparison_commit(root, reverted, &format!("{parent}^{{tree}}"))?;
+    let left = comparison_commit(root, Some(reverted), &format!("{onto}^{{tree}}"))?;
+    let right = comparison_commit(root, Some(reverted), &format!("{parent}^{{tree}}"))?;
     let output = Tool::Git
         .command()
         .arg("-C")
@@ -1765,7 +1761,96 @@ fn upstream_base(
     explicit_base(root, catalog, remote, base).map(Some)
 }
 
-/// The agent stop point over the uncommitted changes.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RequestBaseline {
+    pub(crate) root: PathBuf,
+    pub(crate) commit: String,
+}
+
+fn worktree_snapshot(root: &Path) -> Result<RequestBaseline> {
+    let root = platform::paths::canonical(root)?;
+    let scope = tempfile::tempdir()?;
+    let index = scope.path().join("index");
+    let indexed = |arguments: &[&str]| -> Result<Vec<u8>> {
+        let output = Tool::Git
+            .command()
+            .arg("-C")
+            .arg(&root)
+            .env("GIT_INDEX_FILE", &index)
+            .args(arguments)
+            .output()
+            .context("capture the request worktree")?;
+        ensure!(
+            output.status.success(),
+            "snapshot Git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(output.stdout)
+    };
+    let real_index = String::from_utf8(git(&root, &["rev-parse", "--git-path", "index"])?)?;
+    match std::fs::copy(root.join(real_index.trim()), &index) {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            indexed(&["read-tree", "--empty"])?;
+        }
+        Err(error) => return Err(error).context("copy the request index"),
+    }
+    // Attributes from an empty tree keep a clean filter, such as the one of Git Large File Storage, from replacing the bytes the survey reads.
+    let empty = String::from_utf8(indexed(&["mktree"])?)?;
+    indexed(&[
+        &format!("--attr-source={}", empty.trim()),
+        "add",
+        "--all",
+        "--",
+        ".",
+    ])?;
+    let tree = String::from_utf8(indexed(&["write-tree"])?)?;
+    let commit = comparison_commit(&root, resolve(&root, "HEAD")?.as_deref(), tree.trim())?;
+    Ok(RequestBaseline { root, commit })
+}
+
+pub(crate) fn request_baseline(cwd: &Path) -> Result<Option<RequestBaseline>> {
+    ensure!(cwd.is_absolute(), "request directory must be absolute");
+    let output = Tool::Git
+        .command()
+        .arg("-C")
+        .arg(cwd)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .context("locate the request repository")?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let root = String::from_utf8(output.stdout)?;
+    worktree_snapshot(Path::new(root.trim())).map(Some)
+}
+
+fn request_stop(
+    root: &Path,
+    catalog: &Catalog,
+    baseline: Option<&RequestBaseline>,
+) -> Result<Outcome> {
+    let root = platform::paths::canonical(root)?;
+    let Some(baseline) = baseline.filter(|baseline| baseline.root == root) else {
+        return stop(&root, catalog);
+    };
+    ensure!(
+        shape_rules::commit_id(baseline.commit.as_bytes()),
+        "invalid request baseline commit"
+    );
+    let current = worktree_snapshot(&root)?;
+    decide_from(
+        &root,
+        catalog,
+        Point::Stop,
+        &Tree::Commit(Some(baseline.commit.clone())),
+        &Tree::Commit(Some(current.commit)),
+        &merge_parents(&root)?,
+    )
+}
+
+/// The standalone stop point over all uncommitted changes.
 ///
 /// # Errors
 ///
@@ -1802,14 +1887,17 @@ pub(crate) fn check_request(
         resolve(&root, baseline)?.is_some_and(|resolved| resolved.eq_ignore_ascii_case(baseline)),
         "answer assurance baseline commit is missing or abbreviated"
     );
+    // A fresh snapshot leaves an untracked file from the request's start unchanged, as the Stop comparison does.
+    let current = worktree_snapshot(&root)?;
     enforce(
         catalog,
-        &decide(
+        &decide_from(
             &root,
             catalog,
             Point::Stop,
             &Tree::Commit(Some(baseline.to_owned())),
-            &Tree::WorkingTree,
+            &Tree::Commit(Some(current.commit)),
+            &merge_parents(&root)?,
         )?,
     )
 }
@@ -1962,7 +2050,16 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
             }
             if let Some(root) = repository() {
                 let catalog = installed()?;
-                let outcome = stop(&root, &catalog)?;
+                let baseline = input
+                    .session_id
+                    .as_deref()
+                    .map(|session| {
+                        let home = platform::home::home().context("native home is unavailable")?;
+                        crate::answer::request_baseline(&home, session)
+                    })
+                    .transpose()?
+                    .flatten();
+                let outcome = request_stop(&root, &catalog, baseline.as_ref())?;
                 report_inputs(&outcome);
                 if let Some(refusal) = outcome.refusal(&catalog) {
                     reasons.push(refusal.text());
@@ -1980,6 +2077,7 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
 
 #[derive(Debug, Default, Deserialize)]
 struct StopInput {
+    session_id: Option<String>,
     #[serde(default)]
     stop_hook_active: bool,
     last_assistant_message: Option<String>,
