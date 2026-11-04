@@ -396,7 +396,7 @@
     {"mode":"0644","path":".config/opencode/themes/tokyonight.json","sha256":"3c5a495feb2d09cb793071ab06222faaf516ec7422dde7240d743a7d5d410825","type":"file"},
     {"mode":"0644","path":".config/opencode/tui.json","sha256":"47069c2e8753c44d71fe22e7df6523b9f4f1ccd5d0ca0ab33006bf08758bc34c","type":"file"},
     {"mode":"0755","path":".config/prose","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".config/prose/japanese.toml","sha256":"1f3b3a761db58dfa6664413cec838bfd097b9ea62f6f6b5c107bd4c2036a5cd8","type":"file"},
+    {"mode":"0644","path":".config/prose/japanese.toml","sha256":"2d120180d5803a1266cb117b019442e0bc2ee77e98a6029381d3d87314b89c68","type":"file"},
     {"mode":"0644","path":".config/prose/packages.toml","sha256":"ff141f49c3270e90a78e7922959e8bdb221f794f772d0bbf4de1be82cf9534d3","type":"file"},
     {"mode":"0644","path":".config/prose/retired-terms.tsv","sha256":"f1bb37a74365397b2cad02efcbe1d792e2ee843c0bc8f0b3ccb2b969b8ccdc8e","type":"file"},
     {"mode":"0755","path":".config/prose/styles","sha256":null,"type":"dir"},
