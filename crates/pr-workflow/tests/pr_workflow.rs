@@ -8795,6 +8795,47 @@ fn stack_merge_checks_three_members_own_issues_or_the_explicit_common_issue() ->
 }
 
 #[test]
+fn a_common_issue_that_a_member_does_not_close_points_to_the_per_member_form() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+    let parent = git(&checkout, &["rev-parse", "parent"])?;
+    let middle = git(&checkout, &["rev-parse", "prior-topic"])?;
+    let top = git(&checkout, &["rev-parse", "HEAD"])?;
+    let mut views = Vec::new();
+    for (pr, head, base, issue) in [
+        (5, &parent, "main", 23),
+        (11, &middle, "parent", 24),
+        (17, &top, "prior-topic", 25),
+    ] {
+        let body = format!("{BODY}\nCloses #{issue}.\n\n@coderabbitai ignore\n");
+        let response = read(pr, head, false, &body, PASSING, "CLEAN");
+        let mut document: serde_json::Value =
+            serde_json::from_str(response.split_once('=').unwrap().1)?;
+        document["baseRefName"] = serde_json::json!(base);
+        document["closingIssuesReferences"] = serde_json::json!([{"number":issue}]);
+        views.push(format!("{pr}={document}"));
+    }
+    let issues = [23, 24, 25].map(|number| format!("repos/P4suta/project/issues/{number}={}", serde_json::json!({"number":number,"title":"Preserve edits","body":"Keep the input.","state":"open","html_url":format!("https://github.com/P4suta/project/issues/{number}")}))).join("\n");
+    let output = fixture
+        .stack_command(
+            &checkout,
+            &lease,
+            &["merge", "--pr", "17", "--interval", "0", "--issue", "25"],
+        )?
+        .env("GH_FIXTURE_LIST", r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":11,"headRefName":"prior-topic","baseRefName":"parent"},{"number":17,"headRefName":"topic","baseRefName":"prior-topic"}]"#)
+        .env("GH_FIXTURE_VIEWS", views.join("\n"))
+        .env("GH_FIXTURE_ISSUES", issues)
+        .output()?;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("stack member #5 closes #23; omit --issue 25"),
+        "{stderr}"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<()> {
     let closed = format!("{BODY}\nCloses #23.\n");
     let excluded = format!("{closed}\n@coderabbitai ignore\n");
@@ -8828,9 +8869,10 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    // The address of the top pull request names one stack even on a trunk that more than one local stack shares.
     assert_eq!(
         fixture.stack_log(),
-        "gh-stack checkout topic repo=P4suta/project leased=true notifier=1\n\
+        "gh-stack checkout https://github.com/P4suta/project/pull/17 repo=P4suta/project leased=true notifier=1\n\
          gh-stack sync repo=P4suta/project leased=true notifier=1\n"
     );
     assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());
