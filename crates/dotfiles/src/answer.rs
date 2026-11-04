@@ -77,6 +77,7 @@ pub enum Action {
 #[derive(Debug, Deserialize)]
 struct HookInput {
     session_id: String,
+    cwd: Option<PathBuf>,
     prompt: Option<String>,
     last_assistant_message: Option<String>,
     #[serde(default)]
@@ -89,6 +90,8 @@ struct Request {
     version: u8,
     generation: String,
     prompt: String,
+    #[serde(default)]
+    assurance: Option<crate::assure::RequestBaseline>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -289,6 +292,17 @@ fn request(directory: &Path) -> Result<Request> {
     Ok(state)
 }
 
+pub(crate) fn request_baseline(
+    home: &Path,
+    session: &str,
+) -> Result<Option<crate::assure::RequestBaseline>> {
+    let directory = directory(home, session)?;
+    if !directory.join("request.json").try_exists()? {
+        return Ok(None);
+    }
+    Ok(request(&directory)?.assurance)
+}
+
 fn begin(home: &Path, input: &HookInput) -> Result<String> {
     let prompt = input
         .prompt
@@ -304,14 +318,18 @@ fn begin(home: &Path, input: &HookInput) -> Result<String> {
         .context("request generation has no name")?
         .to_string_lossy()
         .into_owned();
-    write_json(
-        &directory.join("request.json"),
-        &Request {
-            version: VERSION,
-            generation,
-            prompt: prompt.to_owned(),
-        },
-    )?;
+    let mut state = Request {
+        version: VERSION,
+        generation,
+        prompt: prompt.to_owned(),
+        assurance: None,
+    };
+    let path = directory.join("request.json");
+    write_json(&path, &state)?;
+    if let Some(cwd) = &input.cwd {
+        state.assurance = crate::assure::request_baseline(cwd)?;
+        write_json(&path, &state)?;
+    }
     Ok(format!(
         "Before completing this request, use japanese-lexicon for Japanese readings and checked-arguments for reasoning.\nPrepare an exact answer draft and evidence, then run dotfiles answer check --session {} --draft <file> --evidence <file>.\nThe Stop hook rejects absent or stale evidence.\nA proof checks the declared formal claim; it does not certify empirical premises or their natural-language interpretation.\n",
         platform::refusal::quote(&input.session_id)
@@ -1076,6 +1094,7 @@ mod tests {
     fn input(prompt: &str) -> HookInput {
         HookInput {
             session_id: "session".to_owned(),
+            cwd: None,
             prompt: Some(prompt.to_owned()),
             last_assistant_message: Some("Can we test this?".to_owned()),
             stop_hook_active: false,
@@ -1199,11 +1218,51 @@ mod tests {
                     version: VERSION,
                     generation: generation.to_owned(),
                     prompt: "request".to_owned(),
+                    assurance: None,
                 },
             )
             .unwrap();
             assert!(request(&directory).is_err(), "{generation}");
         }
+    }
+
+    #[test]
+    fn failed_snapshot_capture_invalidates_earlier_answer_evidence() {
+        let home = tempfile::tempdir().unwrap();
+        let draft = home.path().join("draft.txt");
+        let evidence = home.path().join("evidence.json");
+        fs::write(&draft, "Can we test this?\n").unwrap();
+        write_json(&evidence, &document()).unwrap();
+        let mut input = input("same request");
+        begin(home.path(), &input).unwrap();
+        check(home.path(), "session", &draft, &evidence).unwrap();
+        assert!(stop(home.path(), &input).is_ok());
+        input.cwd = Some(PathBuf::from("relative"));
+        assert!(
+            begin(home.path(), &input)
+                .unwrap_err()
+                .to_string()
+                .contains("must be absolute")
+        );
+        assert!(
+            stop(home.path(), &input)
+                .unwrap_err()
+                .to_string()
+                .contains("stale or incomplete")
+        );
+    }
+
+    #[test]
+    fn legacy_requests_without_a_snapshot_retain_the_strict_stop_comparison() {
+        let home = tempfile::tempdir().unwrap();
+        begin(home.path(), &input("request")).unwrap();
+        let path = directory(home.path(), "session")
+            .unwrap()
+            .join("request.json");
+        let mut legacy: serde_json::Value = serde_json::from_str(&read(&path).unwrap()).unwrap();
+        legacy.as_object_mut().unwrap().remove("assurance");
+        write_json(&path, &legacy).unwrap();
+        assert!(request_baseline(home.path(), "session").unwrap().is_none());
     }
 
     #[test]

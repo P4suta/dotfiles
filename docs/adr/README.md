@@ -121,3 +121,4 @@
 | [2026-10-25 Resolve script inspection from invocation directories](resolve-script-inspection-from-invocation-directories.md) | proposed |  |
 | [2026-10-25 Verify CI pin readers from the offered source](verify-ci-pin-readers-from-offered-source.md) | proposed |  |
 | [2026-10-26 Import unborn artifacts after same-issue selections](import-unborn-artifacts-after-same-issue-selections.md) | proposed |  |
+| [2026-10-29 Compare agent stops with request snapshots](compare-agent-stops-with-request-snapshots.md) | proposed |  |

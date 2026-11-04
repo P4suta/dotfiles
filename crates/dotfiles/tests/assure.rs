@@ -5,13 +5,18 @@ use dotfiles::assure::{self, Catalog, Kind};
 use dotfiles::refusal::Refusal;
 use dotfiles::shape_rules::{Cause, Verdict};
 use std::fs;
+use std::io::Write as _;
 use std::path::Path;
+use std::process::{Output, Stdio};
 
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
 #[path = "../../../xtask/tests/support/incident_fixture.rs"]
 mod incident_fixture;
+
+#[path = "support/catalog.rs"]
+mod hook_catalog;
 
 fn catalog() -> Result<Catalog> {
     assure::catalog(
@@ -27,6 +32,13 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Result<Self> {
+        let fixture = Self::unborn()?;
+        fixture.write("README.md", "fixture\n")?;
+        fixture.commit("start")?;
+        Ok(fixture)
+    }
+
+    fn unborn() -> Result<Self> {
         let scope = incident_fixture::scope()?;
         let config = scope.path().join("gitconfig");
         fs::write(
@@ -47,8 +59,6 @@ impl Fixture {
             "origin",
             "https://github.com/P4suta/fixture.git",
         ])?;
-        fixture.write("README.md", "fixture\n")?;
-        fixture.commit("start")?;
         Ok(fixture)
     }
 
@@ -103,6 +113,25 @@ impl Fixture {
         self.git(&["add", "--all"]).map(drop)
     }
 
+    fn agent(&self, home: &Path, arguments: &[&str], input: &serde_json::Value) -> Result<Output> {
+        let mut child = fixture_git::command(env!("CARGO_BIN_EXE_dotfiles"), &self.config)
+            .current_dir(&self.root)
+            .env("HOME", home)
+            .env("USERPROFILE", home)
+            .args(arguments)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(input)?)?;
+        let output = child.wait_with_output()?;
+        Ok(output)
+    }
+
     /// Records the working tree as a commit without the machine hooks, as an older repository would hold it.
     fn commit(&self, message: &str) -> Result<String> {
         self.stage()?;
@@ -133,6 +162,131 @@ const PARSER: &str = "pub fn parse(text: &str) -> Option<u8> {\n    text.parse()
 const TARGET: &str = "#![no_main]\nlibfuzzer_sys::fuzz_target!(|data: &[u8]| {});\n";
 const OWNERS: &str =
     "[[owner]]\nshape = \"parser\"\npath = \"src/lib.rs\"\nby = \"fuzz/fuzz_targets/parse.rs\"\n";
+
+#[test]
+fn managed_requests_ignore_existing_work_and_still_refuse_changed_gaps() -> Result<()> {
+    for unborn in [false, true] {
+        let fixture = if unborn {
+            Fixture::unborn()?
+        } else {
+            Fixture::new()?
+        };
+        fixture.write("README.md", "already staged\n")?;
+        fixture.write("ignored/lib.rs", PARSER)?;
+        fixture.stage()?;
+        fixture.write(".gitignore", "ignored/\n")?;
+        fixture.write("ignored/extra.rs", PARSER)?;
+        fixture.write("README.md", "already unstaged\n")?;
+        fixture.write("src/lib.rs", PARSER)?;
+        let home = fixture.scope.path().join("home");
+        hook_catalog::install(&home)?;
+        let index = fixture.git(&["ls-files", "--stage"])?;
+        let index_path = fixture
+            .root
+            .join(fixture.git(&["rev-parse", "--git-path", "index"])?);
+        let index_bytes = fs::read(&index_path)?;
+        let head = assure::resolve(&fixture.root, "HEAD")?;
+        let request = serde_json::json!({
+            "session_id":"request-scope", "prompt":"Discuss a domain name", "cwd":fixture.root
+        });
+        let begin = || -> Result<()> {
+            let output = fixture.agent(&home, &["answer", "begin"], &request)?;
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("Before completing"),
+                "{output:?}"
+            );
+            Ok(())
+        };
+        let stop = |reply: &str| -> Result<serde_json::Value> {
+            let input = serde_json::json!({
+                "session_id":"request-scope", "last_assistant_message":reply
+            });
+            let output = fixture.agent(
+                &home,
+                &["assure", "stop", "--reply-language", "Japanese"],
+                &input,
+            )?;
+            Ok(serde_json::from_slice(&output.stdout)?)
+        };
+        assert!(
+            stop("確認しました。")?["reason"]
+                .as_str()
+                .unwrap()
+                .contains("assure.added")
+        );
+        begin()?;
+        assert_eq!(fixture.git(&["ls-files", "--stage"])?, index);
+        assert_eq!(fs::read(&index_path)?, index_bytes);
+        assert_eq!(assure::resolve(&fixture.root, "HEAD")?, head);
+        assert_eq!(stop("確認しました。")?, serde_json::json!({}));
+        fixture.write("ignored/extra.rs", &PARSER.replace("parse", "parse_extra"))?;
+        fixture.write("README.md", "changed during the request\n")?;
+        assert_eq!(stop("確認しました。")?, serde_json::json!({}));
+        fixture.write("src/lib.rs", &PARSER.replace("text.parse().ok()", "None"))?;
+        let touched = stop("確認しました。")?;
+        assert_eq!(touched["decision"], "block", "{touched}");
+        assert!(
+            touched["reason"]
+                .as_str()
+                .unwrap()
+                .contains("assure.touched"),
+            "{touched}"
+        );
+        fixture.write("src/extra.rs", PARSER)?;
+        let added = stop("確認しました。")?;
+        assert!(
+            added["reason"].as_str().unwrap().contains("assure.added"),
+            "{added}"
+        );
+        begin()?;
+        assert_eq!(stop("確認しました。")?, serde_json::json!({}));
+        assert_eq!(stop("The work is complete.")?["decision"], "block");
+    }
+    Ok(())
+}
+
+#[test]
+fn request_baselines_refuse_missing_objects_and_do_not_exempt_other_repositories() -> Result<()> {
+    let fixture = Fixture::unborn()?;
+    let other = Fixture::new()?;
+    let home = fixture.scope.path().join("home");
+    hook_catalog::install(&home)?;
+    let request = serde_json::json!({
+        "session_id":"repository-scope", "prompt":"Discuss a name", "cwd":fixture.root
+    });
+    let begun = fixture.agent(&home, &["answer", "begin"], &request)?;
+    assert!(String::from_utf8_lossy(&begun.stdout).contains("Before completing"));
+    other.write("src/lib.rs", PARSER)?;
+    let input = serde_json::json!({"session_id":"repository-scope"});
+    let output = other.agent(&home, &["assure", "stop"], &input)?;
+    let blocked: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert!(blocked["reason"].as_str().unwrap().contains("assure.added"));
+
+    let requests = home.join(".local/state/dotfiles/answers");
+    let record = fs::read_dir(requests)?
+        .next()
+        .unwrap()?
+        .path()
+        .join("request.json");
+    let mut state: serde_json::Value = serde_json::from_slice(&fs::read(&record)?)?;
+    for (commit, diagnostic) in [
+        ("HEAD", "invalid request baseline commit"),
+        (
+            "ffffffffffffffffffffffffffffffffffffffff",
+            "comparison base is missing",
+        ),
+    ] {
+        state["assurance"]["commit"] = serde_json::json!(commit);
+        fs::write(&record, serde_json::to_vec(&state)?)?;
+        let failed = fixture.agent(&home, &["assure", "stop"], &input)?;
+        assert!(!failed.status.success(), "{failed:?}");
+        assert!(
+            String::from_utf8_lossy(&failed.stderr).contains(diagnostic),
+            "{failed:?}"
+        );
+    }
+    Ok(())
+}
 
 #[test]
 fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target_and_corpus_exist()
