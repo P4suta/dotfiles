@@ -1,0 +1,9 @@
+{
+  "revision": "7fd3d9304435c4876b8bd788b173e8d1cc4f9f3be7cf5e6581b6eaf35df96d53",
+  "outcome": "implemented",
+  "reason": "An audit of the Public Phonebook iPhone app found fifteen departures from Apple's documentation and Human Interface Guidelines. The skill makes reading and citing Apple's source the first step of every Apple-platform app decision, explains how to read the JavaScript-rendered pages through DocC JSON, and states the verified ground rules with their sources.",
+  "evidence": [
+    "home/dot_agents/skills/apple-platform-guidelines/SKILL.md"
+  ],
+  "revisit": null
+}

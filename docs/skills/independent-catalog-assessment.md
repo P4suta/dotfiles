@@ -21,6 +21,7 @@ Each row names an independent eligible task and the contract for its scope and f
 | --- | --- | --- |
 | adr | Durable contract or trust boundary decisions | Decision status and linked evidence apart from specification writing |
 | apple-notarization | Submitting or resuming a preserved signed distribution | Native receipts and stapling apart from executable signing |
+| apple-platform-guidelines | Reading and citing Apple guidance before an Apple-platform app decision | Cited sources and recorded deviations apart from signing and notarization |
 | apple-signing | Choosing and verifying existing Apple developer identities | Native signatures apart from notarization and packaging |
 | approval-boundaries | Evaluating an explicitly authorized approval scope | Changed heads or candidates invalidate approval without granting publication authority |
 | ci-budget | Controlling authorized publication and duplicate hosted runs | Hosted evidence requirements apart from native execution |
