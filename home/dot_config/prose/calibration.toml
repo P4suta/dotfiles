@@ -1,0 +1,11 @@
+schema_version = 1
+
+[[lexeme]]
+language = "zh"
+rule = "BU"
+word = "步道"
+part_of_speech = "NOUN"
+blocked_contexts = ["大逆步道"]
+source = "https://dict.concised.moe.edu.tw/dictView.jsp?ID=2369&la=0&powerMode=0"
+reference = "僅供行人行走的路。"
+reason = "Preserve the path noun when the parser identifies the complete lexical word; keep the idiom counterexample eligible for correction."

@@ -312,7 +312,7 @@ fn script_bypass_hint(path: &str) -> String {
     )
 }
 
-/// Keep refusals and unavailable inspections independent across every script a command runs.
+/// Keep policy refusals, syntax rejections, and unavailable inspections independent.
 #[derive(Debug, Default)]
 pub struct Findings {
     pub refusals: Vec<String>,
@@ -727,16 +727,20 @@ fn script_refusal(
     if skip_legacy {
         findings.refusals.clear();
     }
-    for message in findings
-        .refusals
-        .iter_mut()
-        .chain(&mut findings.unavailable)
-    {
-        message.push_str("\nThe script ");
-        message.push_str(path);
-        message.push_str(" runs this command.");
-        message.push('\n');
-        message.push_str(&script_bypass_hint(path));
+    for (messages, bypass) in [
+        (&mut findings.refusals, true),
+        (&mut findings.syntax_refusals, false),
+        (&mut findings.unavailable, true),
+    ] {
+        for message in messages {
+            message.push_str("\nThe script ");
+            message.push_str(path);
+            message.push_str(" runs this command.");
+            if bypass {
+                message.push('\n');
+                message.push_str(&script_bypass_hint(path));
+            }
+        }
     }
     Ok(findings)
 }

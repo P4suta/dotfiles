@@ -72,6 +72,86 @@ fn the_next_session_start_reports_failed_hooks_once() -> Result<()> {
 }
 
 #[test]
+fn syntax_rejections_preserve_diagnostics_without_reporting_a_failed_hook() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let home = home.path();
+    std::fs::write(home.join("broken.sh"), "if then; touch executed")?;
+    for source in [
+        "if then; touch executed",
+        "if then; ls -la",
+        "if then; bash missing.sh",
+        "bash -c 'if then; touch executed'",
+        "sh <<'END'\nif then; touch executed\nEND\n",
+        "bash broken.sh",
+        "DOTFILES_LEGACY_BYPASS='broken.sh: fixture' bash broken.sh",
+    ] {
+        let event = serde_json::json!({
+            "tool_name": "Bash",
+            "session_id": "syntax-rejection",
+            "cwd": home,
+            "tool_input": {"command": source},
+        });
+        let output = run(home, &["claude-bash"], event.to_string().as_bytes())?;
+        assert_eq!(output.status.code(), Some(2), "{source}: {output:?}");
+        let diagnostics = String::from_utf8(output.stderr)?;
+        assert!(
+            diagnostics.contains("1:1: `if` must be followed by a statement list"),
+            "{source}: {diagnostics}"
+        );
+        assert!(
+            !diagnostics.contains("the pinned shfmt parser could not finish"),
+            "{source}: {diagnostics}"
+        );
+        assert!(!diagnostics.contains("To run this one script anyway"));
+        assert!(!home.join("executed").exists());
+        assert_eq!(session_start(home)?, "", "{source}");
+    }
+    Ok(())
+}
+
+#[test]
+fn overflowed_parser_columns_remain_syntax_rejections() -> Result<()> {
+    const COLUMN_OVERFLOW: usize = 1 << 14;
+    let home = tempfile::tempdir()?;
+    let source = format!("{}if then; touch executed", " ".repeat(COLUMN_OVERFLOW));
+    let event = serde_json::json!({
+        "tool_name": "Bash",
+        "session_id": "syntax-column-overflow",
+        "cwd": home.path(),
+        "tool_input": {"command": source},
+    });
+    let output = run(home.path(), &["claude-bash"], event.to_string().as_bytes())?;
+    assert_eq!(output.status.code(), Some(2));
+    let diagnostics = String::from_utf8(output.stderr)?;
+    assert!(diagnostics.contains("1:?: `if` must be followed by a statement list"));
+    assert!(!diagnostics.contains("the pinned shfmt parser could not finish"));
+    assert!(!home.path().join("executed").exists());
+    assert_eq!(session_start(home.path())?, "");
+    Ok(())
+}
+
+#[test]
+fn an_unreadable_script_remains_an_inspection_failure() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    let event = serde_json::json!({
+        "tool_name": "Bash",
+        "session_id": "unreadable-script",
+        "cwd": home.path(),
+        "tool_input": {"command": "bash missing.sh"},
+    });
+    let output = run(home.path(), &["claude-bash"], event.to_string().as_bytes())?;
+    assert_eq!(output.status.code(), Some(2));
+    let diagnostics = String::from_utf8(output.stderr)?;
+    assert!(diagnostics.contains("inspect the script missing.sh"));
+    assert!(
+        session_start(home.path())?.starts_with(
+            "The dotfiles `claude-bash` hook failed once since the last session start."
+        )
+    );
+    Ok(())
+}
+
+#[test]
 fn a_codex_hook_that_never_starts_reaches_the_next_session_start() -> Result<()> {
     let home = tempfile::tempdir()?;
     let home = home.path();

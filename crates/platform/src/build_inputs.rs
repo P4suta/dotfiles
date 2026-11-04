@@ -24,7 +24,8 @@ pub const CRATES: [&str; 9] = [
 ];
 
 /// Files outside the crates' `src` directories that the compiler includes or that decide how the tools build.
-const SHARED: [&str; 61] = [
+const SHARED: [&str; 62] = [
+    "home/dot_config/prose/house.toml",
     ".cargo/config.toml",
     ".chezmoiroot",
     ".github/workflows/ci.yml",

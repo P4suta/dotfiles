@@ -1,0 +1,15 @@
+---
+title: Literal structure
+items:
+  - A metadata item
+---
+
+The parser preserves the input.
+
+> - A quoted item.
+
+```html
+<ul><li>A code sample.</li></ul>
+```
+
+<script>const literal = '<table><tr><td>Value</td></tr></table>';</script>

@@ -1,0 +1,30 @@
+[project]
+name = "prose-annotations"
+version = "0.1.0"
+description = "The typed spaCy annotation boundary of prose copyediting"
+requires-python = "==3.13.*"
+dependencies = [
+  "spacy==3.8.16",
+  "OpenCC==1.4.2",
+  "en-core-web-sm",
+  "ja-core-news-sm",
+  "zh-core-web-sm",
+]
+
+[dependency-groups]
+dev = ["mypy==2.4.0", "ruff==0.17.1"]
+
+[tool.uv.sources]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+ja-core-news-sm = { url = "https://github.com/explosion/spacy-models/releases/download/ja_core_news_sm-3.8.0/ja_core_news_sm-3.8.0-py3-none-any.whl" }
+zh-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/zh_core_web_sm-3.8.0/zh_core_web_sm-3.8.0-py3-none-any.whl" }
+
+[tool.mypy]
+strict = true
+files = ["."]
+warn_unreachable = true
+disallow_any_generics = true
+mypy_path = ["stubs"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "ANN", "B", "UP"]

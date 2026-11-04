@@ -3,11 +3,10 @@
 //! macOS lacks `/proc`, so process ages come from the `etime` column of `ps`.
 //! launchd runs as PID 1 and supervises every user app, so `PPID==1` alone proves nothing.
 //!
-//! Tiers:
-//!
-//! * **Tier A** kills a process stopped in state `T` under `PPID==1` and older than the limit, once a grace window confirms it.
-//!   launchd never leaves its jobs in state `T`, so such a process lost its controlling shell, and it ignores `SIGTERM` while stopped, so the reaper sends `SIGKILL`.
-//! * **Tier B** reports a running process under `PPID==1` with no controlling tty and older than the limit, whose executable lives in user or Homebrew space instead of `/System` or `/usr/lib`.
+//! Tier A kills a process stopped in state `T` under `PPID==1` and older than the limit, once a grace window confirms it.
+//! launchd never leaves its jobs in state `T`, so such a process lost its controlling shell, and it ignores `SIGTERM` while stopped, so the reaper sends `SIGKILL`.
+//! Tier B reports a running process under `PPID==1` that has no controlling tty and is older than the limit.
+//! It reports an executable in user or Homebrew space, never one under `/System` or `/usr/lib`.
 //!
 //! `MODE=report` never kills, and `MODE=reap` kills tier A.
 

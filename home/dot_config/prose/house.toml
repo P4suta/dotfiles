@@ -1,0 +1,192 @@
+schema_version = 1
+standard = "https://www.jtf.jp/jp/style_guide/pdf/jtf_style_guide.pdf"
+edition = "4.0"
+
+[japanese]
+demonstratives = [
+  "この",
+  "その",
+  "あの",
+  "どの",
+  "これ",
+  "それ",
+  "あれ",
+  "どれ",
+  "ここ",
+  "そこ",
+  "あそこ",
+  "どこ",
+  "こちら",
+  "そちら",
+  "あちら",
+  "どちら",
+  "こっち",
+  "そっち",
+  "あっち",
+  "どっち",
+  "こう",
+  "そう",
+  "ああ",
+  "どう",
+  "こんな",
+  "そんな",
+  "あんな",
+  "どんな",
+  "そのまま",
+  "それぞれ",
+]
+
+[[term]]
+preferred = "generic method"
+aliases = ["ジェネリックメソッド", "ジェネリック・メソッド"]
+source = "https://github.com/golang/go/issues/77273"
+
+[[term]]
+preferred = "generic function"
+aliases = ["ジェネリック関数"]
+source = "https://go.dev/ref/spec#Function_declarations"
+
+[[term]]
+preferred = "non-generic type"
+aliases = ["非ジェネリック型"]
+source = "https://go.dev/ref/spec#Types"
+
+[[term]]
+preferred = "generic type"
+aliases = ["ジェネリック型"]
+source = "https://go.dev/ref/spec#Types"
+
+[[term]]
+preferred = "generics"
+aliases = ["ジェネリクス", "ジェネリックス", "ジェネリック"]
+source = "https://go.dev/blog/intro-generics"
+
+[[term]]
+preferred = "method"
+aliases = ["メソッド"]
+source = "https://go.dev/ref/spec#Method_declarations"
+
+[[term]]
+preferred = "interface"
+aliases = ["インターフェース", "インターフェイス"]
+source = "https://go.dev/ref/spec#Interface_types"
+
+[[term]]
+preferred = "accepted proposal"
+aliases = ["採用提案"]
+source = "https://github.com/golang/go/issues/77273"
+
+[[term]]
+preferred = "proposal"
+aliases = ["プロポーザル"]
+source = "https://go.dev/s/proposal"
+
+[[term]]
+preferred = "merge"
+aliases = ["マージ", "Merge"]
+source = "https://git-scm.com/docs/git-merge"
+
+[[term]]
+preferred = "type parameter"
+aliases = ["型パラメーター", "型パラメータ"]
+source = "https://go.dev/ref/spec#Type_parameter_declarations"
+
+[[term]]
+preferred = "type argument"
+aliases = ["型引数"]
+source = "https://go.dev/ref/spec#Instantiations"
+
+[[term]]
+preferred = "type assertion"
+aliases = ["型アサーション"]
+source = "https://go.dev/ref/spec#Type_assertions"
+
+[[term]]
+preferred = "type inference"
+aliases = ["型推論"]
+source = "https://go.dev/ref/spec#Type_inference"
+
+[[term]]
+preferred = "function type"
+aliases = ["関数型"]
+source = "https://go.dev/ref/spec#Function_types"
+
+[[term]]
+preferred = "struct literal"
+aliases = ["構造体リテラル"]
+source = "https://go.dev/ref/spec#Composite_literals"
+
+[[term]]
+preferred = "struct"
+aliases = ["構造体"]
+source = "https://go.dev/ref/spec#Struct_types"
+
+[[term]]
+preferred = "field"
+aliases = ["フィールド"]
+source = "https://go.dev/ref/spec#Struct_types"
+
+[[term]]
+preferred = "receiver"
+aliases = ["レシーバー", "レシーバ"]
+source = "https://go.dev/ref/spec#Method_declarations"
+
+[[term]]
+preferred = "instantiation"
+aliases = ["実体化", "インスタンス化"]
+source = "https://go.dev/ref/spec#Instantiations"
+
+[[term]]
+preferred = "reflection"
+aliases = ["リフレクション"]
+source = "https://pkg.go.dev/reflect"
+
+[[term]]
+preferred = "goroutine"
+aliases = ["ゴルーチン"]
+source = "https://go.dev/ref/spec#Go_statements"
+
+[[term]]
+preferred = "channel"
+aliases = ["チャネル", "チャンネル"]
+source = "https://go.dev/ref/spec#Channel_types"
+
+[[term]]
+preferred = "runtime"
+aliases = ["ランタイム"]
+source = "https://pkg.go.dev/runtime"
+
+[[term]]
+preferred = "compiler"
+aliases = ["コンパイラー", "コンパイラ"]
+source = "https://pkg.go.dev/cmd/compile"
+
+[[term]]
+preferred = "linker"
+aliases = ["リンカー", "リンカ"]
+source = "https://pkg.go.dev/cmd/link"
+
+[[term]]
+preferred = "package"
+aliases = ["パッケージ"]
+source = "https://go.dev/ref/spec#Packages"
+
+[[term]]
+preferred = "function"
+aliases = ["関数"]
+source = "https://go.dev/ref/spec#Function_declarations"
+
+[[term]]
+preferred = "heap"
+aliases = ["ヒープ"]
+source = "https://go.dev/doc/gc-guide"
+
+[[term]]
+preferred = "stack"
+aliases = ["スタック"]
+source = "https://go.dev/doc/gc-guide"
+
+[[term]]
+preferred = "memory"
+aliases = ["メモリ", "メモリー"]
+source = "https://go.dev/doc/gc-guide"

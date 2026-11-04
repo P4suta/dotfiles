@@ -69,6 +69,9 @@ enum Action {
         /// Rewrites this host family's manifests from the current rendering instead.
         #[arg(long)]
         write: bool,
+        /// Print source-bound entry changes from this host's native renderer.
+        #[arg(long, conflicts_with = "write")]
+        export: bool,
     },
     /// Records every profile's terminal cell grids.
     ThemeGrids {
@@ -515,7 +518,7 @@ fn run() -> Result<()> {
         Action::StartupPrograms { profile, home } => {
             xtask::profiles::print_startup(&cli.root, profile.as_deref(), home.as_deref())?;
         }
-        Action::ProfileSnapshots { write } => profile_snapshots(&cli.root, write)?,
+        Action::ProfileSnapshots { write, export } => profile_snapshots(&cli.root, write, export)?,
         Action::PublicAudit { denylist } => xtask::profiles::audit_private(&cli.root, &denylist)?,
         Action::InstallPrWorkflow => install_pr_workflow(&cli.root)?,
         Action::InstallPrWorkflowBinary => install_pr_workflow_binary(&cli.root)?,
@@ -729,7 +732,15 @@ fn install_pr_workflow_binary(root: &Path) -> Result<()> {
     pr_workflow::install_binary(root, &binary, &user_directory()?)
 }
 
-fn profile_snapshots(root: &Path, write: bool) -> Result<()> {
+fn profile_snapshots(root: &Path, write: bool, export: bool) -> Result<()> {
+    if export {
+        serde_json::to_writer(
+            std::io::stdout().lock(),
+            &xtask::profile_snapshot::export(root)?,
+        )?;
+        println!();
+        return Ok(());
+    }
     if write {
         xtask::profile_snapshot::write(root)?;
     }

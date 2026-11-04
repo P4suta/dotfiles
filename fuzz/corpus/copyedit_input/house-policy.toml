@@ -1,0 +1,9 @@
+schema_version = 1
+standard = "https://www.jtf.jp/jp/style_guide/pdf/jtf_style_guide.pdf"
+edition = "4.0"
+[japanese]
+demonstratives = ["この"]
+[[term]]
+preferred = "method"
+aliases = ["メソッド"]
+source = "https://go.dev/ref/spec#Method_declarations"

@@ -1,0 +1,9 @@
+The parser returns a value.
+
+- The parser reads the input.
+
+| Input | Output |
+| --- | --- |
+| A | B |
+
+<UL><LI>An HTML item.</LI></UL>

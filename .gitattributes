@@ -9,6 +9,12 @@ fuzz/corpus/** binary
 xtask/proofs/fuzz-fixture/corpus/** binary
 # Compressed consumer schemas keep their original bytes and both recorded digests.
 schemas/vendor/*.gz binary
+# The copyediting fixtures and tests hold real Chinese and Japanese text in the language they check.
+crates/prose/tests/fixtures/copyedit/** dotguard-lang=off
+crates/prose/tests/copyedit.rs dotguard-lang=off
+crates/prose/tests/editorial.rs dotguard-lang=off
+home/dot_config/prose/nlp/test_annotations.py dotguard-lang=off
+fuzz/corpus/copyedit_input/** dotguard-lang=off
 # Keep prepared pulse code modulation bytes identical to their fixed manifest.
 home/dot_config/dotfiles/notifications/audio/*.wav binary
 # The Japanese word rules list the Chinese terms they refuse, so the language guard must not refuse the list itself.

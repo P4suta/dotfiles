@@ -19,6 +19,7 @@ const SOURCE: &str = "/fixture/source";
 const SPEECH_SOURCE: &str = "home/dot_config/dotfiles/notifications";
 const SPEECH_AUDIO: &str = ".config/dotfiles/notifications/audio/";
 const SPEECH_MANIFEST: &str = ".config/dotfiles/notifications/materials.tsv";
+const EXPORT_SCHEMA: u32 = 1;
 const PUBLIC_KEY: &str =
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureFixtureFixtureFixtureFixtureFixture fixture";
 
@@ -464,6 +465,95 @@ fn text(manifest: &Value) -> Result<String> {
     Ok(text)
 }
 
+#[derive(Debug, serde::Serialize)]
+pub struct SnapshotExport {
+    schema_version: u32,
+    family: &'static str,
+    manifests: Vec<ManifestChanges>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ManifestChanges {
+    combination: String,
+    base_sha256: String,
+    rendered_sha256: String,
+    entries: Vec<EntryChange>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct EntryChange {
+    section: String,
+    name: String,
+    before: Option<Value>,
+    after: Option<Value>,
+}
+
+fn changed_entries(before: &Value, after: &Value) -> Result<Vec<EntryChange>> {
+    differences(before, after)
+        .into_iter()
+        .map(|difference| {
+            let (section, name) = difference
+                .split_once(' ')
+                .context("snapshot difference lost its section")?;
+            let key = if section == "targets" {
+                "path"
+            } else {
+                "target"
+            };
+            let entry = |value: &Value| {
+                value[section]
+                    .as_array()
+                    .and_then(|entries| {
+                        entries
+                            .iter()
+                            .find(|entry| entry[key].as_str() == Some(name))
+                    })
+                    .cloned()
+            };
+            Ok(EntryChange {
+                section: section.to_owned(),
+                name: name.to_owned(),
+                before: entry(before),
+                after: entry(after),
+            })
+        })
+        .collect()
+}
+
+/// Exports native rendering changes with the exact input and output manifest hashes.
+///
+/// # Errors
+///
+/// Refuses missing or invalid source manifests and failed native rendering.
+pub fn export(root: &Path) -> Result<SnapshotExport> {
+    let manifests = Combination::all()
+        .into_iter()
+        .map(|combination| {
+            let bytes = fs::read(path(root, combination))?;
+            let committed: Value = serde_json::from_slice(&bytes)?;
+            let rendered = manifest(root, combination)?;
+            ensure!(
+                committed["combination"] == rendered["combination"]
+                    && ["targets", "scripts"]
+                        .iter()
+                        .all(|section| committed[*section].is_array()),
+                "source manifest has an invalid profile identity or section"
+            );
+            Ok(ManifestChanges {
+                combination: combination.name(),
+                base_sha256: sha256(&bytes),
+                rendered_sha256: sha256(text(&rendered)?.as_bytes()),
+                entries: changed_entries(&committed, &rendered)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(SnapshotExport {
+        schema_version: EXPORT_SCHEMA,
+        family: family(),
+        manifests,
+    })
+}
+
 /// The paths and script targets whose entries differ between `committed` and `rendered`.
 #[must_use]
 pub fn differences(committed: &Value, rendered: &Value) -> Vec<String> {
@@ -573,6 +663,40 @@ pub(crate) fn command_line_dependent(root: &Path) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_manifest_exports_keep_added_changed_and_removed_entries() -> Result<()> {
+        let before = json!({"targets":[{"path":"changed","sha256":"old"},{"path":"removed","sha256":"old"}],"scripts":[]});
+        let after = json!({"targets":[{"path":"added","sha256":"new"},{"path":"changed","sha256":"new"}],"scripts":[]});
+        let changes = changed_entries(&before, &after)?;
+        assert_eq!(
+            changes
+                .iter()
+                .map(|change| change.name.as_str())
+                .collect::<Vec<_>>(),
+            ["added", "changed", "removed"]
+        );
+        assert!(changes[0].before.is_none());
+        assert_eq!(
+            changes[0].after,
+            Some(json!({"path":"added","sha256":"new"}))
+        );
+        assert_eq!(
+            changes[1].before,
+            Some(json!({"path":"changed","sha256":"old"}))
+        );
+        assert_eq!(
+            changes[1].after,
+            Some(json!({"path":"changed","sha256":"new"}))
+        );
+        assert!(changes[2].after.is_none());
+        assert!(changed_entries(&after, &after)?.is_empty());
+        assert_ne!(
+            sha256(text(&before)?.as_bytes()),
+            sha256(text(&after)?.as_bytes())
+        );
+        Ok(())
+    }
 
     fn pcm(sample: u8) -> Vec<u8> {
         let length: u32 = 44_100;

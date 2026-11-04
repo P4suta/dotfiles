@@ -43,6 +43,16 @@ commit-message file: trust
 profiles: trust
     mise x -- cargo xtask profiles
 
+profile-snapshots *args: trust
+    mise x -- cargo xtask profile-snapshots {{ args }}
+
+copyedit-check: trust
+    mise x -- cargo clippy --locked --package prose --package rules --all-targets -- -D warnings
+    mise x -- cargo test --locked --package prose --lib --test copyedit --test editorial -- --test-threads=1
+
+copyedit-proofs: trust
+    mise x -- cargo xtask proofs --source crates/rules/src/copyedit_rules.rs --source crates/rules/src/editorial_rules.rs
+
 profiles-linux: trust
     mise x -- cargo xtask profiles-linux
 

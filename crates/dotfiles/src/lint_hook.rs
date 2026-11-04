@@ -138,24 +138,33 @@ impl std::fmt::Display for SyntaxRejected {
 
 impl std::error::Error for SyntaxRejected {}
 
+fn shell_syntax_result(completed: Completed) -> Result<String> {
+    check_shell_syntax_output(&completed.stdout)?;
+    check_shell_syntax_output(&completed.stderr)?;
+    let diagnostic = completed.stderr.trim();
+    match rules::shell_syntax(completed.outcome, diagnostic) {
+        rules::ShellSyntax::Parsed => Ok(completed.stdout),
+        rules::ShellSyntax::Rejected => Err(SyntaxRejected(diagnostic.to_owned()).into()),
+        rules::ShellSyntax::Unavailable => anyhow::bail!(
+            "the pinned shfmt parser could not finish: {:?}: {}",
+            completed.outcome,
+            if diagnostic.is_empty() {
+                "no diagnostic output"
+            } else {
+                diagnostic
+            }
+        ),
+    }
+}
+
 pub(crate) fn shell_syntax_tree(input: &str) -> Result<String> {
     check_shell_syntax_source(input)?;
-    let completed = bounded(
+    shell_syntax_result(bounded(
         Tool::Shfmt
             .command()
             .args(["--to-json", "--language-dialect", "bash"]),
         Some(input),
-    )?;
-    if completed.outcome == Outcome::Findings && !completed.stderr.trim().is_empty() {
-        return Err(SyntaxRejected(completed.stderr.trim().to_owned()).into());
-    }
-    ensure!(
-        completed.outcome == Outcome::Clean,
-        "the pinned shfmt parser could not finish: {:?}",
-        completed.outcome
-    );
-    check_shell_syntax_output(&completed.stdout)?;
-    Ok(completed.stdout)
+    )?)
 }
 
 pub(crate) fn powershell_syntax_tree(input: &str, projection: &str) -> Result<String> {
@@ -1145,6 +1154,54 @@ mod tests {
         let output = "x".repeat(usize::try_from(MAX_OUTPUT_BYTES).unwrap());
         assert!(check_shell_syntax_output(&output[..output.len() - 1]).is_ok());
         assert!(check_shell_syntax_output(&output).is_err());
+        for (stdout, stderr) in [
+            (output.clone(), "1:1: rejected".to_owned()),
+            (String::new(), output),
+        ] {
+            let error = shell_syntax_result(Completed {
+                outcome: Outcome::Findings,
+                stdout,
+                stderr,
+            })
+            .unwrap_err();
+            assert!(!error.is::<SyntaxRejected>());
+        }
+    }
+
+    #[test]
+    fn only_a_located_source_rejection_becomes_a_syntax_refusal() {
+        let diagnostic = "2:3: syntax rejected";
+        for (outcome, stderr, rejected) in [
+            (Outcome::Findings, diagnostic, true),
+            (Outcome::Findings, "parser initialization failed", false),
+            (Outcome::Findings, "", false),
+            (Outcome::Missing, diagnostic, false),
+            (Outcome::Timeout, diagnostic, false),
+            (Outcome::Failed, diagnostic, false),
+            (Outcome::Excluded, diagnostic, false),
+        ] {
+            let error = shell_syntax_result(Completed {
+                outcome,
+                stdout: String::new(),
+                stderr: stderr.to_owned(),
+            })
+            .unwrap_err();
+            assert_eq!(error.is::<SyntaxRejected>(), rejected);
+            assert!(error.to_string().contains(if stderr.is_empty() {
+                "no diagnostic output"
+            } else {
+                stderr
+            }));
+        }
+        assert_eq!(
+            shell_syntax_result(Completed {
+                outcome: Outcome::Clean,
+                stdout: "tree".to_owned(),
+                stderr: String::new(),
+            })
+            .unwrap(),
+            "tree"
+        );
     }
 
     #[test]
