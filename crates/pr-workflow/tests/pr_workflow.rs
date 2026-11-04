@@ -2393,7 +2393,9 @@ const PAUSE_MARKER: &str = "<!-- coderabbit-pause -->";
 /// The checkout file where an earlier release wrote issue contexts, which grants no authority.
 const LEGACY_TRANSPORT: &str = ".pr-workflow/contexts.json";
 
-const BODY: &str = "## Why\nAvoid losing edits.\n\n## Changes\nPreserve the original input.\n\n## Validation\nThe targeted regression test passed.\n";
+/// A described diagram that the personal fixture repository stores, which a personal body shows.
+const DIAGRAM: &str = "![Flow of the preserved edits](https://github.com/P4suta/project/blob/diagrams/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.svg?raw=true)";
+const BODY: &str = "## Why\nAvoid losing edits.\n\n![Flow of the preserved edits](https://github.com/P4suta/project/blob/diagrams/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.svg?raw=true)\n\n## Changes\nPreserve the original input.\n\n## Validation\nThe targeted regression test passed.\n";
 
 /// Whether the command names `--issue 23`, the issue GitHub returns, what follows [`BODY`] in the document, and whether publication proceeds.
 type Publication = (bool, Option<&'static str>, &'static str, bool);
@@ -2564,7 +2566,9 @@ fn global_owner_identity_and_forks_preserve_upstream_rules() -> Result<()> {
 
 #[test]
 fn checked_preparation_does_not_publish_and_generation_cannot_skip_issues() -> Result<()> {
-    let mut fixture = Fixture::new("Closes #23.\n@coderabbitai summary\n")?;
+    let mut fixture = Fixture::new(&format!(
+        "Closes #23.\n\n{DIAGRAM}\n\n@coderabbitai summary\n"
+    ))?;
     fixture.level = "critical";
     for issue in [false, true] {
         let mut command = fixture.personal_command("start")?;
@@ -3424,7 +3428,7 @@ fn attribution_lines_are_refused_by_name_and_the_authors_own_lines_are_admitted(
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(!output.status.success(), "{action}: {form}");
             assert!(
-                stderr.contains("body line 10") && stderr.contains(form),
+                stderr.contains("body line 12") && stderr.contains(form),
                 "{action}: {stderr}"
             );
             assert!(
@@ -3600,7 +3604,22 @@ fn issue_bodies_pass_the_checker_before_gh_publishes_them() -> Result<()> {
         .output()?;
     assert!(!output.status.success());
     assert!(!unfinished.log.try_exists()?);
-    let accepted = Fixture::new("The parser keeps every edit.\n")?;
+    let undrawn = Fixture::new("The parser keeps every edit.\n")?;
+    for (action, extra) in [
+        ("check", vec![]),
+        ("create", vec![]),
+        ("edit", vec!["--number", "23"]),
+    ] {
+        let output = undrawn
+            .personal_command(&format!("issue {action}"))?
+            .args(["--title", "Keep edits", "--body-file"])
+            .arg(&undrawn.body)
+            .args(&extra)
+            .output()?;
+        assert_eq!(rule(&output), "pr.diagram", "{action}");
+    }
+    assert!(!undrawn.log.try_exists()? || !undrawn.log()?.contains("\nissue\n"));
+    let accepted = Fixture::new(&format!("The parser keeps every edit.\n\n{DIAGRAM}\n"))?;
     for (action, extra) in [
         ("check", vec![]),
         ("create", vec![]),
@@ -6533,7 +6552,10 @@ fn mutations(log: &str) -> Vec<String> {
 #[test]
 fn independent_prs_merge_in_order_through_update_checks_ready_and_the_verified_head() -> Result<()>
 {
-    let closed = format!("{BODY}\nCloses #23.\n");
+    // Ready and merge accept a live body written before the diagram rule.
+    let undrawn = BODY.replace(&format!("{DIAGRAM}\n\n"), "");
+    assert_ne!(undrawn, BODY);
+    let closed = format!("{undrawn}\nCloses #23.\n");
     let excluded = format!("{closed}\n@coderabbitai ignore\n");
     let fixture = Fixture::new(BODY)?;
     fixture.pause("paused-pr")?;
@@ -8795,6 +8817,47 @@ fn stack_merge_checks_three_members_own_issues_or_the_explicit_common_issue() ->
 }
 
 #[test]
+fn a_common_issue_that_a_member_does_not_close_points_to_the_per_member_form() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let (checkout, lease) = fixture.stack_checkout("https://github.com/P4suta/project.git")?;
+    let parent = git(&checkout, &["rev-parse", "parent"])?;
+    let middle = git(&checkout, &["rev-parse", "prior-topic"])?;
+    let top = git(&checkout, &["rev-parse", "HEAD"])?;
+    let mut views = Vec::new();
+    for (pr, head, base, issue) in [
+        (5, &parent, "main", 23),
+        (11, &middle, "parent", 24),
+        (17, &top, "prior-topic", 25),
+    ] {
+        let body = format!("{BODY}\nCloses #{issue}.\n\n@coderabbitai ignore\n");
+        let response = read(pr, head, false, &body, PASSING, "CLEAN");
+        let mut document: serde_json::Value =
+            serde_json::from_str(response.split_once('=').unwrap().1)?;
+        document["baseRefName"] = serde_json::json!(base);
+        document["closingIssuesReferences"] = serde_json::json!([{"number":issue}]);
+        views.push(format!("{pr}={document}"));
+    }
+    let issues = [23, 24, 25].map(|number| format!("repos/P4suta/project/issues/{number}={}", serde_json::json!({"number":number,"title":"Preserve edits","body":"Keep the input.","state":"open","html_url":format!("https://github.com/P4suta/project/issues/{number}")}))).join("\n");
+    let output = fixture
+        .stack_command(
+            &checkout,
+            &lease,
+            &["merge", "--pr", "17", "--interval", "0", "--issue", "25"],
+        )?
+        .env("GH_FIXTURE_LIST", r#"[{"number":5,"headRefName":"parent","baseRefName":"main"},{"number":11,"headRefName":"prior-topic","baseRefName":"parent"},{"number":17,"headRefName":"topic","baseRefName":"prior-topic"}]"#)
+        .env("GH_FIXTURE_VIEWS", views.join("\n"))
+        .env("GH_FIXTURE_ISSUES", issues)
+        .output()?;
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("stack member #5 closes #23; omit --issue 25"),
+        "{stderr}"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<()> {
     let closed = format!("{BODY}\nCloses #23.\n");
     let excluded = format!("{closed}\n@coderabbitai ignore\n");
@@ -8828,9 +8891,10 @@ fn a_stack_merges_together_after_restacking_and_verifies_each_head() -> Result<(
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    // The address of the top pull request names one stack even on a trunk that more than one local stack shares.
     assert_eq!(
         fixture.stack_log(),
-        "gh-stack checkout topic repo=P4suta/project leased=true notifier=1\n\
+        "gh-stack checkout https://github.com/P4suta/project/pull/17 repo=P4suta/project leased=true notifier=1\n\
          gh-stack sync repo=P4suta/project leased=true notifier=1\n"
     );
     assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());

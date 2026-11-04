@@ -1,11 +1,14 @@
 //! The pull request workflow: issue-scoped preparation, creation, document edits, ready transitions, and stacked branches.
 
 mod context;
+mod diagram;
 mod evidence;
+mod figure;
 mod link_issue;
 mod local;
 mod merge;
 mod review_policy;
+mod screenshot;
 mod work;
 pub use evidence::store_assessment;
 pub use local::Action as LocalAction;
@@ -259,6 +262,30 @@ pub enum Commands {
         #[command(subcommand)]
         action: StackAction,
     },
+    /// Render a D2 source in black and white, store it on the personal repository's `diagrams` branch, and print the image line for a PR or issue body.
+    Diagram {
+        /// The exact personal GitHub repository that stores the image.
+        #[arg(long)]
+        repo: String,
+        /// The D2 source, which leaves configuration and colors to this command.
+        #[arg(long)]
+        source: PathBuf,
+        /// The image description a reader gets in place of the diagram.
+        #[arg(long)]
+        alt: String,
+    },
+    /// Store a captured screen image on the personal repository's `screenshots` branch, and print the image line for a PR or issue body.
+    Screenshot {
+        /// The exact personal GitHub repository that stores the image.
+        #[arg(long)]
+        repo: String,
+        /// The captured image.
+        #[arg(long)]
+        file: PathBuf,
+        /// What the screenshot shows, for a reader who can't see it.
+        #[arg(long)]
+        alt: String,
+    },
     /// Check, create, or edit an issue through the same document and writing checks.
     Issue {
         #[command(subcommand)]
@@ -375,6 +402,8 @@ impl Commands {
             Self::PruneMerged { .. } => "prune-merged",
             Self::Stack { .. } => "stack",
             Self::Issue { .. } => "issue",
+            Self::Diagram { .. } => "diagram",
+            Self::Screenshot { .. } => "screenshot",
             Self::Local { .. } => "local",
         }
     }
@@ -1278,6 +1307,56 @@ fn written_to_standard(
         &document.title,
         &document.body,
     )
+}
+
+/// Refuses a newly written title or body that fails the personal writing standard or, in a personal repository, shows no stored diagram.
+/// Ready and merge read an existing body through [`written_to_standard`] alone, so a PR written before the diagram rule still lands.
+fn authored_to_standard(
+    destination: Destination,
+    repo: &str,
+    kind: prose::Publication,
+    document: &ValidatedDocument,
+) -> Result<()> {
+    written_to_standard(destination, kind, document)?;
+    if standard_applies(destination.personal, destination.fork)
+        && !diagram::shown(repo, &document.body)
+    {
+        return Err(diagram::missing(repo).into());
+    }
+    Ok(())
+}
+
+/// An image that a personal repository stores on a branch of its own.
+enum Figure<'a> {
+    Diagram(&'a Path),
+    Screenshot(&'a Path),
+}
+
+/// Stores a figure for a personal non-fork repository and prints its image line.
+fn store_figure(repo: &str, figure: &Figure<'_>, alt: &str) -> Result<()> {
+    let github = Github::connect()?;
+    let destination = destination(&github, repo)?;
+    let (rule, kind) = match figure {
+        Figure::Diagram(_) => ("pr.diagram", "diagrams"),
+        Figure::Screenshot(_) => ("pr.screenshot", "screenshots"),
+    };
+    require(
+        standard_applies(destination.personal, destination.fork),
+        || {
+            Refusal::new(
+                rule,
+                format!("only a personal non-fork repository stores {kind} on its own branch"),
+                "attach the image through the destination's own interface",
+            )
+            .evidence(format!("repository: {repo}"))
+        },
+    )?;
+    let line = match figure {
+        Figure::Diagram(source) => diagram::publish(repo, source, alt)?,
+        Figure::Screenshot(file) => screenshot::publish(repo, file, alt)?,
+    };
+    println!("{line}");
+    Ok(())
 }
 
 fn offline_destination(repo: &str) -> Result<Destination> {
@@ -2197,6 +2276,12 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
         Commands::PruneMerged { target, dry_run } => prune_merged(&target, dry_run)?,
         Commands::Stack { action } => stack(action, rerun)?,
         Commands::Issue { action } => issue(action)?,
+        Commands::Diagram { repo, source, alt } => {
+            store_figure(&repo, &Figure::Diagram(&source), &alt)?;
+        }
+        Commands::Screenshot { repo, file, alt } => {
+            store_figure(&repo, &Figure::Screenshot(&file), &alt)?;
+        }
         Commands::Local { action } => local::run(action)?,
     }
     Ok(())
@@ -2214,7 +2299,7 @@ fn check_command(
         return check_live(&target, pr, r#final, rerun);
     }
     let destination = offline_destination(&target.repo)?;
-    let (_, document) = read_document(
+    let (target, document) = read_document(
         DocumentArgs {
             target,
             title: title.context("title required")?,
@@ -2222,7 +2307,7 @@ fn check_command(
         },
         r#final,
     )?;
-    written_to_standard(destination, PULL_REQUEST, &document)?;
+    authored_to_standard(destination, &target.repo, PULL_REQUEST, &document)?;
     println!(
         "Offline document format accepted; no issue, source, classification, or review credit"
     );
@@ -2397,7 +2482,7 @@ fn create(
         || Ok((true, Exclusion::None)),
     )?;
     let destination = destination(&github, &target.repo)?;
-    written_to_standard(destination, PULL_REQUEST, &document)?;
+    authored_to_standard(destination, &target.repo, PULL_REQUEST, &document)?;
     let issue = inspect_issue(
         &github,
         &target,
@@ -2461,7 +2546,7 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
         },
     )?;
     let destination = destination(&github, &target.repo)?;
-    written_to_standard(destination, PULL_REQUEST, &document)?;
+    authored_to_standard(destination, &target.repo, PULL_REQUEST, &document)?;
     let issue = inspect_issue(
         &github,
         &target,
@@ -3257,9 +3342,16 @@ fn restack(target: &Target, restack: impl FnOnce() -> Result<()>) -> Result<()> 
 fn sync_stack(target: &Target) -> Result<()> {
     require_checkout(target)?;
     let branch = git_output(&["symbolic-ref", "--quiet", "--short", "HEAD"])?;
+    sync_stack_at(target, branch.trim())
+}
+
+/// Restacks the stack that `selector` names: a pull request address, a stack number, or a branch.
+/// Checking it out adopts the stack that GitHub records while this clone still lacks tracking for it.
+/// The web address of a pull request names one stack even on a trunk that more than one local stack shares, and a bare number could name a stack first.
+fn sync_stack_at(target: &Target, selector: &str) -> Result<()> {
+    require_checkout(target)?;
     let lease = Lease::acquire()?;
-    // Checking out the current branch adopts the stack that GitHub records for it while this clone still lacks tracking for it.
-    gh_stack(target, Some(&lease), &["checkout", branch.trim()])?;
+    gh_stack(target, Some(&lease), &["checkout", selector])?;
     gh_stack(target, Some(&lease), &["sync"])
 }
 
@@ -3288,7 +3380,20 @@ fn check_stack_issue(
     .and_then(|gate| require_issue(gate, &member))
     .map_err(|error| {
         if let Some(refusal) = error.downcast_ref::<Refusal>() {
-            anyhow::Error::from(refusal.clone().evidence(format!("stack member #{pr}")))
+            let mut refusal = refusal.clone().evidence(format!("stack member #{pr}"));
+            let own = view
+                .closing_issues_references
+                .first()
+                .map(|issue| issue.number)
+                .or_else(|| closing_references(&view.body, &target.repo).first().copied());
+            if let (Some(common), Some(own)) = (target.issue, own)
+                && own != common
+            {
+                refusal = refusal.evidence(format!(
+                    "stack member #{pr} closes #{own}; omit --issue {common} so each member needs to close its own issue"
+                ));
+            }
+            anyhow::Error::from(refusal)
         } else {
             error.context(format!("stack member #{pr}"))
         }
@@ -3346,7 +3451,7 @@ fn merge_stack(
                     return Err(stop_refusal(target, *pr, *stop, true, view).into());
                 }
             }
-            sync_stack(target)?;
+            sync_stack_at(target, &format!("{GITHUB}/{}/pull/{top}", target.repo))?;
             carry = assessments;
             wait(target, top, polling, started)?;
             continue;
@@ -3710,7 +3815,12 @@ fn issue(action: IssueAction) -> Result<()> {
     let (document, number) = match action {
         IssueAction::Check { document } => {
             let validated = validate_issue(&document)?;
-            written_to_standard(offline_destination(&document.repo)?, ISSUE, &validated)?;
+            authored_to_standard(
+                offline_destination(&document.repo)?,
+                &document.repo,
+                ISSUE,
+                &validated,
+            )?;
             println!("Issue document accepted");
             return Ok(());
         }
@@ -3719,7 +3829,12 @@ fn issue(action: IssueAction) -> Result<()> {
     };
     let validated = validate_issue(&document)?;
     let github = Github::connect()?;
-    written_to_standard(destination(&github, &document.repo)?, ISSUE, &validated)?;
+    authored_to_standard(
+        destination(&github, &document.repo)?,
+        &document.repo,
+        ISSUE,
+        &validated,
+    )?;
     let mut args: Vec<OsString> = vec!["issue".into()];
     match number {
         Some(number) => args.extend(["edit".into(), number.to_string().into()]),

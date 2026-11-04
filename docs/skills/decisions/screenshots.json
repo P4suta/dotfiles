@@ -1,0 +1,14 @@
+{
+  "revision": "66bebe7e5e4a998e906b526a8f2e4af03d3e7ef0061b48e9427a00a900124ab6",
+  "outcome": "implemented",
+  "reason": "The owner wants each user-visible change shown as a real screen in its PR or issue beside the D2 diagram. The skill names one capture command for each kind of screen, binds the shared freeze and shot-scraper pins, and publishes each capture through pr-workflow screenshot, which stores it on the repository's screenshots branch.",
+  "evidence": [
+    "home/dot_agents/skills/screenshots/SKILL.md",
+    "home/dot_agents/skills/screenshots/tools.toml",
+    "crates/pr-workflow/src/screenshot.rs",
+    "crates/pr-workflow/src/figure.rs",
+    "home/.chezmoidata/tools.toml",
+    "home/.chezmoidata/versions.toml"
+  ],
+  "revisit": null
+}

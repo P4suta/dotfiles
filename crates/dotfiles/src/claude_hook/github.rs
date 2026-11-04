@@ -424,6 +424,17 @@ fn target(arguments: &[String]) -> Result<Option<Target<'_>>> {
     {
         return Ok(None);
     }
+    // pr-workflow publishes stacks, so an agent may only read a stack or drop its local tracking.
+    if group == "stack" {
+        let rest = &arguments[index..];
+        let verb = rest.first().map(String::as_str);
+        ensure!(
+            matches!(verb, None | Some("help" | "--help" | "-h" | "view"))
+                || verb == Some("unstack") && rest.iter().any(|argument| argument == "--local"),
+            "GitHub command has no supported body contract"
+        );
+        return Ok(None);
+    }
     if !matches!(group.as_str(), "pr" | "issue") {
         ensure!(
             matches!(
@@ -907,10 +918,32 @@ mod tests {
             ],
             vec!["gh", "release", "view", "--repo", "oven-sh/bun"],
             vec!["gh", "release", "list", "--repo", "oven-sh/bun"],
+            vec!["gh", "stack", "view"],
+            vec!["gh", "stack", "--help"],
+            vec!["gh", "stack", "unstack", "--local", "60"],
         ] {
             let words: Vec<String> = arguments.iter().map(|word| (*word).to_owned()).collect();
             let bodies = collect(&words, None, None, None, false);
             assert!(bodies.is_empty(), "{arguments:?}: {bodies:?}");
+        }
+    }
+
+    #[test]
+    fn stack_commands_that_change_github_still_require_pr_workflow() {
+        for arguments in [
+            vec!["gh", "stack", "unstack", "60"],
+            vec!["gh", "stack", "push"],
+            vec!["gh", "stack", "submit"],
+            vec!["gh", "stack", "sync"],
+        ] {
+            let words: Vec<String> = arguments.iter().map(|word| (*word).to_owned()).collect();
+            assert!(
+                matches!(
+                    &collect(&words, None, None, None, false)[..],
+                    [Body::Unreadable(_)]
+                ),
+                "{arguments:?}"
+            );
         }
     }
 
