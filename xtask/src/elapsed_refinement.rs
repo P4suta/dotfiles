@@ -202,7 +202,7 @@ pub fn translate(source: &str) -> Result<String> {
     );
     scope(&file.items, false)?;
     require_functions(&file.items, CAMPAIGN_FUNCTION)?;
-    let timeout: syn::ItemConst = syn::parse_str("pub const TIMEOUT_SECONDS: u64 = 60;")?;
+    let timeout: syn::ItemConst = syn::parse_str("pub const TIMEOUT_SECONDS: u64 = 600;")?;
     ensure!(
         file.items
             .iter()
@@ -295,7 +295,7 @@ theorem ceiling_minimal (whole remainder actual : Nat)
   by_cases zero : remainder = 0 <;>
     simp [nativePostcondition, nanosPerMilli, zero] at post ⊢ <;> omega
 
-def campaignTimeout : Nat := 60
+def campaignTimeout : Nat := 600
 
 def campaignWaves (h p : Nat) : Nat :=
   h / p + (if h % p = 0 then 0 else 1)
