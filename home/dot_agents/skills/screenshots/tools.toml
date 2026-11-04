@@ -1,0 +1,4 @@
+[tools]
+"pr-workflow" = "latest"
+"freeze" = "0.2.2"
+"shot-scraper" = "1.12"
