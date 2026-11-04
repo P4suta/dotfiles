@@ -294,8 +294,25 @@ fn lefthook_drops_its_own_backup_stash_and_other_drops_stay_refused() {
         let stash = wrapper.run(&["stash", "push", "--message", message], None);
         assert!(stash.status.success(), "{}", text(&stash.stderr));
     }
-    let backup = wrapper.run(&["stash", "drop", "--quiet", "stash@{0}"], None);
-    assert!(backup.status.success(), "{}", text(&backup.stderr));
+    // Lefthook creates its backup and stores it with the bare message.
+    std::fs::write(repository.join("tracked"), "stored\n").unwrap();
+    let created = wrapper.run(&["stash", "create"], None);
+    assert!(created.status.success(), "{}", text(&created.stderr));
+    let stored = wrapper.run(
+        &[
+            "stash",
+            "store",
+            "-m",
+            "lefthook auto backup",
+            text(&created.stdout).trim(),
+        ],
+        None,
+    );
+    assert!(stored.status.success(), "{}", text(&stored.stderr));
+    for _ in 0..2 {
+        let backup = wrapper.run(&["stash", "drop", "--quiet", "stash@{0}"], None);
+        assert!(backup.status.success(), "{}", text(&backup.stderr));
+    }
     assert_eq!(
         last_record(&wrapper.run(&["stash", "drop", "--quiet", "stash@{0}"], None)).rule,
         "git.force",
