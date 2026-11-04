@@ -12,7 +12,8 @@ Keep owner-side service review and publication policy separate from the project'
 Keep the user's commit, push, PR comment, and approval boundaries.
 Never start a second independent model review or a cloud coding task to fetch findings.
 Use the authenticated PR importance assessment to select the required route.
-By default, `low` and `medium` require no CodeRabbit review, `high` requires the guarded CLI, and `critical` requires GitHub PR review.
+By default, `low`, `medium`, and `high` require no CodeRabbit review, and `critical` requires GitHub PR review.
+Run a guarded CLI review on an explicit request.
 The `pull-request` owner-local repository policy selects GitHub PR review for every level without changing the assessment.
 Use only the selected route.
 Keep existing supported findings regardless of a changed classification.
@@ -31,7 +32,7 @@ Exit code 75 means a guard refusal: report it and continue independent work with
 Never invoke `coderabbit-vendor`, install another CLI, edit or delete guard state, or raise limits to get around a refusal.
 Never schedule an automatic retry for the end of a window.
 
-For a required `high` review, use the guard's committed-review receipt command for the exact full merge-base commit and keep its signed private receipt.
+For a requested review of committed changes, use the guard's committed-review receipt command for the exact full merge-base commit and keep its signed private receipt.
 The publication gate verifies the original result and exact diff.
 A quota reservation or process exit alone proves no completed review.
 Don't publish raw review diagnostics or credentials in the PR body.
