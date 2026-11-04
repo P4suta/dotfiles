@@ -1,6 +1,7 @@
 //! The pull request workflow: issue-scoped preparation, creation, document edits, ready transitions, and stacked branches.
 
 mod context;
+mod current_checks;
 mod diagram;
 mod evidence;
 mod figure;
@@ -537,6 +538,9 @@ struct ReportedCheck {
     state: Option<String>,
     name: Option<String>,
     context: Option<String>,
+    /// The address of a check run, whose workflow job number names the run.
+    #[serde(default)]
+    details_url: Option<String>,
 }
 
 /// One rule of a branch's rulesets, of which only the required status checks matter here.
@@ -633,6 +637,7 @@ mod check_reports {
             state: None,
             name: name.map(str::to_owned),
             context: None,
+            details_url: None,
         }
     }
 
@@ -2154,7 +2159,12 @@ fn live_document(_github: &Github, target: &Target, pr: u64) -> Result<LiveDocum
         "--json".into(),
         "title,body,state,isDraft,statusCheckRollup,headRefOid,baseRefName,baseRefOid,labels,author,headRefName,headRepository,headRepositoryOwner,isCrossRepository".into(),
     ]);
-    serde_json::from_str(&gh(&args)?).context("invalid gh PR document")
+    let mut live: LiveDocument =
+        serde_json::from_str(&gh(&args)?).context("invalid gh PR document")?;
+    if let Some(head) = &live.head_ref_oid {
+        current_checks::retain_current(&target.repo, head, &mut live.status_check_rollup);
+    }
+    Ok(live)
 }
 
 fn start_implementation(
@@ -2790,7 +2800,14 @@ fn merge_view(target: &Target, pr: u64) -> Result<MergeView> {
         "--json".into(),
         "title,body,state,isDraft,headRefOid,baseRefName,baseRefOid,labels,author,mergeable,mergeStateStatus,statusCheckRollup,closingIssuesReferences,headRefName,headRepository,headRepositoryOwner,isCrossRepository".into(),
     ]);
-    serde_json::from_str(&gh(&args)?).context("invalid gh PR merge state")
+    let mut view: MergeView =
+        serde_json::from_str(&gh(&args)?).context("invalid gh PR merge state")?;
+    current_checks::retain_current(
+        &target.repo,
+        &view.head_ref_oid,
+        &mut view.status_check_rollup,
+    );
+    Ok(view)
 }
 
 /// The merge state of `view`.

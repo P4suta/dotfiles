@@ -3349,7 +3349,9 @@ fn assert_bounded_authentication_reads(log: &str) {
     let count = |prefix: &str| calls.iter().filter(|call| call.starts_with(prefix)).count();
     let signers = count("api\nusers/P4suta/ssh_signing_keys?per_page=100\n");
     let branch = count("api\nrepos/P4suta/project/branches/main\n");
-    let threads = count("api\ngraphql\n");
+    let threads = count("api\ngraphql\n--hostname\ngithub.com\n--include\n");
+    // Each view reads the check suites of its head once.
+    let suites = count("api\ngraphql\n--hostname\ngithub.com\n--input\n");
     let repository = count("api\nrepos/P4suta/project\n");
     let views = count("pr\nview\n");
     assert!(
@@ -3357,11 +3359,15 @@ fn assert_bounded_authentication_reads(log: &str) {
         "bounded assessment reads: {log}"
     );
     assert!(
-        views <= VIEW_READ_LIMIT && repository <= REPOSITORY_READ_LIMIT,
+        views <= VIEW_READ_LIMIT && suites <= views && repository <= REPOSITORY_READ_LIMIT,
         "bounded source readbacks: {log}"
     );
-    let assessment_reads =
-        signers + branch + threads + repository.saturating_sub(1) + views.saturating_sub(1);
+    let assessment_reads = signers
+        + branch
+        + threads
+        + suites
+        + repository.saturating_sub(1)
+        + views.saturating_sub(1);
     assert!(
         calls.len() - assessment_reads <= LEGACY_READ_LIMIT,
         "bounded original workflow reads: {log}"
@@ -3965,7 +3971,7 @@ fn repository_pr_policy_merges_only_with_current_review_and_never_inserts_suppre
 }
 
 #[test]
-fn repository_pr_policy_preserves_an_earlier_cli_route_until_history_is_carried() -> Result<()> {
+fn a_high_pr_leaves_no_cli_history_for_a_later_repository_pr_policy() -> Result<()> {
     let mut fixture = Fixture::new(BODY)?;
     fixture.level = "high";
     let output = fixture
@@ -3994,11 +4000,12 @@ fn repository_pr_policy_preserves_an_earlier_cli_route_until_history_is_carried(
                 .args(["--title", "fix: preserve edits", "--body-file"])
                 .arg(&fixture.body);
         }
+        // A high assessment selects no review, so a later PR review policy has no CLI history to carry.
         let output = command.output()?;
-        assert!(!output.status.success());
         assert!(
-            String::from_utf8_lossy(&output.stderr)
-                .contains("prior high review history must be carried")
+            !String::from_utf8_lossy(&output.stderr)
+                .contains("prior high review history must be carried"),
+            "{operation}"
         );
     }
     let record: serde_json::Value = serde_json::from_slice(&fs::read(
@@ -4007,7 +4014,7 @@ fn repository_pr_policy_preserves_an_earlier_cli_route_until_history_is_carried(
             .path()
             .join(".local/state/pr-workflow/assessments/owner__project/pr-17.json"),
     )?)?;
-    assert_eq!(record["always_pr"], false);
+    assert_eq!(record["always_pr"], true);
     Ok(())
 }
 
@@ -5367,6 +5374,52 @@ fn ready_checks_live_contents_and_draft_state_before_mutation() -> Result<()> {
             .status
             .success()
     );
+    Ok(())
+}
+
+#[test]
+fn ready_drops_a_check_run_that_a_newer_run_of_the_same_check_replaced() -> Result<()> {
+    // Run 101 of the same workflow, event, and check replaced run 100, as a cancelled duplicate run is.
+    let suites = r#"{"data":{"repository":{"object":{"checkSuites":{"pageInfo":{"hasNextPage":false},"nodes":[
+        {"databaseId":1,"app":{"databaseId":15368},"workflowRun":{"databaseId":100,"event":"pull_request","workflow":{"databaseId":7}},"checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":10,"name":"Checks"}]}},
+        {"databaseId":2,"app":{"databaseId":15368},"workflowRun":{"databaseId":101,"event":"pull_request","workflow":{"databaseId":7}},"checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":20,"name":"Checks"}]}}]}}}}}"#;
+    let rollup = |older: &str, newer: &str| {
+        format!(
+            r#"[{{"status":"COMPLETED","conclusion":"{older}","name":"Checks","detailsUrl":"https://github.com/P4suta/project/actions/runs/100/job/10"}},{{"status":"COMPLETED","conclusion":"{newer}","name":"Checks","detailsUrl":"https://github.com/P4suta/project/actions/runs/101/job/20?pr=17"}}]"#
+        )
+    };
+    for (checks, suites, accepted) in [
+        (rollup("FAILURE", "SUCCESS"), Some(suites), true),
+        (rollup("CANCELLED", "SUCCESS"), Some(suites), true),
+        (rollup("SUCCESS", "FAILURE"), Some(suites), false),
+        (rollup("FAILURE", "SUCCESS"), None, false),
+        (
+            rollup("FAILURE", "SUCCESS"),
+            Some(&*suites.replace(
+                "\"hasNextPage\":false},\"nodes\":[{\"databaseId\":20",
+                "\"hasNextPage\":true},\"nodes\":[{\"databaseId\":20",
+            )),
+            false,
+        ),
+    ] {
+        let fixture = Fixture::new(BODY)?;
+        let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
+        let mut command = fixture.command("ready")?;
+        command
+            .args(["--pr", "17"])
+            .env("GH_FIXTURE_VIEW", view.to_string())
+            .env("GH_FIXTURE_CHECKS", &checks);
+        if let Some(suites) = suites {
+            command.env("GH_FIXTURE_SUITES", suites);
+        }
+        let output = command.output()?;
+        assert_eq!(
+            output.status.success(),
+            accepted,
+            "{checks} {suites:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     Ok(())
 }
 

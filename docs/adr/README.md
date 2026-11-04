@@ -127,9 +127,11 @@
 | [2026-10-26 Import unborn artifacts after same-issue selections](import-unborn-artifacts-after-same-issue-selections.md) | proposed |  |
 | [2026-10-26 Require PR review by repository policy](require-pr-review-by-repository-policy.md) | proposed |  |
 | [2026-10-29 Check agent-written comments at write time](check-agent-written-comments-at-write-time.md) | proposed |  |
+| [2026-10-29 Compare agent stops with request snapshots](compare-agent-stops-with-request-snapshots.md) | proposed |  |
 | [2026-10-30 Bind official tarballs to verified update records](bind-official-tarballs-to-verified-update-records.md) | proposed |  |
 | [2026-11-02 Carry assessments through base update merges that keep the hunks](carry-assessments-through-base-update-merges.md) | accepted |  |
 | [2026-11-03 Carry issue contexts through leased restacks](carry-issue-contexts-through-leased-restacks.md) | accepted |  |
 | [2026-11-03 Keep the previous build running after a failed reinstall](keep-the-previous-build-running-after-a-failed-reinstall.md) | accepted |  |
 | [2026-11-03 Give each generated SSH host its own login](per-host-ssh-logins.md) | accepted |  |
 | [2026-11-04 Draw personal PRs and issues as monochrome D2 images](draw-personal-prs-and-issues-as-monochrome-d2-images.md) | accepted |  |
+| [2026-11-04 Require no CLI review for high PRs](require-no-cli-review-for-high-prs.md) | accepted |  |

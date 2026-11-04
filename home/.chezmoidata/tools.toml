@@ -32,6 +32,9 @@ common = [
   "just",
 ]
 
+[shared_tools.skip.windows]
+"pipx:shot-scraper" = "PyYAML ships no wheel for the Windows Python, and its source build needs the Microsoft C++ Build Tools that the profile doesn't install"
+
 [platforms.linux.mise]
 jobs = 2
 

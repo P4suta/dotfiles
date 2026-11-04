@@ -3736,6 +3736,34 @@ fn reject_losing_hook_input() { assert!(!takes_input(Gate::RepositoryLefthook));
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/check_selection_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_the_newest_run_as_superseded() {
+    let older = production::Run {
+        identity: Some(production::Identity { app: 1, workflow: Some(1), event: None }),
+        name: "a".into(),
+        order: 1,
+        id: 1,
+    };
+    let newer = production::Run { order: 2, id: 2, ..older.clone() };
+    assert!(production::superseded(&newer, &[older, newer.clone()]));
+}
+#[kani::proof]
+fn reject_another_check_superseding_a_run() {
+    let older = production::Run {
+        identity: Some(production::Identity { app: 1, workflow: Some(1), event: None }),
+        name: "a".into(),
+        order: 1,
+        id: 1,
+    };
+    let other = production::Run { name: "b".into(), order: 2, id: 2, ..older.clone() };
+    assert!(production::superseded(&older, &[older.clone(), other]));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/cycle_rules.rs"
 probes = '''
 #[kani::proof]

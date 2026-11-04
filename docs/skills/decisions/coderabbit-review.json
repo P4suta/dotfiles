@@ -1,8 +1,11 @@
 {
-  "revision": "8109490e8bebfb7f7c0a92037739da1b554ef08bcd9f3abd0997624894425127",
+  "revision": "195a71464995b26c8e3a751b7c71e48e8d5e2563dd9e6a96f8717518c6cd5d36",
   "outcome": "implemented",
-  "reason": "Separate owner-side service review from project verification and leave executor and allowance policy in machine-local configuration.\nHonor the repository PR policy without escalating importance or substituting CLI evidence.\nRequire actual current-head PR review and preserve supported historical findings and owner-controlled pauses.\nThe CodeRabbit CLI has no review allowance, so the guard no longer queries vendor usage before a CLI review and keeps its local limits and its refusal of paid reviews.",
+  "reason": "Per-PR CLI reviews cost more time than they returned, so high assessments now select no review and a guarded CLI review runs on an explicit request. The guard restores its pinned runtime when the CLI replaces it.",
   "evidence": [
+    "crates/rules/src/review_routing_rules.rs",
+    "docs/adr/require-no-cli-review-for-high-prs.md",
+    "crates/coderabbit-guard/src/lib.rs",
     "home/dot_agents/skills/coderabbit-review/SKILL.md",
     "home/dot_agents/skills/pull-request/references/importance.md",
     "docs/adr/route-coderabbit-by-current-pr-importance.md",

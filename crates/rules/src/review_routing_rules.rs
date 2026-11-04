@@ -65,8 +65,7 @@ pub struct SevereRisk {
 #[must_use]
 pub const fn route(level: ReviewLevel) -> ReviewRoute {
     match level {
-        ReviewLevel::Low | ReviewLevel::Medium => ReviewRoute::None,
-        ReviewLevel::High => ReviewRoute::Cli,
+        ReviewLevel::Low | ReviewLevel::Medium | ReviewLevel::High => ReviewRoute::None,
         ReviewLevel::Critical => ReviewRoute::Pr,
     }
 }
@@ -263,9 +262,12 @@ mod proofs {
         let actual = route(level);
         assert_eq!(
             actual == ReviewRoute::None,
-            matches!(level, ReviewLevel::Low | ReviewLevel::Medium)
+            matches!(
+                level,
+                ReviewLevel::Low | ReviewLevel::Medium | ReviewLevel::High
+            )
         );
-        assert_eq!(actual == ReviewRoute::Cli, level == ReviewLevel::High);
+        assert_ne!(actual, ReviewRoute::Cli);
         assert_eq!(actual == ReviewRoute::Pr, level == ReviewLevel::Critical);
     }
 

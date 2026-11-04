@@ -35,6 +35,7 @@ pub mod boundary_rules;
 pub mod bounded_rules;
 pub mod cfg_rules;
 pub mod change_rules;
+pub mod check_selection_rules;
 pub mod contrast_rules;
 pub mod copyedit_rules;
 pub mod cycle_rules;
