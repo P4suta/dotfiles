@@ -136,7 +136,7 @@
     {"mode":"0755","path":".agents/skills/pull-request/references","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/pull-request/references/importance.md","sha256":"c616a9b6452cea91d881872847755bf4d2eef97dbee84d3da9056be866580de4","type":"file"},
     {"mode":"0644","path":".agents/skills/pull-request/references/workflow.md","sha256":"91d0d5dbbc04476bc601a2258e048f22d273e3ffa6ae5cc9a1212363590d02b4","type":"file"},
-    {"mode":"0644","path":".agents/skills/pull-request/tools.toml","sha256":"72f52caa4d254cae605d9b8be7fe4779bf16b71ee39bebf86c59e6f4e1fb2c78","type":"file"},
+    {"mode":"0644","path":".agents/skills/pull-request/tools.toml","sha256":"67f34a23960a7542b08f504b8d5fc2ca1c3e4da5fd1eec3a0d21a934b5b10aae","type":"file"},
     {"mode":"0755","path":".agents/skills/registry-publishing","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/registry-publishing/SKILL.md","sha256":"0604ac88fbee219e7fd9302a43a9d83a7b02802c83a769eda96f3954facf43f4","type":"file"},
     {"mode":"0755","path":".agents/skills/release-evidence","sha256":null,"type":"dir"},
