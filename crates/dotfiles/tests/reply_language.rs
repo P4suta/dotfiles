@@ -118,6 +118,15 @@ fn a_japanese_reply_follows_the_installed_word_rules() -> Result<()> {
         json!({}),
         "the conjunction and code stay allowed"
     );
+    assert_eq!(
+        stop_with_rules(
+            "\u{898b}\u{3066}\u{3044}\u{305f}\u{3060}\u{3051}\u{308c}\u{3070}\u{7d9a}\u{3051}\u{307e}\u{3059}\u{3002}\n\u{6c7a}\u{3081}\u{3066}\u{3044}\u{305f}\u{3060}\u{3051}\u{307e}\u{3059}\u{304b}\u{3002}"
+        )?,
+        json!({}),
+        "the polite verb stays allowed"
+    );
+    let past = stop_with_rules("\u{66f8}\u{3044}\u{305f}\u{3060}\u{3051}\u{3067}\u{3059}\u{3002}")?;
+    assert_eq!(past["decision"], "block", "{past}");
     Ok(())
 }
 
