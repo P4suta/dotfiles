@@ -1,8 +1,10 @@
 {
-  "revision": "b9f7f2c940ac9abc2019da6b73ccd55d06214b519ba8d60a6e799adfcdffb00d",
+  "revision": "56f7e91823e6813054abf0e017011aaca54058edc8d7b9324541ad422ef05cb6",
   "outcome": "implemented",
-  "reason": "The skill tool inventory now covers GitHub CLI 2.103.3 and gh-stack v0.3.0 beside the shared v0.2.1 pin. pr-workflow runs gh-stack with closed standard input, so a v0.3.0 question before it drops the commits of an unmerged old base fails the command instead of waiting. The workflows and review safeguards are unchanged, and this version metadata update does not claim a current-source verification run.",
+  "reason": "The skill now tells an agent to draw each personal issue and PR in D2 and paste the image line that pr-workflow diagram prints, and its tool inventory binds D2 0.9.0. pr-workflow refuses a newly written personal body without that image, renders the source with a black-and-white theme, and stores the image on the repository's diagrams branch. Ready and merge keep accepting an existing body, so open PRs still land.",
   "evidence": [
+    "crates/pr-workflow/src/diagram.rs",
+    "docs/adr/draw-personal-prs-and-issues-as-monochrome-d2-images.md",
     "crates/pr-workflow/src/link_issue.rs",
     "docs/adr/link-issues-with-repository-owner-authority.md",
     "crates/pr-workflow/src/work.rs",
@@ -63,5 +65,10 @@
     "docs/adr/require-pr-review-by-repository-policy.md",
     "crates/pr-workflow/src/evidence.rs"
   ],
-  "revisit": null
+  "revisit": null,
+  "size": {
+    "outcome": "keep",
+    "reason": "The four added lines name the command, the refusing commands, the shapes to draw, and the source limits, which an agent needs before it writes a body.",
+    "revisit": null
+  }
 }

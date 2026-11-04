@@ -1,6 +1,7 @@
 //! The pull request workflow: issue-scoped preparation, creation, document edits, ready transitions, and stacked branches.
 
 mod context;
+mod diagram;
 mod evidence;
 mod link_issue;
 mod local;
@@ -259,6 +260,18 @@ pub enum Commands {
         #[command(subcommand)]
         action: StackAction,
     },
+    /// Render a D2 source in black and white, store it on the personal repository's `diagrams` branch, and print the image line for a PR or issue body.
+    Diagram {
+        /// The exact personal GitHub repository that stores the image.
+        #[arg(long)]
+        repo: String,
+        /// The D2 source, which leaves configuration and colors to this command.
+        #[arg(long)]
+        source: PathBuf,
+        /// The image description a reader gets in place of the diagram.
+        #[arg(long)]
+        alt: String,
+    },
     /// Check, create, or edit an issue through the same document and writing checks.
     Issue {
         #[command(subcommand)]
@@ -375,6 +388,7 @@ impl Commands {
             Self::PruneMerged { .. } => "prune-merged",
             Self::Stack { .. } => "stack",
             Self::Issue { .. } => "issue",
+            Self::Diagram { .. } => "diagram",
             Self::Local { .. } => "local",
         }
     }
@@ -1278,6 +1292,42 @@ fn written_to_standard(
         &document.title,
         &document.body,
     )
+}
+
+/// Refuses a newly written title or body that fails the personal writing standard or, in a personal repository, shows no stored diagram.
+/// Ready and merge read an existing body through [`written_to_standard`] alone, so a PR written before the diagram rule still lands.
+fn authored_to_standard(
+    destination: Destination,
+    repo: &str,
+    kind: prose::Publication,
+    document: &ValidatedDocument,
+) -> Result<()> {
+    written_to_standard(destination, kind, document)?;
+    if standard_applies(destination.personal, destination.fork)
+        && !diagram::shown(repo, &document.body)
+    {
+        return Err(diagram::missing(repo).into());
+    }
+    Ok(())
+}
+
+/// Stores a diagram for a personal non-fork repository and prints its image line.
+fn draw(repo: &str, source: &Path, alt: &str) -> Result<()> {
+    let github = Github::connect()?;
+    let destination = destination(&github, repo)?;
+    require(
+        standard_applies(destination.personal, destination.fork),
+        || {
+            Refusal::new(
+                "pr.diagram",
+                "only a personal non-fork repository stores diagrams on its own branch",
+                "draw the change in the body of a repository that isn't personal without this command",
+            )
+            .evidence(format!("repository: {repo}"))
+        },
+    )?;
+    println!("{}", diagram::publish(repo, source, alt)?);
+    Ok(())
 }
 
 fn offline_destination(repo: &str) -> Result<Destination> {
@@ -2197,6 +2247,7 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
         Commands::PruneMerged { target, dry_run } => prune_merged(&target, dry_run)?,
         Commands::Stack { action } => stack(action, rerun)?,
         Commands::Issue { action } => issue(action)?,
+        Commands::Diagram { repo, source, alt } => draw(&repo, &source, &alt)?,
         Commands::Local { action } => local::run(action)?,
     }
     Ok(())
@@ -2214,7 +2265,7 @@ fn check_command(
         return check_live(&target, pr, r#final, rerun);
     }
     let destination = offline_destination(&target.repo)?;
-    let (_, document) = read_document(
+    let (target, document) = read_document(
         DocumentArgs {
             target,
             title: title.context("title required")?,
@@ -2222,7 +2273,7 @@ fn check_command(
         },
         r#final,
     )?;
-    written_to_standard(destination, PULL_REQUEST, &document)?;
+    authored_to_standard(destination, &target.repo, PULL_REQUEST, &document)?;
     println!(
         "Offline document format accepted; no issue, source, classification, or review credit"
     );
@@ -2397,7 +2448,7 @@ fn create(
         || Ok((true, Exclusion::None)),
     )?;
     let destination = destination(&github, &target.repo)?;
-    written_to_standard(destination, PULL_REQUEST, &document)?;
+    authored_to_standard(destination, &target.repo, PULL_REQUEST, &document)?;
     let issue = inspect_issue(
         &github,
         &target,
@@ -2461,7 +2512,7 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
         },
     )?;
     let destination = destination(&github, &target.repo)?;
-    written_to_standard(destination, PULL_REQUEST, &document)?;
+    authored_to_standard(destination, &target.repo, PULL_REQUEST, &document)?;
     let issue = inspect_issue(
         &github,
         &target,
@@ -3730,7 +3781,12 @@ fn issue(action: IssueAction) -> Result<()> {
     let (document, number) = match action {
         IssueAction::Check { document } => {
             let validated = validate_issue(&document)?;
-            written_to_standard(offline_destination(&document.repo)?, ISSUE, &validated)?;
+            authored_to_standard(
+                offline_destination(&document.repo)?,
+                &document.repo,
+                ISSUE,
+                &validated,
+            )?;
             println!("Issue document accepted");
             return Ok(());
         }
@@ -3739,7 +3795,12 @@ fn issue(action: IssueAction) -> Result<()> {
     };
     let validated = validate_issue(&document)?;
     let github = Github::connect()?;
-    written_to_standard(destination(&github, &document.repo)?, ISSUE, &validated)?;
+    authored_to_standard(
+        destination(&github, &document.repo)?,
+        &document.repo,
+        ISSUE,
+        &validated,
+    )?;
     let mut args: Vec<OsString> = vec!["issue".into()];
     match number {
         Some(number) => args.extend(["edit".into(), number.to_string().into()]),
