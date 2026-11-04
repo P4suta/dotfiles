@@ -129,3 +129,4 @@
 | [2026-11-03 Carry issue contexts through leased restacks](carry-issue-contexts-through-leased-restacks.md) | accepted |  |
 | [2026-11-03 Keep the previous build running after a failed reinstall](keep-the-previous-build-running-after-a-failed-reinstall.md) | accepted |  |
 | [2026-11-03 Give each generated SSH host its own login](per-host-ssh-logins.md) | accepted |  |
+| [2026-11-04 Draw personal PRs and issues as monochrome D2 images](draw-personal-prs-and-issues-as-monochrome-d2-images.md) | accepted |  |

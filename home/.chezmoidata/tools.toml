@@ -18,6 +18,7 @@ common = [
   "golangci-lint",
   "cargo:cargo-semver-checks",
   "github:github/gh-stack",
+  "aqua:terrastruct/d2",
   "shellcheck",
   "shfmt",
   "ruff",

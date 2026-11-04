@@ -2393,7 +2393,9 @@ const PAUSE_MARKER: &str = "<!-- coderabbit-pause -->";
 /// The checkout file where an earlier release wrote issue contexts, which grants no authority.
 const LEGACY_TRANSPORT: &str = ".pr-workflow/contexts.json";
 
-const BODY: &str = "## Why\nAvoid losing edits.\n\n## Changes\nPreserve the original input.\n\n## Validation\nThe targeted regression test passed.\n";
+/// A described diagram that the personal fixture repository stores, which a personal body shows.
+const DIAGRAM: &str = "![Flow of the preserved edits](https://github.com/P4suta/project/blob/diagrams/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.svg?raw=true)";
+const BODY: &str = "## Why\nAvoid losing edits.\n\n![Flow of the preserved edits](https://github.com/P4suta/project/blob/diagrams/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.svg?raw=true)\n\n## Changes\nPreserve the original input.\n\n## Validation\nThe targeted regression test passed.\n";
 
 /// Whether the command names `--issue 23`, the issue GitHub returns, what follows [`BODY`] in the document, and whether publication proceeds.
 type Publication = (bool, Option<&'static str>, &'static str, bool);
@@ -2564,7 +2566,9 @@ fn global_owner_identity_and_forks_preserve_upstream_rules() -> Result<()> {
 
 #[test]
 fn checked_preparation_does_not_publish_and_generation_cannot_skip_issues() -> Result<()> {
-    let mut fixture = Fixture::new("Closes #23.\n@coderabbitai summary\n")?;
+    let mut fixture = Fixture::new(&format!(
+        "Closes #23.\n\n{DIAGRAM}\n\n@coderabbitai summary\n"
+    ))?;
     fixture.level = "critical";
     for issue in [false, true] {
         let mut command = fixture.personal_command("start")?;
@@ -3424,7 +3428,7 @@ fn attribution_lines_are_refused_by_name_and_the_authors_own_lines_are_admitted(
             let stderr = String::from_utf8_lossy(&output.stderr);
             assert!(!output.status.success(), "{action}: {form}");
             assert!(
-                stderr.contains("body line 10") && stderr.contains(form),
+                stderr.contains("body line 12") && stderr.contains(form),
                 "{action}: {stderr}"
             );
             assert!(
@@ -3600,7 +3604,22 @@ fn issue_bodies_pass_the_checker_before_gh_publishes_them() -> Result<()> {
         .output()?;
     assert!(!output.status.success());
     assert!(!unfinished.log.try_exists()?);
-    let accepted = Fixture::new("The parser keeps every edit.\n")?;
+    let undrawn = Fixture::new("The parser keeps every edit.\n")?;
+    for (action, extra) in [
+        ("check", vec![]),
+        ("create", vec![]),
+        ("edit", vec!["--number", "23"]),
+    ] {
+        let output = undrawn
+            .personal_command(&format!("issue {action}"))?
+            .args(["--title", "Keep edits", "--body-file"])
+            .arg(&undrawn.body)
+            .args(&extra)
+            .output()?;
+        assert_eq!(rule(&output), "pr.diagram", "{action}");
+    }
+    assert!(!undrawn.log.try_exists()? || !undrawn.log()?.contains("\nissue\n"));
+    let accepted = Fixture::new(&format!("The parser keeps every edit.\n\n{DIAGRAM}\n"))?;
     for (action, extra) in [
         ("check", vec![]),
         ("create", vec![]),
@@ -6533,7 +6552,10 @@ fn mutations(log: &str) -> Vec<String> {
 #[test]
 fn independent_prs_merge_in_order_through_update_checks_ready_and_the_verified_head() -> Result<()>
 {
-    let closed = format!("{BODY}\nCloses #23.\n");
+    // Ready and merge accept a live body written before the diagram rule.
+    let undrawn = BODY.replace(&format!("{DIAGRAM}\n\n"), "");
+    assert_ne!(undrawn, BODY);
+    let closed = format!("{undrawn}\nCloses #23.\n");
     let excluded = format!("{closed}\n@coderabbitai ignore\n");
     let fixture = Fixture::new(BODY)?;
     fixture.pause("paused-pr")?;
