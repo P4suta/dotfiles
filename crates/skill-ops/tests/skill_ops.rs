@@ -852,8 +852,8 @@ fn a_skill_that_repeats_a_pinned_version_or_the_proof_hang_cap_is_refused() -> R
     for (text, pin) in [
         ("Run Kani 0.68.0 on every harness.\n", "0.68.0"),
         (
-            "An incomplete harness reaches its 60-second hang cap.\n",
-            "60-second",
+            "An incomplete harness reaches its 600-second hang cap.\n",
+            "600-second",
         ),
         ("Build with Rust 1.99.0.\n", "1.99.0"),
     ] {
