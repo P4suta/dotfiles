@@ -253,9 +253,11 @@ fn a_review_runs_after_its_reservation_and_the_local_limit_stops_it_before_launc
     fs::write(&ledger, "").unwrap();
     assert_eq!(execute_reserved(&ledger, 100, || Ok(23)).unwrap(), 23);
     assert_eq!(fs::read_to_string(&ledger).unwrap(), "100\n");
-    let full: String = (1..=HOURLY_LIMIT)
-        .map(|offset| format!("{}\n", 1_000 + offset as u64))
-        .collect();
+    let full = (1..=HOURLY_LIMIT).fold(String::new(), |mut text, offset| {
+        text.push_str(&(1_000 + offset as u64).to_string());
+        text.push('\n');
+        text
+    });
     fs::write(&ledger, &full).unwrap();
     assert!(
         execute_reserved(&ledger, 1_000 + HOURLY_LIMIT as u64 + 1, || panic!(
