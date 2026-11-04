@@ -69,6 +69,20 @@ pub fn upgrade<R: Runner>(
     result
 }
 
+/// Fails a run that skipped its source update, because a skip applies nothing and a caller reads success as an applied profile.
+///
+/// # Errors
+/// Returns the skip reason when the run skipped the source update.
+pub fn applied(decision: Decision) -> Result<()> {
+    match decision {
+        Decision::Move => Ok(()),
+        Decision::Skip(reason) => anyhow::bail!(
+            "the upgrade applied nothing because it skipped the source update: {}",
+            skip_reason(reason)
+        ),
+    }
+}
+
 fn synchronize<R: Runner>(
     config: &Path,
     home: &Path,
@@ -224,5 +238,19 @@ mod tests {
         drop(duplicate);
         drop(next);
         Ok(())
+    }
+
+    #[test]
+    fn only_a_moved_source_counts_as_an_applied_upgrade() {
+        assert!(applied(Decision::Move).is_ok());
+        for (reason, cause) in [
+            (SkipReason::Dirty, "dirty working tree or index"),
+            (SkipReason::OffMain, "off main"),
+            (SkipReason::Diverged, "diverged from origin/main"),
+            (SkipReason::FetchFailed, "fetch failed"),
+        ] {
+            let error = applied(Decision::Skip(reason)).expect_err("a skip applies nothing");
+            assert!(error.to_string().contains(cause), "{error}");
+        }
     }
 }

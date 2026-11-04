@@ -1831,7 +1831,7 @@ fn require_current_source(source: &platform::source_identity::Checked) -> Result
     source.require_current().map_err(source_identity_error)
 }
 
-/// Validate an explicitly selected issue in a destination with a known personal scope.
+/// Validate an explicitly selected open issue in a destination with a known personal scope.
 /// `rerun` names the refused command, which a body-file refusal repeats after the edit.
 fn inspect_issue(
     github: &Github,
@@ -1839,6 +1839,19 @@ fn inspect_issue(
     destination: Destination,
     body: Option<(&str, BodySource)>,
     rerun: &str,
+) -> Result<IssueGate> {
+    inspect_issue_for(github, target, destination, body, rerun, false)
+}
+
+/// Validate an explicitly selected issue, and admit a closed one only for a merged PR whose body still closes it.
+/// A merged PR closes its issue, so a correction to its document names the closed issue.
+fn inspect_issue_for(
+    github: &Github,
+    target: &Target,
+    destination: Destination,
+    body: Option<(&str, BodySource)>,
+    rerun: &str,
+    merged: bool,
 ) -> Result<IssueGate> {
     target.conventional_required()?;
     let Some(number) = target.issue else {
@@ -1850,12 +1863,12 @@ fn inspect_issue(
             && issue
                 .html_url
                 .eq_ignore_ascii_case(&format!("{GITHUB}/{}/issues/{number}", target.repo))
-            && issue.state == "open"
+            && (issue.state == "open" || merged && issue.state == "closed" && body.is_some())
             && issue.pull_request.is_none(),
         || {
             Refusal::new(
                 "pr.issue",
-                "--issue must identify an open issue in the exact destination, not a PR",
+                "--issue must identify an open issue in the exact destination, or the closed issue that a merged PR closes, not a PR",
                 command(&[
                     "gh",
                     "issue",
@@ -2557,12 +2570,13 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     )?;
     let destination = destination(&github, &target.repo)?;
     authored_to_standard(destination, &target.repo, PULL_REQUEST, &document)?;
-    let issue = inspect_issue(
+    let issue = inspect_issue_for(
         &github,
         &target,
         destination,
         Some((&document.body, BodySource::File(&body_file))),
         rerun,
+        live.state == "MERGED",
     )?;
     planned(
         Operation::Edit,

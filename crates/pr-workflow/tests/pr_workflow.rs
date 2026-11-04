@@ -5497,6 +5497,52 @@ fn a_push_between_the_read_and_ready_returns_the_pr_to_draft() -> Result<()> {
 }
 
 #[test]
+fn a_merged_pr_document_takes_corrections_against_the_issue_it_closed() -> Result<()> {
+    let body = format!("{BODY}\nCloses #23.\n");
+    for (state, accepted) in [("MERGED", true), ("OPEN", false)] {
+        let fixture = Fixture::new(&body)?;
+        let branch = git(fixture.directory.path(), &["branch", "--show-current"])?;
+        let output = fixture
+            .personal_command("edit")?
+            .args(["--title", "fix: preserve edits", "--body-file"])
+            .arg(&fixture.body)
+            .args(["--pr", "17", "--issue", "23"])
+            .env(
+                "GH_FIXTURE_ISSUE",
+                serde_json::json!({
+                    "number":23,"title":"Preserve edits","body":"The original input must survive edits.",
+                    "state":"closed","html_url":"https://github.com/P4suta/project/issues/23"
+                })
+                .to_string(),
+            )
+            .env(
+                "GH_FIXTURE_VIEW",
+                serde_json::json!({
+                    "title":"fix: preserve edits", "body":body,
+                    "state":state, "isDraft":false,
+                    "author":{"login":"P4suta","is_bot":false},
+                    "headRefName":branch, "headRepository":{"name":"project"},
+                    "headRepositoryOwner":{"login":"P4suta"},
+                    "isCrossRepository":false
+                })
+                .to_string(),
+            )
+            .output()?;
+        assert_eq!(
+            output.status.success(),
+            accepted,
+            "{state}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(fixture.log()?.contains("\nedit\n17\n"), accepted, "{state}");
+        if !accepted {
+            assert_eq!(refusal(&output)["rule"], "pr.issue");
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn the_repository_owner_can_assess_a_bot_pull_request() -> Result<()> {
     let body = format!("{BODY}\nCloses #23.\n");
     let fixture = Fixture::new(&body)?;

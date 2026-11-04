@@ -778,7 +778,7 @@ fn clean_domyjob(context: &TemplateData, runner: &mut impl Runner) {
 }
 
 fn upgrade(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
-    crate::source_sync::upgrade(
+    let decision = crate::source_sync::upgrade(
         &context.config,
         &context.home,
         runner,
@@ -796,7 +796,7 @@ fn upgrade(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
             tools(&current, runner, true)
         },
     )?;
-    Ok(())
+    crate::source_sync::applied(decision)
 }
 
 fn tools(context: &TemplateData, runner: &mut impl Runner, upgrade: bool) -> Result<()> {
