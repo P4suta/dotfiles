@@ -1,8 +1,8 @@
 use coderabbit_guard::review_rules::{budget, within_budget};
 use coderabbit_guard::{
-    DAY_MS, HOUR_MS, HOURLY_LIMIT, Invocation, PROBE_GAP_MS, PauseScope, check_budget, check_usage,
-    classify, execute_admitted, execute_probe, execute_reserved, install, reserve,
-    review_directory, usage_query, validate_policy,
+    DAY_MS, HOUR_MS, HOURLY_LIMIT, Invocation, PROBE_GAP_MS, PauseScope, check_budget, classify,
+    execute_admitted, execute_probe, execute_reserved, install, reserve, review_directory,
+    usage_query, validate_policy,
 };
 use std::fs;
 
@@ -120,51 +120,6 @@ fn rolling_hour_daily_budget_and_clock_rollback_fail_closed() {
     assert!(check_budget(&records, DAY_MS + 100).is_ok());
     assert!(check_budget(&[100], 99).is_err());
     assert!(check_budget(&[100, 1], 99).is_err());
-}
-
-const USAGE: &str = r#"{"type":"status","phase":"usage","status":"complete","organization":"P4suta","includedReviews":{"state":"available","repository":"P4suta/dotfiles","fullCapacityInMs":0,"limit":10,"remaining":10,"rollingWindowMs":3600000},"billingPeriod":{"state":"available","scope":"user","usageBillingStatus":"inactive","user":"P4suta","reviewsCount":0}}"#;
-
-#[test]
-fn only_known_within_budget_with_inactive_paid_usage_is_accepted() {
-    assert!(check_usage(USAGE, "P4suta").is_ok());
-    assert!(check_usage(USAGE, "other").is_err());
-    assert!(
-        check_usage(
-            &USAGE.replace("\"user\":\"P4suta\"", "\"user\":\"other\""),
-            "P4suta"
-        )
-        .is_err()
-    );
-    for (from, to) in [
-        ("\"remaining\":10", "\"remaining\":0"),
-        ("\"remaining\":10", "\"remaining\":1"),
-        ("\"remaining\":10", "\"remaining\":2"),
-        ("\"remaining\":10", "\"remaining\":3"),
-        ("\"remaining\":10", "\"remaining\":11"),
-        ("\"limit\":10", "\"limit\":2"),
-        ("\"inactive\"", "\"active\""),
-        ("\"state\":\"available\"", "\"state\":\"unavailable\""),
-        (
-            "\"rollingWindowMs\":3600000",
-            "\"rollingWindowMs\":86400000",
-        ),
-        ("\"status\":\"complete\"", "\"status\":\"partial\""),
-    ] {
-        assert!(
-            check_usage(&USAGE.replace(from, to), "P4suta").is_err(),
-            "{to}"
-        );
-    }
-    assert!(check_usage("not JSON", "P4suta").is_err());
-    assert!(check_usage("{}", "P4suta").is_err());
-    assert!(check_usage(&format!("{USAGE}\n{USAGE}"), "P4suta").is_err());
-    assert!(
-        check_usage(
-            &USAGE.replace("\"remaining\":10", "\"remaining\":4"),
-            "P4suta"
-        )
-        .is_ok()
-    );
 }
 
 #[test]
@@ -292,52 +247,23 @@ fn oversized_audit_history_requires_maintenance_without_discarding_entries() {
 }
 
 #[test]
-fn failed_preflight_consumes_allowance_and_never_launches_a_review() {
+fn a_review_runs_after_its_reservation_and_the_local_limit_stops_it_before_launch() {
     let dir = tempfile::tempdir().unwrap();
     let ledger = dir.path().join("reviews.log");
-    let probes = dir.path().join("usage.log");
     fs::write(&ledger, "").unwrap();
-    fs::write(&probes, "").unwrap();
-    let forbidden_review = || panic!("a review must not start");
-    assert!(
-        execute_reserved(
-            &ledger,
-            &probes,
-            100,
-            "P4suta",
-            || Ok("{}".into()),
-            forbidden_review
-        )
-        .is_err()
-    );
+    assert_eq!(execute_reserved(&ledger, 100, || Ok(23)).unwrap(), 23);
     assert_eq!(fs::read_to_string(&ledger).unwrap(), "100\n");
-    assert_eq!(
-        execute_reserved(
-            &ledger,
-            &probes,
-            HOUR_MS + 100,
-            "P4suta",
-            || Ok(USAGE.into()),
-            || Ok(23)
-        )
-        .unwrap(),
-        23
-    );
+    let full: String = (1..=HOURLY_LIMIT)
+        .map(|offset| format!("{}\n", 1_000 + offset as u64))
+        .collect();
+    fs::write(&ledger, &full).unwrap();
     assert!(
-        execute_reserved(
-            &ledger,
-            &probes,
-            HOUR_MS + 101,
-            "P4suta",
-            || panic!("preflight must not start"),
-            forbidden_review
-        )
+        execute_reserved(&ledger, 1_000 + HOURLY_LIMIT as u64 + 1, || panic!(
+            "a review must not start past the local limit"
+        ))
         .is_err()
     );
-    assert_eq!(
-        fs::read_to_string(&ledger).unwrap(),
-        format!("100\n{}\n{}\n", HOUR_MS + 100, HOUR_MS + 101)
-    );
+    assert_eq!(fs::read_to_string(&ledger).unwrap(), full);
 }
 
 #[test]
@@ -568,10 +494,7 @@ fn a_pr_pause_admits_a_guarded_review_through_reservation_preflight_and_executio
     ] {
         let dir = tempfile::tempdir().unwrap();
         let ledger = dir.path().join("reviews.log");
-        let probes = dir.path().join("usage.log");
         fs::write(&ledger, "").unwrap();
-        fs::write(&probes, "").unwrap();
-        let preflight = std::cell::Cell::new(false);
         let launched = std::cell::Cell::new(false);
         // The pause reads under the ledger lock, so a second guard can't take the lock meanwhile.
         let result = execute_admitted(
@@ -580,20 +503,13 @@ fn a_pr_pause_admits_a_guarded_review_through_reservation_preflight_and_executio
                 Ok(scope)
             },
             &ledger,
-            &probes,
             100,
-            "P4suta",
-            || {
-                preflight.set(true);
-                Ok(USAGE.into())
-            },
             || {
                 launched.set(true);
                 Ok(0)
             },
         );
         assert_eq!(result.is_ok(), admitted, "{scope:?}");
-        assert_eq!(preflight.get(), admitted, "{scope:?}");
         assert_eq!(launched.get(), admitted, "{scope:?}");
         assert_eq!(
             fs::read_to_string(&ledger).unwrap(),
