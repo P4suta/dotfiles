@@ -188,6 +188,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             if let Some(index) = args.iter().position(|arg| arg == "--input")
+                && std::fs::read_to_string(&args[index + 1])?.contains("checkSuites")
+            {
+                // Without suites the answer stays incomplete, so every reported run stays counted.
+                println!(
+                    "{}",
+                    std::env::var("GH_FIXTURE_SUITES")
+                        .unwrap_or_else(|_| r#"{"data":{"repository":{"object":null}}}"#.into())
+                );
+                return Ok(());
+            }
+            if let Some(index) = args.iter().position(|arg| arg == "--input")
                 && std::fs::read_to_string(&args[index + 1])?.contains("object(expression")
             {
                 writeln!(log, "workflows-read")?;
