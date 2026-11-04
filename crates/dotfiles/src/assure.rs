@@ -1796,7 +1796,15 @@ fn worktree_snapshot(root: &Path) -> Result<RequestBaseline> {
         }
         Err(error) => return Err(error).context("copy the request index"),
     }
-    indexed(&["add", "--all", "--", "."])?;
+    // Attributes from an empty tree keep a clean filter, such as the one of Git Large File Storage, from replacing the bytes the survey reads.
+    let empty = String::from_utf8(indexed(&["mktree"])?)?;
+    indexed(&[
+        &format!("--attr-source={}", empty.trim()),
+        "add",
+        "--all",
+        "--",
+        ".",
+    ])?;
     let tree = String::from_utf8(indexed(&["write-tree"])?)?;
     let commit = comparison_commit(&root, resolve(&root, "HEAD")?.as_deref(), tree.trim())?;
     Ok(RequestBaseline { root, commit })

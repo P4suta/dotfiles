@@ -246,6 +246,31 @@ fn managed_requests_ignore_existing_work_and_still_refuse_changed_gaps() -> Resu
 }
 
 #[test]
+fn a_clean_filter_cannot_hide_a_parser_added_during_a_request() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.write(".gitattributes", "*.rs filter=pointer\n")?;
+    fixture.git(&["config", "filter.pointer.clean", "printf pointer"])?;
+    fixture.git(&["config", "filter.pointer.smudge", "cat"])?;
+    let home = fixture.scope.path().join("home");
+    hook_catalog::install(&home)?;
+    let request = serde_json::json!({
+        "session_id":"filtered", "prompt":"Add a parser", "cwd":fixture.root
+    });
+    fixture.agent(&home, &["answer", "begin"], &request)?;
+    fixture.write("src/lib.rs", PARSER)?;
+    let input = serde_json::json!({"session_id":"filtered"});
+    let output = fixture.agent(&home, &["assure", "stop"], &input)?;
+    let blocked: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert!(
+        blocked["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("parser has no owner")),
+        "{blocked}"
+    );
+    Ok(())
+}
+
+#[test]
 fn request_baselines_refuse_missing_objects_and_do_not_exempt_other_repositories() -> Result<()> {
     let fixture = Fixture::unborn()?;
     let other = Fixture::new()?;
