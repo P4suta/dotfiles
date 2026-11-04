@@ -3,10 +3,12 @@
 mod context;
 mod diagram;
 mod evidence;
+mod figure;
 mod link_issue;
 mod local;
 mod merge;
 mod review_policy;
+mod screenshot;
 mod work;
 pub use evidence::store_assessment;
 pub use local::Action as LocalAction;
@@ -272,6 +274,18 @@ pub enum Commands {
         #[arg(long)]
         alt: String,
     },
+    /// Store a captured screen image on the personal repository's `screenshots` branch, and print the image line for a PR or issue body.
+    Screenshot {
+        /// The exact personal GitHub repository that stores the image.
+        #[arg(long)]
+        repo: String,
+        /// The captured image.
+        #[arg(long)]
+        file: PathBuf,
+        /// What the screenshot shows, for a reader who can't see it.
+        #[arg(long)]
+        alt: String,
+    },
     /// Check, create, or edit an issue through the same document and writing checks.
     Issue {
         #[command(subcommand)]
@@ -389,6 +403,7 @@ impl Commands {
             Self::Stack { .. } => "stack",
             Self::Issue { .. } => "issue",
             Self::Diagram { .. } => "diagram",
+            Self::Screenshot { .. } => "screenshot",
             Self::Local { .. } => "local",
         }
     }
@@ -1311,22 +1326,36 @@ fn authored_to_standard(
     Ok(())
 }
 
-/// Stores a diagram for a personal non-fork repository and prints its image line.
-fn draw(repo: &str, source: &Path, alt: &str) -> Result<()> {
+/// An image that a personal repository stores on a branch of its own.
+enum Figure<'a> {
+    Diagram(&'a Path),
+    Screenshot(&'a Path),
+}
+
+/// Stores a figure for a personal non-fork repository and prints its image line.
+fn store_figure(repo: &str, figure: &Figure<'_>, alt: &str) -> Result<()> {
     let github = Github::connect()?;
     let destination = destination(&github, repo)?;
+    let (rule, kind) = match figure {
+        Figure::Diagram(_) => ("pr.diagram", "diagrams"),
+        Figure::Screenshot(_) => ("pr.screenshot", "screenshots"),
+    };
     require(
         standard_applies(destination.personal, destination.fork),
         || {
             Refusal::new(
-                "pr.diagram",
-                "only a personal non-fork repository stores diagrams on its own branch",
-                "draw the change in the body of a repository that isn't personal without this command",
+                rule,
+                format!("only a personal non-fork repository stores {kind} on its own branch"),
+                "attach the image through the destination's own interface",
             )
             .evidence(format!("repository: {repo}"))
         },
     )?;
-    println!("{}", diagram::publish(repo, source, alt)?);
+    let line = match figure {
+        Figure::Diagram(source) => diagram::publish(repo, source, alt)?,
+        Figure::Screenshot(file) => screenshot::publish(repo, file, alt)?,
+    };
+    println!("{line}");
     Ok(())
 }
 
@@ -2247,7 +2276,12 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
         Commands::PruneMerged { target, dry_run } => prune_merged(&target, dry_run)?,
         Commands::Stack { action } => stack(action, rerun)?,
         Commands::Issue { action } => issue(action)?,
-        Commands::Diagram { repo, source, alt } => draw(&repo, &source, &alt)?,
+        Commands::Diagram { repo, source, alt } => {
+            store_figure(&repo, &Figure::Diagram(&source), &alt)?;
+        }
+        Commands::Screenshot { repo, file, alt } => {
+            store_figure(&repo, &Figure::Screenshot(&file), &alt)?;
+        }
         Commands::Local { action } => local::run(action)?,
     }
     Ok(())

@@ -19,6 +19,8 @@ common = [
   "cargo:cargo-semver-checks",
   "github:github/gh-stack",
   "aqua:terrastruct/d2",
+  "aqua:charmbracelet/freeze",
+  "pipx:shot-scraper",
   "shellcheck",
   "shfmt",
   "ruff",

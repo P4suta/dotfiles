@@ -1,8 +1,10 @@
 {
-  "revision": "56f7e91823e6813054abf0e017011aaca54058edc8d7b9324541ad422ef05cb6",
+  "revision": "3c50a4b9167d4bbd364ca1592a9c1641328b940a3c84bf7641a1f83361ebc42f",
   "outcome": "implemented",
-  "reason": "The skill now tells an agent to draw each personal issue and PR in D2 and paste the image line that pr-workflow diagram prints, and its tool inventory binds D2 0.9.0. pr-workflow refuses a newly written personal body without that image, renders the source with a black-and-white theme, and stores the image on the repository's diagrams branch. Ready and merge keep accepting an existing body, so open PRs still land.",
+  "reason": "The skill now points a change that a reader can see on a screen at the screenshots skill, whose captures go beside the required D2 diagram. The diagram and its storage keep their behavior, and the shared figure module now stores both kinds of image.",
   "evidence": [
+    "crates/pr-workflow/src/figure.rs",
+    "home/dot_agents/skills/screenshots/SKILL.md",
     "crates/pr-workflow/src/diagram.rs",
     "docs/adr/draw-personal-prs-and-issues-as-monochrome-d2-images.md",
     "crates/pr-workflow/src/link_issue.rs",
@@ -68,7 +70,7 @@
   "revisit": null,
   "size": {
     "outcome": "keep",
-    "reason": "The four added lines name the command, the refusing commands, the shapes to draw, and the source limits, which an agent needs before it writes a body.",
+    "reason": "One added line routes a visible change to the screenshots skill, which holds the capture commands instead of this skill.",
     "revisit": null
   }
 }

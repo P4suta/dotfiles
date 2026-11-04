@@ -85,6 +85,7 @@ In a personal non-fork repository, draw the change in D2 and run `pr-workflow di
 Paste the image line it prints into the issue or PR body, because `check`, `create`, `edit`, and the issue commands refuse a body without one.
 Draw the shape that the change has, such as a flow, a sequence, or the structure before and after it.
 The command adds the black-and-white theme and refuses colors, transparency, effects, icons, and its own D2 configuration in the source.
+Load `screenshots` for a change that a reader can see on a screen, and attach its captures beside the diagram.
 Rewrite the description around the final change if the scope changed.
 Write every PR, issue, review, and comment in the owner's voice: flat, short, and about the change or the decision.
 Leave out who or what wrote it, the local workflow, and notes addressed to the owner.

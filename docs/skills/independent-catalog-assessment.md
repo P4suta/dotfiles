@@ -61,6 +61,7 @@ Each row names an independent eligible task and the contract for its scope and f
 | rust-invariants | Representing important Rust states and transitions through types | Validated construction and exhaustive variants apart from type checker configuration |
 | rust-release | Handling Rust version proposals and crates.io publication | Exact workspace candidate and registry identity apart from generic release stages |
 | rust-tooling | Implementing maintained typed automation | Project commands for effects and cleanup apart from command discovery |
+| screenshots | Capturing and attaching screens of user-visible changes | Capture tools and branch storage apart from the required D2 diagram |
 | skill-operations | Loading, observing, assessing, and deciding the current catalog | Immutable report and evidence identities apart from native installation |
 | sslcom-esigner | Verifying Windows signing enrollment and persistent certificate authenticator seeds | Native Authenticode evidence apart from account multifactor authentication and Apple identities |
 | storage-scout | Selecting owned local build artifacts through the maintained tool | Refused cleanup stays refused apart from remote storage |

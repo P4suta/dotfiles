@@ -1,22 +1,18 @@
 //! Black-and-white D2 diagrams that personal PR and issue bodies show from the repository's `diagrams` branch.
 
-use crate::{GITHUB, gh};
+use crate::figure;
 use anyhow::{Context, Result, ensure};
 use pulldown_cmark::{Event, Tag, TagEnd};
 use sha2::{Digest, Sha256};
-use std::ffi::OsString;
 use std::fs;
-use std::io::Write as _;
 use std::path::Path;
 
 /// The branch of a personal repository that holds each rendered diagram beside its full source.
 const BRANCH: &str = "diagrams";
-/// The suffix of a stored image's address that makes GitHub serve the image itself.
-const IMAGE_SUFFIX: &str = ".svg?raw=true";
+/// The extension of a stored diagram image.
+const IMAGE_EXTENSION: &str = ".svg";
 /// The hexadecimal digits of a diagram name: a SHA-256 digest of its full source.
 const NAME_DIGITS: usize = 64;
-/// The mode of a regular file in a Git tree.
-const FILE_MODE: &str = "100644";
 
 /// The configuration that starts every source: the layered layout of the Eclipse Layout Kernel and a theme whose every color is black or white.
 const HEADER: &str = r##"vars: {
@@ -259,26 +255,16 @@ fn svg_gaps(svg: &str) -> Vec<String> {
     gaps
 }
 
-/// The address prefix of the diagrams that a repository stores.
-fn image_prefix(repository: &str) -> String {
-    format!("{GITHUB}/{repository}/blob/{BRANCH}/")
-}
-
 /// Whether an image address names a stored diagram of the repository.
 fn stored_image(repository: &str, address: &str) -> bool {
-    let prefix = image_prefix(repository);
-    address
-        .get(..prefix.len())
-        .is_some_and(|start| start.eq_ignore_ascii_case(&prefix))
-        && address
-            .get(prefix.len()..)
-            .and_then(|rest| rest.strip_suffix(IMAGE_SUFFIX))
-            .is_some_and(|name| {
-                name.len() == NAME_DIGITS
-                    && name
-                        .chars()
-                        .all(|digit| digit.is_ascii_digit() || ('a'..='f').contains(&digit))
-            })
+    figure::stored_name(repository, BRANCH, address)
+        .and_then(|file| file.strip_suffix(IMAGE_EXTENSION))
+        .is_some_and(|name| {
+            name.len() == NAME_DIGITS
+                && name
+                    .chars()
+                    .all(|digit| digit.is_ascii_digit() || ('a'..='f').contains(&digit))
+        })
 }
 
 /// Whether a body shows, outside comments and code, a described diagram that the repository stores.
@@ -318,131 +304,8 @@ pub(crate) fn missing(repository: &str) -> crate::Refusal {
     )
     .evidence(format!(
         "the body shows no described image from {}",
-        image_prefix(repository)
+        figure::prefix(repository, BRANCH)
     ))
-}
-
-fn json_file(value: &serde_json::Value) -> Result<tempfile::NamedTempFile> {
-    let mut file = tempfile::NamedTempFile::new()?;
-    serde_json::to_writer(file.as_file_mut(), value)?;
-    file.as_file_mut().flush()?;
-    Ok(file)
-}
-
-/// Sends one GitHub API request with a JSON body and returns the response object.
-fn api(method: &str, endpoint: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
-    let input = json_file(body)?;
-    let args: Vec<OsString> = vec![
-        "api".into(),
-        "--hostname".into(),
-        "github.com".into(),
-        "--method".into(),
-        method.into(),
-        endpoint.into(),
-        "--input".into(),
-        input.path().as_os_str().to_owned(),
-    ];
-    serde_json::from_str(&gh(&args)?).with_context(|| format!("read the {endpoint} response"))
-}
-
-fn sha(response: &serde_json::Value) -> Result<String> {
-    response["sha"]
-        .as_str()
-        .map(str::to_owned)
-        .context("GitHub returned no object id")
-}
-
-/// The tip of the `diagrams` branch.
-struct Tip {
-    commit: String,
-    tree: String,
-}
-
-/// The tip of the `diagrams` branch, if the branch exists, and whether it already holds the named image.
-fn branch_state(repository: &str, name: &str) -> Result<(Option<Tip>, bool)> {
-    let (owner, repository_name) = repository
-        .split_once('/')
-        .context("repository must be OWNER/REPO")?;
-    let query = "query($owner:String!,$name:String!,$ref:String!,$expression:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){target{oid ... on Commit{tree{oid}}}} object(expression:$expression){oid}}}";
-    let response = api(
-        "POST",
-        "graphql",
-        &serde_json::json!({
-            "query": query,
-            "variables": {
-                "owner": owner,
-                "name": repository_name,
-                "ref": format!("refs/heads/{BRANCH}"),
-                "expression": format!("{BRANCH}:{name}.svg"),
-            }
-        }),
-    )?;
-    let repository = &response["data"]["repository"];
-    ensure!(
-        repository.is_object(),
-        "GitHub returned no repository for the diagram: {response}"
-    );
-    let target = &repository["ref"]["target"];
-    let tip = match (target["oid"].as_str(), target["tree"]["oid"].as_str()) {
-        (Some(commit), Some(tree)) => Some(Tip {
-            commit: commit.to_owned(),
-            tree: tree.to_owned(),
-        }),
-        (None, None) if repository["ref"].is_null() => None,
-        _ => anyhow::bail!("the {BRANCH} branch doesn't point at a commit: {response}"),
-    };
-    Ok((tip, repository["object"]["oid"].is_string()))
-}
-
-/// Adds the image and its source to the `diagrams` branch, which it starts as an orphan when absent.
-fn store(repository: &str, name: &str, source: &str, svg: &str) -> Result<()> {
-    let (tip, stored) = branch_state(repository, name)?;
-    if stored {
-        return Ok(());
-    }
-    let endpoint = |path: &str| format!("repos/{repository}/git/{path}");
-    let mut entries = Vec::new();
-    for (extension, content) in [("svg", svg), ("d2", source)] {
-        let blob = api(
-            "POST",
-            &endpoint("blobs"),
-            &serde_json::json!({"content": content, "encoding": "utf-8"}),
-        )?;
-        entries.push(serde_json::json!({
-            "path": format!("{name}.{extension}"),
-            "mode": FILE_MODE,
-            "type": "blob",
-            "sha": sha(&blob)?,
-        }));
-    }
-    let mut tree = serde_json::json!({"tree": entries});
-    if let Some(tip) = &tip {
-        tree["base_tree"] = serde_json::json!(tip.tree);
-    }
-    let tree = sha(&api("POST", &endpoint("trees"), &tree)?)?;
-    let commit = sha(&api(
-        "POST",
-        &endpoint("commits"),
-        &serde_json::json!({
-            "message": format!("docs: add diagram {name}"),
-            "tree": tree,
-            "parents": tip.iter().map(|tip| &tip.commit).collect::<Vec<_>>(),
-        }),
-    )?)?;
-    if tip.is_some() {
-        api(
-            "PATCH",
-            &endpoint(&format!("refs/heads/{BRANCH}")),
-            &serde_json::json!({"sha": commit, "force": false}),
-        )?;
-    } else {
-        api(
-            "POST",
-            &endpoint("refs"),
-            &serde_json::json!({"ref": format!("refs/heads/{BRANCH}"), "sha": commit}),
-        )?;
-    }
-    Ok(())
 }
 
 /// Renders a source in black and white, stores it on the repository's `diagrams` branch, and returns the body's image line.
@@ -450,10 +313,7 @@ fn store(repository: &str, name: &str, source: &str, svg: &str) -> Result<()> {
 /// # Errors
 /// Returns a refusal for a source or image that leaves black and white, and an error when D2 or GitHub fails.
 pub(crate) fn publish(repository: &str, source_file: &Path, alt: &str) -> Result<String> {
-    ensure!(
-        !alt.trim().is_empty() && !alt.contains(['\n', '[', ']']),
-        "--alt must describe the diagram on one line without brackets"
-    );
+    figure::check_alt(alt)?;
     let source = fs::read_to_string(source_file).context("read the UTF-8 D2 source")?;
     let gaps = source_gaps(&source);
     if !gaps.is_empty() {
@@ -496,12 +356,22 @@ pub(crate) fn publish(repository: &str, source_file: &Path, alt: &str) -> Result
             .fold(refusal, crate::Refusal::evidence)
             .into());
     }
-    store(repository, &name, &full, &svg)?;
-    Ok(format!(
-        "![{}]({}{name}{IMAGE_SUFFIX})",
-        alt.trim(),
-        image_prefix(repository)
-    ))
+    let image = format!("{name}.svg");
+    figure::store(
+        repository,
+        BRANCH,
+        &[
+            figure::File {
+                name: image.clone(),
+                content: figure::Content::Text(&svg),
+            },
+            figure::File {
+                name: format!("{name}.d2"),
+                content: figure::Content::Text(&full),
+            },
+        ],
+    )?;
+    Ok(figure::image_line(repository, BRANCH, &image, alt))
 }
 
 #[cfg(test)]
