@@ -294,13 +294,12 @@ pub(crate) fn shown(repository: &str, body: &str) -> bool {
                     description.push_str(&text);
                 }
             }
-            Event::End(TagEnd::Image) => {
-                if image
-                    .take()
-                    .is_some_and(|(stored, description)| stored && !description.trim().is_empty())
-                {
-                    return true;
-                }
+            Event::End(TagEnd::Image)
+                if image.take().is_some_and(|(stored, description)| {
+                    stored && !description.trim().is_empty()
+                }) =>
+            {
+                return true;
             }
             _ => {}
         }
@@ -601,15 +600,15 @@ mod tests {
     fn colored_translucent_blended_and_foreign_paint_is_refused() {
         for svg in [
             r##"<svg><rect fill="#FF0000"/></svg>"##,
-            r##"<svg><rect stroke="red"/></svg>"##,
-            r##"<svg><rect opacity="0.5"/></svg>"##,
-            r##"<svg><rect style="fill:#123456"/></svg>"##,
-            r##"<svg><rect style="filter:blur(2px)"/></svg>"##,
-            r##"<svg><g class="shape blend"/></svg>"##,
-            r##"<svg><linearGradient id="g"/></svg>"##,
-            r##"<svg><image href="a.png"/></svg>"##,
-            r##"<svg><style>.a{fill:#EDF0FD}</style></svg>"##,
-            r##"<svg><style>.a{fill:rgba(0,0,0,0.5)}</style></svg>"##,
+            r#"<svg><rect stroke="red"/></svg>"#,
+            r#"<svg><rect opacity="0.5"/></svg>"#,
+            r#"<svg><rect style="fill:#123456"/></svg>"#,
+            r#"<svg><rect style="filter:blur(2px)"/></svg>"#,
+            r#"<svg><g class="shape blend"/></svg>"#,
+            r#"<svg><linearGradient id="g"/></svg>"#,
+            r#"<svg><image href="a.png"/></svg>"#,
+            r"<svg><style>.a{fill:#EDF0FD}</style></svg>",
+            r"<svg><style>.a{fill:rgba(0,0,0,0.5)}</style></svg>",
         ] {
             assert!(!svg_gaps(svg).is_empty(), "{svg}");
         }

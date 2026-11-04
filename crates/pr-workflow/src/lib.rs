@@ -1311,6 +1311,25 @@ fn authored_to_standard(
     Ok(())
 }
 
+/// Stores a diagram for a personal non-fork repository and prints its image line.
+fn draw(repo: &str, source: &Path, alt: &str) -> Result<()> {
+    let github = Github::connect()?;
+    let destination = destination(&github, repo)?;
+    require(
+        standard_applies(destination.personal, destination.fork),
+        || {
+            Refusal::new(
+                "pr.diagram",
+                "only a personal non-fork repository stores diagrams on its own branch",
+                "draw the change in the body of a repository that isn't personal without this command",
+            )
+            .evidence(format!("repository: {repo}"))
+        },
+    )?;
+    println!("{}", diagram::publish(repo, source, alt)?);
+    Ok(())
+}
+
 fn offline_destination(repo: &str) -> Result<Destination> {
     let policy = workflow_policy()?;
     let owner = repo.split('/').next().unwrap_or_default();
@@ -2228,22 +2247,7 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
         Commands::PruneMerged { target, dry_run } => prune_merged(&target, dry_run)?,
         Commands::Stack { action } => stack(action, rerun)?,
         Commands::Issue { action } => issue(action)?,
-        Commands::Diagram { repo, source, alt } => {
-            let github = Github::connect()?;
-            let destination = destination(&github, &repo)?;
-            require(
-                standard_applies(destination.personal, destination.fork),
-                || {
-                    Refusal::new(
-                        "pr.diagram",
-                        "only a personal non-fork repository stores diagrams on its own branch",
-                        "draw the change in the body of a repository that isn't personal without this command",
-                    )
-                    .evidence(format!("repository: {repo}"))
-                },
-            )?;
-            println!("{}", diagram::publish(&repo, &source, &alt)?);
-        }
+        Commands::Diagram { repo, source, alt } => draw(&repo, &source, &alt)?,
         Commands::Local { action } => local::run(action)?,
     }
     Ok(())

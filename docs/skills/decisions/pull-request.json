@@ -1,7 +1,7 @@
 {
-  "revision": "1b320abf03b890c009eb0fef8f0567e7f2a6e78c90fc95090b3554e9d274e390",
+  "revision": "56f7e91823e6813054abf0e017011aaca54058edc8d7b9324541ad422ef05cb6",
   "outcome": "implemented",
-  "reason": "The skill now tells an agent to draw each personal issue and PR in D2 and paste the image line that pr-workflow diagram prints. pr-workflow refuses a newly written personal body without that image, renders the source with a black-and-white theme, and stores the image on the repository's diagrams branch. Ready and merge keep accepting an existing body, so open PRs still land.",
+  "reason": "The skill now tells an agent to draw each personal issue and PR in D2 and paste the image line that pr-workflow diagram prints, and its tool inventory binds D2 0.9.0. pr-workflow refuses a newly written personal body without that image, renders the source with a black-and-white theme, and stores the image on the repository's diagrams branch. Ready and merge keep accepting an existing body, so open PRs still land.",
   "evidence": [
     "crates/pr-workflow/src/diagram.rs",
     "docs/adr/draw-personal-prs-and-issues-as-monochrome-d2-images.md",
