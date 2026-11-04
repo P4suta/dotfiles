@@ -1,5 +1,7 @@
-/// The hang cap after which a harness has no completed proof evidence.
-pub const TIMEOUT_SECONDS: u64 = 60;
+/// The wall-clock backstop after which a harness that waits without using CPU has no completed proof evidence.
+pub const TIMEOUT_SECONDS: u64 = 600;
+/// The CPU time after which a Kani process stops, which the host's load doesn't stretch.
+pub const CPU_SECONDS: u64 = 60;
 
 #[must_use]
 pub fn campaign_seconds(harnesses: u32, parallelism: u16, overhead: u32) -> Option<u32> {
@@ -426,14 +428,14 @@ mod tests {
     #[test]
     fn campaign_budget_counts_sequential_waves_and_preserves_overhead() {
         for (harnesses, parallelism, overhead, expected) in [
-            (1, 1, 900, Some(960)),
-            (316, 1, 900, Some(19_860)),
-            (3, 2, 900, Some(1_020)),
+            (1, 1, 900, Some(1_500)),
+            (316, 1, 900, Some(190_500)),
+            (3, 2, 900, Some(2_100)),
             (0, 2, 900, None),
             (1, 0, 900, None),
             (1, 1, u32::MAX, None),
             (u32::MAX, 1, 0, None),
-            (u32::MAX, u16::MAX, 0, Some(3_932_220)),
+            (u32::MAX, u16::MAX, 0, Some(39_322_200)),
         ] {
             let _ = proofs::spec_campaign_seconds(harnesses, parallelism, overhead);
             assert_eq!(campaign_seconds(harnesses, parallelism, overhead), expected);

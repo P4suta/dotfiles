@@ -102,8 +102,8 @@ fn changed_campaign_arithmetic_cannot_supply_the_generated_ceiling_claims() {
         ("u32::try_from(expected).is_ok()", "true"),
         ("harnesses / divisor", "harnesses / (divisor + 1)"),
         (
-            "pub const TIMEOUT_SECONDS: u64 = 60;",
-            "pub const TIMEOUT_SECONDS: u64 = 61;",
+            "pub const TIMEOUT_SECONDS: u64 = 600;",
+            "pub const TIMEOUT_SECONDS: u64 = 601;",
         ),
     ] {
         let changed = source.replace(before, after);

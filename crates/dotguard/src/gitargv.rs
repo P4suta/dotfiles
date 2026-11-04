@@ -1108,6 +1108,20 @@ fn subcommand(call: &Invocation) -> Option<Denial> {
         }
 
         "stash" => match first_word(args) {
+            // Lefthook drops the backup it pushed before a pre-commit hook, and the stash list names it by its message.
+            Some("drop")
+                if lefthook_backup(
+                    &real_git::capture(&[
+                        "log",
+                        "-1",
+                        "--format=%s",
+                        call.positional(1).unwrap_or("stash@{0}"),
+                    ])
+                    .unwrap_or_default(),
+                ) =>
+            {
+                None
+            }
             Some("drop") => Some(Denial::new(
                 Rule::Force,
                 "git stash drop",
@@ -1548,6 +1562,14 @@ fn flags_of(args: &[String]) -> Vec<String> {
 }
 
 /// The first non-flag argument, a subcommand word like `drop` or `expire`.
+/// The message Lefthook gives the stash that backs up unstaged changes during a pre-commit hook.
+const LEFTHOOK_BACKUP: &str = ": lefthook auto backup";
+
+/// Whether a stash subject, such as `On main: lefthook auto backup`, names Lefthook's own backup.
+fn lefthook_backup(subject: &str) -> bool {
+    subject.trim_end().ends_with(LEFTHOOK_BACKUP)
+}
+
 fn first_word(args: &[String]) -> Option<&str> {
     args.iter()
         .take_while(|a| a.as_str() != "--")

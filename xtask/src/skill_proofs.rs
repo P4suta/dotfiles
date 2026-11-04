@@ -539,7 +539,16 @@ fn installed_kani_command() -> Result<std::process::Command> {
         "native Kani refuses on owner machines; use `just proofs` or `dotfiles bounded run`"
     );
     let directory = installed_kani_directory()?;
-    let mut command = checked_kani(platform::process::command(directory.join(KANI_DRIVER)));
+    // The CPU limit holds for the driver and each verifier process it starts, at any host load.
+    // `exec -a` keeps the program name `kani`, from which the driver selects its single-file mode.
+    let mut command = checked_kani(platform::process::command("bash"));
+    command
+        .arg("-c")
+        .arg(format!(
+            r#"ulimit -t {} && exec -a kani "$0" "$@""#,
+            proof_budget_rules::CPU_SECONDS
+        ))
+        .arg(directory.join(KANI_DRIVER));
     let mut path = vec![directory.join("bin"), directory.join("pyroot/bin")];
     path.extend(std::env::split_paths(
         &std::env::var_os("PATH").unwrap_or_default(),
@@ -564,11 +573,6 @@ fn installed_kani_command() -> Result<std::process::Command> {
             });
             command.env(variable, std::env::join_paths(paths)?);
         }
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.arg0("kani");
     }
     Ok(command)
 }

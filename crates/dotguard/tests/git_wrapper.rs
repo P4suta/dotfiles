@@ -281,6 +281,28 @@ fn lefthooks_forced_checkout_passes_only_when_its_patch_holds_the_discarded_hunk
     );
 }
 
+#[test]
+fn lefthook_drops_its_own_backup_stash_and_other_drops_stay_refused() {
+    let wrapper = Wrapper::new("lefthook-stash");
+    let repository = wrapper.scope.join("repository");
+    std::fs::write(repository.join("tracked"), "one\n").unwrap();
+    assert!(wrapper.run(&["add", "tracked"], None).status.success());
+    let commit = wrapper.run(&["commit", "--quiet", "-m", "chore: add tracked"], None);
+    assert!(commit.status.success(), "{}", text(&commit.stderr));
+    for message in ["work in progress", "lefthook auto backup"] {
+        std::fs::write(repository.join("tracked"), format!("{message}\n")).unwrap();
+        let stash = wrapper.run(&["stash", "push", "--message", message], None);
+        assert!(stash.status.success(), "{}", text(&stash.stderr));
+    }
+    let backup = wrapper.run(&["stash", "drop", "--quiet", "stash@{0}"], None);
+    assert!(backup.status.success(), "{}", text(&backup.stderr));
+    assert_eq!(
+        last_record(&wrapper.run(&["stash", "drop", "--quiet", "stash@{0}"], None)).rule,
+        "git.force",
+        "a stash of the owner's own work stays protected"
+    );
+}
+
 /// A clone made with `--no-checkout` has no index, so its status lists every file as a staged deletion that a forced checkout restores.
 #[test]
 fn a_forced_checkout_that_only_restores_deleted_files_passes() {
