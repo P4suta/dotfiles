@@ -15,6 +15,16 @@
 ghc = {{ printf "ref:%s" .platforms.mac.tool_versions.ghc | quote }}
 "github:haskell/haskell-language-server" = { version = {{ index .platforms.mac.tool_versions "haskell-language-server" | quote }}, bin = ["haskell-language-server-wrapper", {{ printf "haskell-language-server-%s" .platforms.mac.tool_versions.ghc | quote }}] }
 
+# The CodeRabbit guard runs managed reviews on the Mac and finds this runtime through `mise where`.
+[tools."http:coderabbit"]
+version = {{ .coderabbit.version | quote }}
+rename_exe = "coderabbit-vendor"
+
+[tools."http:coderabbit".platforms]
+{{- range $platform, $artifact := .coderabbit.platforms }}
+{{ $platform }} = { url = "https://cli.coderabbit.ai/releases/{{ $.coderabbit.version }}/{{ $artifact.artifact }}", checksum = "sha256:{{ $artifact.sha256 }}"{{ if hasPrefix "windows-" $platform }}, rename_exe = "coderabbit-vendor.exe"{{ end }} }
+{{- end }}
+
 [tool_alias]
 ghc = "asdf:mise-plugins/mise-ghcup"
 
