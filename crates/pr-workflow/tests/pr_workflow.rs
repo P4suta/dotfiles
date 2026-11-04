@@ -5361,6 +5361,23 @@ fn ready_checks_live_contents_and_draft_state_before_mutation() -> Result<()> {
         assert_eq!(output.status.success(), accepted, "{checks}");
         assert_eq!(fixture.log()?.contains("\nready\n"), accepted, "{checks}");
     }
+    let mut fixture = Fixture::new(BODY)?;
+    fixture.level = "critical";
+    let view = serde_json::json!({"title":"@coderabbitai","body":"@coderabbitai summary","state":"OPEN","isDraft":true});
+    assert!(
+        fixture
+            .command("ready")?
+            .args(["--pr", "17", "--generation", "coderabbit"])
+            .env("GH_FIXTURE_VIEW", view.to_string())
+            .output()?
+            .status
+            .success()
+    );
+    Ok(())
+}
+
+#[test]
+fn ready_drops_a_check_run_that_a_newer_run_of_the_same_check_replaced() -> Result<()> {
     // Run 101 of the same workflow, event, and check replaced run 100, as a cancelled duplicate run is.
     let suites = r#"{"data":{"repository":{"object":{"checkSuites":{"pageInfo":{"hasNextPage":false},"nodes":[
         {"databaseId":1,"app":{"databaseId":15368},"workflowRun":{"databaseId":100,"event":"pull_request","workflow":{"databaseId":7}},"checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[{"databaseId":10,"name":"Checks"}]}},
@@ -5402,18 +5419,6 @@ fn ready_checks_live_contents_and_draft_state_before_mutation() -> Result<()> {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    let mut fixture = Fixture::new(BODY)?;
-    fixture.level = "critical";
-    let view = serde_json::json!({"title":"@coderabbitai","body":"@coderabbitai summary","state":"OPEN","isDraft":true});
-    assert!(
-        fixture
-            .command("ready")?
-            .args(["--pr", "17", "--generation", "coderabbit"])
-            .env("GH_FIXTURE_VIEW", view.to_string())
-            .output()?
-            .status
-            .success()
-    );
     Ok(())
 }
 

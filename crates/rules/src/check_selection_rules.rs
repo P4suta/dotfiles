@@ -183,4 +183,18 @@ mod proofs {
         }));
         assert!(!superseded(run, &runs));
     }
+
+    /// `superseded_ids` names exactly the runs that `superseded` marks.
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn superseded_ids_name_exactly_the_superseded_runs() {
+        let runs = [any_run(), any_run()];
+        let ids = super::superseded_ids(&runs);
+        for run in &runs {
+            if superseded(run, &runs) {
+                assert!(ids.contains(&run.id));
+            }
+        }
+        assert!(ids.len() <= runs.len());
+    }
 }
