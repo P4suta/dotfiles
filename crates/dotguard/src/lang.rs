@@ -2,18 +2,19 @@
 //!
 //! `dotguard:allow-foreign` exempts this file, because it must contain the characters it detects.
 //!
-//! Three problems arrive without anyone typing them, from a search result, a model that drifts between languages, or a rendered page:
+//! Three problems arrive without anyone typing them, from a search result, a model that drifts between languages, or a rendered page.
 //!
-//! 1. **Another writing system:** these repositories use Japanese and English, so Hangul, Cyrillic, Thai, Devanagari, and the rest count as contamination.
+//! The first is another writing system.
+//! These repositories use Japanese and English, so Hangul, Cyrillic, Thai, Devanagari, and the rest count as contamination.
 //!
-//! 2. **Simplified Chinese:** the Japanese and Chinese writing systems share most ideographs, so `日本語` reads the same in both.
-//!    A Chinese sentence of any length contains simplified forms such as `这 个 说 时 门 现`, which Japanese lacks.
+//! The second comes from Simplified Chinese.
+//! The Japanese and Chinese writing systems share most ideographs, so `日本語` reads the same in both.
+//! A Chinese sentence of any length contains simplified forms such as `这 个 说 时 门 现`, which Japanese lacks.
+//! Japanese prose goes further.
+//! Every Han character must belong to the Japanese Industrial Standards (JIS) X 0208 or X 0213 repertoire, which `jis_kanji_table` derives from Unihan.
+//! A character outside that repertoire comes from Chinese or a rare variant, whatever its shape.
 //!
-//!    Japanese prose goes further.
-//!    Every Han character must belong to the Japanese Industrial Standards (JIS) X 0208 or X 0213 repertoire, which `jis_kanji_table` derives from Unihan.
-//!    A character outside that repertoire comes from Chinese or a rare variant, whatever its shape.
-//!
-//! 3. **Invisible characters:** zero-width spaces, bidirectional overrides, and byte-order marks have no place here.
+//! The third is an invisible character: zero-width spaces, bidirectional overrides, and byte-order marks have no place here.
 //!
 //! Latin-1 accents pass, as in `naïve`, `Gödel`, and `São`.
 //! Greek passes one letter at a time, so notation such as `λ`, `μs`, and `Σ` passes, but a run of three or more letters counts as a word.

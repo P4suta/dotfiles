@@ -1,5 +1,18 @@
 ## Prose
 
+Use the shared editorial-assurance skill for replies, prose, documentation, comments, and authored artifacts.
+Use ideal-specification to derive durable writing rules from governing standards and intended outcomes.
+Follow the shared house policy under the dotfiles-managed prose configuration.
+Use canonical English terminology from the applicable technical specification or project's official documentation.
+Resolve a term's meaning and technical role before choosing its form, and keep one form per concept within its scope.
+Preserve the exact spelling and case of API identifiers, commands, UI labels, product names, and literal source quotations.
+Write ordinary prose in the required language.
+Follow the selected Japanese orthography guide from the Japan Translation Federation, with the explicit house choices in the editorial-assurance references.
+Don't use Japanese demonstratives in authored explanations or replies.
+Name the actual object, operation, condition, or result.
+Run the existing prose checks and resolve their shared house findings before delivery.
+The answer-evidence check and persisted prose gates enforce the same shared policy.
+
 Write prose one sentence per line in English and Japanese: break after `。`, `！`, `？`, `.`, `!`, and `?`.
 Never wrap a sentence across lines or put two sentences on one line.
 Split long sentences into shorter ones when a channel limits line length.

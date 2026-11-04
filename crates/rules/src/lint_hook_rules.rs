@@ -82,6 +82,56 @@ pub enum Outcome {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShellSyntax {
+    Parsed,
+    Rejected,
+    Unavailable,
+}
+
+fn position_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut end = start;
+    let mut positive = false;
+    let mut unknown = false;
+    while let Some(byte) = bytes.get(end) {
+        match byte {
+            b'?' if end == start => unknown = true,
+            b'0'..=b'9' if !unknown => positive |= *byte != b'0',
+            b':' if positive || unknown => return Some(end + 1),
+            _ => return None,
+        }
+        end += 1;
+    }
+    None
+}
+
+fn located_diagnostic(diagnostic: &str) -> bool {
+    let bytes = diagnostic.as_bytes();
+    let Some(column) = position_end(bytes, 0) else {
+        return false;
+    };
+    let Some(reason) = position_end(bytes, column) else {
+        return false;
+    };
+    bytes.get(reason) == Some(&b' ')
+        && diagnostic
+            .get(reason + 1..)
+            .is_some_and(|reason| reason.chars().any(|character| !character.is_whitespace()))
+}
+
+#[must_use]
+pub fn shell_syntax(outcome: Outcome, diagnostic: &str) -> ShellSyntax {
+    match outcome {
+        Outcome::Clean => ShellSyntax::Parsed,
+        Outcome::Findings if located_diagnostic(diagnostic) => ShellSyntax::Rejected,
+        Outcome::Findings
+        | Outcome::Excluded
+        | Outcome::Missing
+        | Outcome::Timeout
+        | Outcome::Failed => ShellSyntax::Unavailable,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Admission {
     Admit,
     Block,
@@ -444,6 +494,48 @@ mod proofs {
 
     #[cfg(kani)]
     #[kani::proof]
+    #[kani::unwind(10)]
+    fn parser_status_never_admits_incomplete_inspection() {
+        const DIAGNOSTIC_BYTES: usize = 8;
+        let bytes: [u8; DIAGNOSTIC_BYTES] = kani::any();
+        let Ok(diagnostic) = core::str::from_utf8(&bytes) else {
+            return;
+        };
+        let outcome = outcome();
+        let syntax = shell_syntax(outcome, diagnostic);
+        assert_eq!(syntax == ShellSyntax::Parsed, outcome == Outcome::Clean);
+        if !matches!(outcome, Outcome::Clean | Outcome::Findings) {
+            assert_eq!(syntax, ShellSyntax::Unavailable);
+        }
+        if syntax == ShellSyntax::Rejected {
+            assert_eq!(outcome, Outcome::Findings);
+        }
+        kani::cover!(syntax == ShellSyntax::Parsed);
+        kani::cover!(syntax == ShellSyntax::Rejected);
+        kani::cover!(syntax == ShellSyntax::Unavailable);
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(8)]
+    fn one_digit_parser_locations_distinguish_rejections_from_failures() {
+        let line: u8 = kani::any();
+        let column: u8 = kani::any();
+        let bytes = [line, b':', column, b':', b' ', b'e'];
+        let Ok(diagnostic) = core::str::from_utf8(&bytes) else {
+            return;
+        };
+        let position = |byte: u8| matches!(byte, b'1'..=b'9' | b'?');
+        assert_eq!(
+            shell_syntax(Outcome::Findings, diagnostic) == ShellSyntax::Rejected,
+            position(line) && position(column)
+        );
+        kani::cover!(position(line) && position(column));
+        kani::cover!(!position(line));
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
     #[kani::unwind(5)]
     fn any_finding_or_missing_linter_blocks_and_unknown_types_are_admitted() {
         let outcomes = [outcome(), outcome(), outcome()];
@@ -540,6 +632,44 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parser_diagnostics_require_a_position_and_reason() {
+        for diagnostic in [
+            "1:1: rejected",
+            "12:345: rejected: explanation",
+            "001:002: rejected\ncontinued explanation",
+            "1:?: rejected",
+            "?:1: rejected",
+            "?:?: rejected",
+            "1:1: 日本語",
+        ] {
+            assert_eq!(
+                shell_syntax(Outcome::Findings, diagnostic),
+                ShellSyntax::Rejected,
+                "{diagnostic}"
+            );
+        }
+        for diagnostic in [
+            "",
+            "parser initialization failed",
+            "1:1:",
+            "1:1: \n\t",
+            "1:1: \u{2003}",
+            "0:1: rejected",
+            "1:0: rejected",
+            "+1:1: rejected",
+            "1:2x: rejected",
+            "1:1:rejected",
+            "one:two: rejected",
+        ] {
+            assert_eq!(
+                shell_syntax(Outcome::Findings, diagnostic),
+                ShellSyntax::Unavailable,
+                "{diagnostic}"
+            );
+        }
+    }
 
     #[test]
     fn classifies_paths_and_interpreters() {

@@ -110,7 +110,10 @@
 | [2026-10-23 Keep independent work reasons in owner-local state](keep-independent-work-reasons-owner-local.md) | accepted |  |
 | [2026-10-23 Limit merge queues to organization-owned repositories](limit-merge-queues-to-organization-repositories.md) | accepted |  |
 | [2026-10-23 Link issues with repository owner authority](link-issues-with-repository-owner-authority.md) | accepted |  |
+| [2026-10-23 Parse three languages before copyediting](parse-three-languages-before-copyediting.md) | proposed |  |
 | [2026-10-23 Resolve SSH agents at use time](resolve-ssh-agents-at-use-time.md) | proposed |  |
+| [2026-10-24 Bind copyedit decisions to exact reports](bind-copyedit-decisions-to-exact-reports.md) | proposed |  |
+| [2026-10-24 Enforce shared house style before answer evidence](enforce-shared-house-style-before-answer-evidence.md) | accepted |  |
 | [2026-10-24 Prefer the supported native Windows sandbox](prefer-native-windows-sandbox.md) | proposed |  |
 | [2026-10-24 Preserve shell argument source spellings](preserve-shell-argument-source-spellings.md) | proposed |  |
 | [2026-10-24 Preserve reviewed repository license assets](preserved-repository-license-assets.md) | proposed |  |

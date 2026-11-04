@@ -135,6 +135,7 @@ pub enum Tool {
     Tmux,
     Typos,
     Unzip,
+    Uv,
     UpdateDesktopDatabase,
     Vale,
     Vivid,
@@ -142,6 +143,7 @@ pub enum Tool {
     Whoami,
     Wslpath,
     XdgMime,
+    Xh,
     Yamllint,
     Zizmor,
     Zoxide,
@@ -149,7 +151,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Self; 100] = [
+    pub const ALL: [Self; 102] = [
         Self::Actionlint,
         Self::AnsibleGalaxy,
         Self::AnsiblePlaybook,
@@ -239,6 +241,7 @@ impl Tool {
         Self::Tmux,
         Self::Typos,
         Self::Unzip,
+        Self::Uv,
         Self::UpdateDesktopDatabase,
         Self::Vale,
         Self::Vivid,
@@ -246,6 +249,7 @@ impl Tool {
         Self::Whoami,
         Self::Wslpath,
         Self::XdgMime,
+        Self::Xh,
         Self::Yamllint,
         Self::Zizmor,
         Self::Zoxide,
@@ -347,6 +351,8 @@ impl Tool {
             Self::Tailscale => "tailscale",
             Self::Television => "tv",
             Self::Vale => "vale",
+            Self::Uv => "uv",
+            Self::Xh => "xh",
             Self::Vivid => "vivid",
             Self::Zoxide => "zoxide",
             Self::Zsh => ZSH,
@@ -398,6 +404,8 @@ impl Tool {
             Self::Shellcheck => Provision::Pinned("shellcheck"),
             Self::Taplo => Provision::Pinned("taplo"),
             Self::Vale => Provision::Pinned("vale"),
+            Self::Uv => Provision::Pinned("uv"),
+            Self::Xh => Provision::Pinned("xh"),
             Self::Zsh if cfg!(target_os = "linux") => Provision::Pinned("conda:zsh"),
             Self::Zsh
             | Self::Bash

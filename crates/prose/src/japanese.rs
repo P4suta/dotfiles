@@ -103,6 +103,9 @@ mod tests {
             config: config.path().to_path_buf(),
             textlint: std::path::PathBuf::new(),
             vale: None,
+            bun: None,
+            uv: None,
+            xh: None,
         })
     }
 

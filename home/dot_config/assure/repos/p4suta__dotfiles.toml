@@ -3,6 +3,46 @@
 
 [[owner]]
 shape = "parser"
+path = "crates/prose/src/house.rs"
+by = "fuzz/fuzz_targets/copyedit_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/prose/src/copyedit/style.rs"
+by = "fuzz/fuzz_targets/copyedit_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/prose/src/editorial.rs"
+by = "fuzz/fuzz_targets/copyedit_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/prose/src/copyedit/projection.rs"
+by = "fuzz/fuzz_targets/copyedit_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/prose/src/copyedit/metadata.rs"
+by = "fuzz/fuzz_targets/copyedit_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/prose/src/copyedit/nlp.rs"
+by = "fuzz/fuzz_targets/copyedit_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/prose/src/copyedit/review.rs"
+by = "fuzz/fuzz_targets/copyedit_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/prose/src/copyedit/grammar.rs"
+by = "fuzz/fuzz_targets/copyedit_input.rs"
+
+[[owner]]
+shape = "parser"
 path = "crates/dotfiles/src/assure/attributes.rs"
 by = "fuzz/fuzz_targets/generated_attributes.rs"
 

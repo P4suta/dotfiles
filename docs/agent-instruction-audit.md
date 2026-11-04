@@ -192,6 +192,56 @@ The answer checker distinguishes hypotheses and unverified statements from factu
 
 Heading: groups the prose lines.
 
+> Use the shared editorial-assurance skill for replies, prose, documentation, comments, and authored artifacts.
+
+Judgment: the skill supplies research, explanation, and editing criteria for the requested genre.
+
+> Use ideal-specification to derive durable writing rules from governing standards and intended outcomes.
+
+Judgment: a rule's authority and scope need source interpretation.
+
+> Follow the shared house policy under the dotfiles-managed prose configuration.
+
+Judgment: the owner selects a shared style.
+`crates/prose/src/house.rs` enforces its configured rules.
+
+> Use canonical English terminology from the applicable technical specification or project's official documentation.
+
+Judgment: terms require a domain sense and an applicable primary specification.
+
+> Resolve a term's meaning and technical role before choosing its form, and keep one form per concept within its scope.
+
+Judgment: concept identity and consistency across a chosen scope need editorial review.
+
+> Preserve the exact spelling and case of API identifiers, commands, UI labels, product names, and literal source quotations.
+
+Judgment: source fidelity requires comparison with the original record.
+
+> Write ordinary prose in the required language.
+
+Judgment: the requested language depends on the current user and document.
+
+> Follow the selected Japanese orthography guide from the Japan Translation Federation, with the explicit house choices in the editorial-assurance references.
+
+Judgment: applying the guide requires interpreting its scope and the owner's choices.
+
+> Don't use Japanese demonstratives in authored explanations or replies.
+
+Judgment: the owner prohibits Japanese demonstratives in authored prose.
+`crates/prose/src/house.rs` rejects the configured spellings after native annotation.
+
+> Name the actual object, operation, condition, or result.
+
+Judgment: a named object's relevance and precision need semantic review.
+
+> Run the existing prose checks and resolve their shared house findings before delivery.
+
+Judgment: check selection and candidate resolution require context.
+
+> The answer-evidence check and persisted prose gates enforce the same shared policy.
+
+Follow-up F1: `crates/dotfiles/src/answer.rs` and the prose entry points call `crates/prose/src/house.rs`.
+
 > Write prose one sentence per line in English and Japanese: break after `。`, `！`, `？`, `.`, `!`, and `?`.
 
 Follow-up F1: `prose check` and `dotfiles assure stop --reply-language` share the sentence layout decisions in `crates/rules/src/prose_rules.rs`.

@@ -1,0 +1,4 @@
+- We walk to the station.
+- They arrive at noon.
+  - The guide opens the gate.
+- We enter the museum.

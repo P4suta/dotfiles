@@ -1,0 +1,20 @@
+---
+title: "TODO"
+---
+# Result
+
+İ😀 I THINK THAT the interface is useful.
+
+> A quoted claim.[^record]
+
+[^record]: [Specification](https://example.com/specification)
+
+## Empty
+
+## Evidence
+
+The parser accepts [input][missing].
+
+```text
+TODO: 詳しくは参照してほしい。
+```

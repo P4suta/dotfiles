@@ -41,7 +41,7 @@ use std::io::Write as _;
 use std::path::Path;
 use std::process::{Output, Stdio};
 
-const PROPOSAL_PLAN: &str = "<proposed_plan>\n# Ownership verification\n\n## Changes\n\n- Add the supplied configuration.\n\n```json\n{\"enabled\":true}\n```\n</proposed_plan>\n";
+const PROPOSAL_PLAN: &str = "<proposed_plan>\n# Ownership verification\n\n## Changes\n\nAdd the supplied configuration.\n\n```json\n{\"enabled\":true}\n```\n</proposed_plan>\n";
 
 fn proposal_evidence(draft: &str) -> serde_json::Value {
     let claims: Vec<_> = draft

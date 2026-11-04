@@ -896,6 +896,41 @@ fn check(home: &Path, session: &str, draft: &Path, evidence: &Path) -> Result<()
 }
 
 fn check_at(home: &Path, session: &str, draft: &Path, evidence: &Path, cwd: &Path) -> Result<()> {
+    check_with_house(
+        home,
+        session,
+        draft,
+        evidence,
+        cwd,
+        prose::Bundle::installed,
+    )
+}
+
+fn check_house_style(draft: &str, bundle: impl FnOnce() -> Result<prose::Bundle>) -> Result<()> {
+    let findings = prose::house::check("answer.md", draft, bundle)?;
+    ensure!(
+        findings.is_empty(),
+        "answer violates the shared house style:\n{}",
+        findings
+            .iter()
+            .map(|finding| format!(
+                "{}:{}:{}: {}: {}",
+                finding.path, finding.line, finding.column, finding.rule, finding.message
+            ))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    Ok(())
+}
+
+fn check_with_house(
+    home: &Path,
+    session: &str,
+    draft: &Path,
+    evidence: &Path,
+    cwd: &Path,
+    bundle: impl FnOnce() -> Result<prose::Bundle>,
+) -> Result<()> {
     let directory = directory(home, session)?;
     let state = request(&directory)?;
     state.check_assurance(home, cwd)?;
@@ -922,6 +957,7 @@ fn check_at(home: &Path, session: &str, draft: &Path, evidence: &Path, cwd: &Pat
         proof,
         arguments: count,
     } = inspect(&draft, &evidence, &state.prompt)?;
+    check_house_style(&draft, bundle)?;
     let mut fetched = BTreeMap::new();
     for claim in &document.claims {
         match &claim.basis {
@@ -1503,6 +1539,58 @@ mod tests {
         write_json(&directory.join("request.json"), &state).unwrap();
         assert!(check_observation(&directory, &state, id, "git version", 0).is_err());
         assert!(stop(home.path(), &input).is_err());
+    }
+
+    #[test]
+    fn answer_evidence_refuses_shared_house_violations_before_recording_success() {
+        let home = tempfile::tempdir().unwrap();
+        begin(home.path(), &input("Plan a change")).unwrap();
+        let draft = home.path().join("draft.txt");
+        let evidence = home.path().join("evidence.json");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for (text, expected_rule) in [
+            (
+                "提案：このメソッドをマージします。",
+                Some("House.JapaneseDemonstrative"),
+            ),
+            (
+                "提案：methodを使います。interfaceを使います。",
+                Some("Dotfiles.SentencePerLine"),
+            ),
+            (
+                "提案：<ul><li>methodを使います。</li></ul>",
+                Some("House.List"),
+            ),
+            (
+                "提案：<table><tr><td>methodを使います。</td></tr></table>",
+                Some("House.Table"),
+            ),
+            ("提案：methodとinterfaceを使います。", None),
+        ] {
+            fs::write(&draft, text).unwrap();
+            fs::write(&evidence, json!({"version":1,"atoms":[],"readings":[],"claims":[{"id":"change","text":text,"basis":{"kind":"proposal","reason":"Proposed implementation"}}]}).to_string()).unwrap();
+            let result = check_with_house(
+                home.path(),
+                "session",
+                &draft,
+                &evidence,
+                home.path(),
+                || prose::Bundle::source(&root),
+            );
+            if let Some(expected_rule) = expected_rule {
+                let error = result.unwrap_err();
+                assert!(
+                    error.to_string().contains(expected_rule),
+                    "{text}: {error:#}"
+                );
+                assert!(stop(home.path(), &input("Plan a change")).is_err());
+            } else {
+                result.unwrap();
+                let mut completed = input("Plan a change");
+                completed.last_assistant_message = Some(text.to_owned());
+                stop(home.path(), &completed).unwrap();
+            }
+        }
     }
 
     #[test]

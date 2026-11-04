@@ -4,9 +4,7 @@
 //!
 //! The gate refuses a push whose range adds or changes a manifest line of a dependency's own manifest with a non-major update available, reading the offered commit.
 //! The default update types cover minor, patch, pin, and `pinDigest`, and `RENOVATE_LOCAL_UPDATE_TYPES` overrides them, with `RENOVATE_LOCAL_GATE_TYPES` read as the name before the rename.
-//! Everything else only informs:
-//!
-//! * Major updates never block, because deferring them stays a valid decision.
+//! Everything else only informs, and major updates never block, because deferring them stays a valid decision.
 //!
 //! Missing tools, malformed reports, and failed lookups refuse the push with a structured next action.
 //! A `uses-with` input that holds a `${{ matrix.* }}` expression names no version, so it needs no lookup.

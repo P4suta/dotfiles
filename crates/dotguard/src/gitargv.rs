@@ -1,21 +1,18 @@
 //! What `~/.local/bin/git` refuses to run.
 //!
-//! Two families of rule live here:
-//!
-//! * **force**: operations that discard committed history or uncommitted work with no undo.
-//!   `push --force`, `reset --hard`, `clean -f`, `branch -D`, `stash drop`, `reflog expire`, `filter-branch`.
-//! * **no-verify**: operations that switch off signing or hook enforcement for one command, such as `--no-verify`, `--no-gpg-sign`, and their `-c key=value` forms.
+//! The force family refuses operations that discard committed history or uncommitted work with no undo.
+//! The family covers `push --force`, `reset --hard`, `clean -f`, `branch -D`, `stash drop`, `reflog expire`, and `filter-branch`.
+//! The no-verify family refuses operations that switch off signing or hook enforcement for one command, such as `--no-verify`, `--no-gpg-sign`, and their `-c key=value` forms.
 //!
 //! This layer only handles commands that resolve `git` through `PATH`, so a direct path or a different `PATH` bypasses it.
 //! `dotguard pre-push` runs from `core.hooksPath` and enforces the rule for every push.
 //!
-//! * **published rewrites**: a `rebase` that rewrites a commit a remote-tracking ref holds, and `push --force-with-lease`.
-//!   The stack tooling runs both while it holds the repository's stack lease.
+//! The published-rewrite family covers a `rebase` that rewrites a commit that a remote-tracking ref holds, and `push --force-with-lease`.
+//! The stack tooling runs both while it holds the repository's stack lease.
 //!
-//! Rules left out:
-//! * `commit --amend` and a `rebase` of unpushed commits: rewriting unpushed history counts as ordinary work, and pre-push catches pushed history.
-//! * `restore` and `checkout -- <path>`: no flag marks the destruction, so a rule would refuse the whole command.
-//! * `rm -f`: common in scripts, and the index still holds what it removes.
+//! `commit --amend` and a `rebase` of unpushed commits stay allowed, because rewriting unpushed history counts as ordinary work and pre-push catches pushed history.
+//! `restore` and `checkout -- <path>` stay allowed, because no flag marks the destruction and a rule would refuse the whole command.
+//! `rm -f` stays allowed, because scripts use it and the index still holds what it removes.
 
 use crate::bypass::Rule;
 use crate::gate_rules::{Fixup, Source, Spelling, Verdict, Withheld, spelling, verdict};

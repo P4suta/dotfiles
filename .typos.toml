@@ -23,6 +23,8 @@ ignore-hidden = false
 [default]
 # File names produce false positives.
 check-filename = false
+# A Rust Unicode escape spells a code point in hexadecimal, not a word.
+extend-ignore-re = ['\\u\{[0-9a-fA-F]+\}']
 
 [default.extend-words]
 tre = "tre"     # Tool name.

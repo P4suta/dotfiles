@@ -22,11 +22,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+pub mod copyedit;
+pub mod editorial;
+pub mod house;
 pub mod japanese;
 
 pub const POLICY: &str = "policy/prose.toml";
 pub const SOURCE_CONFIG: &str = "home/dot_config/prose";
 const INSTALL: &str = "just install-prose";
+const INSTALLED_TOOLS: &str = "tools.toml";
+const COPYEDIT_TOOLS: &str = "copyedit-tools.toml";
 
 /// The digest digits that name a cached textlint installation.
 const CACHE_DIGEST_DIGITS: usize = 16;
@@ -110,12 +115,22 @@ struct Tools {
     bun: Option<PathBuf>,
 }
 
+#[derive(Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
+struct CopyeditTools {
+    uv: Option<PathBuf>,
+    xh: Option<PathBuf>,
+}
+
 /// The configuration, the pinned linters, and the textlint installation one check runs with.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Bundle {
     pub config: PathBuf,
     pub textlint: PathBuf,
     vale: Option<PathBuf>,
+    bun: Option<PathBuf>,
+    uv: Option<PathBuf>,
+    xh: Option<PathBuf>,
 }
 
 fn home() -> Result<PathBuf> {
@@ -149,6 +164,9 @@ impl Bundle {
             )),
             config,
             vale: None,
+            bun: None,
+            uv: None,
+            xh: None,
         })
     }
 
@@ -156,22 +174,32 @@ impl Bundle {
     ///
     /// # Errors
     ///
-    /// Returns an error when the system reports no user directory, or reading or parsing the installed `tools.toml` fails.
+    /// Returns an error when the system reports no user directory, or reading or parsing the installed tool metadata fails.
     pub fn installed() -> Result<Self> {
         let config = match std::env::var_os("PROSE_CONFIG") {
             Some(directory) => PathBuf::from(directory),
             None => home()?.join(".config/prose"),
         };
         let runtime = runtime_directory()?;
-        let tools: Tools = match fs::read_to_string(runtime.join("tools.toml")) {
+        let tools: Tools = match fs::read_to_string(runtime.join(INSTALLED_TOOLS)) {
             Ok(text) => toml::from_str(&text).context("read the installed prose tool paths")?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Tools::default(),
+            Err(error) => return Err(error.into()),
+        };
+        let copyedit: CopyeditTools = match fs::read_to_string(runtime.join(COPYEDIT_TOOLS)) {
+            Ok(text) => {
+                toml::from_str(&text).context("read the installed copyediting tool paths")?
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => CopyeditTools::default(),
             Err(error) => return Err(error.into()),
         };
         Ok(Self {
             config,
             textlint: runtime.join("textlint"),
             vale: tools.vale,
+            bun: tools.bun,
+            uv: copyedit.uv,
+            xh: copyedit.xh,
         })
     }
 
@@ -179,6 +207,24 @@ impl Bundle {
         self.vale
             .as_ref()
             .map_or_else(|| Tool::Vale.command(), crate::tool::external)
+    }
+
+    fn bun(&self) -> Command {
+        self.bun
+            .as_ref()
+            .map_or_else(|| Tool::Bun.command(), crate::tool::external)
+    }
+
+    fn uv(&self) -> Command {
+        self.uv
+            .as_ref()
+            .map_or_else(|| Tool::Uv.command(), crate::tool::external)
+    }
+
+    fn xh(&self) -> Command {
+        self.xh
+            .as_ref()
+            .map_or_else(|| Tool::Xh.command(), crate::tool::external)
     }
 
     /// Refuses a missing configuration, a changed style package, or another Vale version.
@@ -767,6 +813,7 @@ pub fn check(bundle: &Bundle, channel: Channel, path: &str, text: &str) -> Resul
             findings.extend(language(&input, lang::Mode::English));
             findings.extend(sentence_per_line(&input));
             findings.extend(vale(bundle, std::slice::from_ref(&input))?);
+            findings.extend(house_findings(bundle, &input)?);
         }
     }
     findings.sort_by(|a, b| (a.line, a.column, &a.rule).cmp(&(b.line, b.column, &b.rule)));
@@ -1014,7 +1061,19 @@ pub fn check_inputs(bundle: &Bundle, inputs: &[Input]) -> Result<Vec<Finding>> {
         })
         .collect();
     findings.extend(vale(bundle, inputs)?);
+    for input in inputs {
+        findings.extend(house_findings(bundle, input)?);
+    }
     Ok(findings)
+}
+
+fn house_findings(bundle: &Bundle, input: &Input) -> Result<Vec<Finding>> {
+    Ok(
+        house::check(&input.path, &input.text, || Ok(bundle.clone()))?
+            .into_iter()
+            .map(|item| input.finding(item.line, item.column, &item.rule, &item.message))
+            .collect(),
+    )
 }
 
 /// Checks the comments of source files for language and style.
@@ -1556,11 +1615,7 @@ pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()
     )?;
     let runtime = runtime_directory()?;
     fs::create_dir_all(&runtime)?;
-    let tools = Tools {
-        vale: Some(pinned_path(source, "vale")?),
-        bun: Some(pinned_path(source, "bun")?),
-    };
-    fs::write(runtime.join("tools.toml"), toml::to_string(&tools)?)?;
+    let tools = install_runtime_tools(source, &runtime)?;
     install_textlint(
         &source.join(SOURCE_CONFIG).join("textlint"),
         &runtime.join("textlint"),
@@ -1575,4 +1630,46 @@ pub fn install(source: &Path, binary: &Path, user_directory: &Path) -> Result<()
         "Installed the persisted prose checker and its pinned linters; removed retired reply checks"
     );
     Ok(())
+}
+
+fn install_runtime_tools(source: &Path, runtime: &Path) -> Result<Tools> {
+    let tools = Tools {
+        vale: Some(pinned_path(source, "vale")?),
+        bun: Some(pinned_path(source, "bun")?),
+    };
+    let copyedit = CopyeditTools {
+        uv: Some(pinned_path(source, "uv")?),
+        xh: Some(pinned_path(source, "xh")?),
+    };
+    fs::write(runtime.join(COPYEDIT_TOOLS), toml::to_string(&copyedit)?)?;
+    fs::write(runtime.join(INSTALLED_TOOLS), toml::to_string(&tools)?)?;
+    Ok(tools)
+}
+
+#[cfg(test)]
+mod runtime_tests {
+    use super::*;
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyTools {
+        vale: PathBuf,
+        bun: PathBuf,
+    }
+
+    #[test]
+    fn installation_preserves_strict_legacy_tool_metadata() -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let runtime = tempfile::tempdir()?;
+        let written = install_runtime_tools(&root, runtime.path())?;
+        let legacy: LegacyTools =
+            toml::from_str(&fs::read_to_string(runtime.path().join(INSTALLED_TOOLS))?)?;
+        assert_eq!(Some(legacy.vale), written.vale);
+        assert_eq!(Some(legacy.bun), written.bun);
+        let copyedit: CopyeditTools =
+            toml::from_str(&fs::read_to_string(runtime.path().join(COPYEDIT_TOOLS))?)?;
+        assert!(copyedit.uv.is_some_and(|path| path.is_file()));
+        assert!(copyedit.xh.is_some_and(|path| path.is_file()));
+        Ok(())
+    }
 }

@@ -1,5 +1,10 @@
 [[exempt]]
 scope = "documents"
+paths = ["crates/prose/tests/fixtures/copyedit/"]
+reason = "Native-language copyediting fixtures contain deliberate grammar and typography defects checked by the multilingual regression suite."
+
+[[exempt]]
+scope = "documents"
 paths = ["home/dot_config/prose/styles/"]
 reason = "Vendored Vale packages keep their upstream text."
 

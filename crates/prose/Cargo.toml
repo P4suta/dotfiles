@@ -15,6 +15,8 @@ path = "src/main.rs"
 anyhow = "1.0"
 clap = { version = "4.6", features = ["derive", "env"] }
 dotguard = { path = "../dotguard" }
+html5ever = "0.39.0"
+markup5ever_rcdom = "0.39.0"
 platform = { path = "../platform" }
 pulldown-cmark = "0.13"
 rules = { path = "../rules" }
@@ -24,8 +26,6 @@ sha2 = "0.11.0"
 skill-ops = { path = "../skill-ops" }
 tempfile = "3.27"
 toml = "1.0"
-
-[dev-dependencies]
 yaml-rust2 = "0.13"
 
 [lints]

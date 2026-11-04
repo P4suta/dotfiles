@@ -1,11 +1,10 @@
 //! The local policy gate.
 //!
-//! One binary serves four global entry points:
-//!
-//! - `~/.local/bin/git` runs `dotguard git …`, which applies the argument policy and then executes git, and on Windows a copy named `git.exe` acts as the wrapper.
-//! - `~/.config/git/hooks/pre-push` runs `dotguard pre-push`, the force-push gate.
-//! - `~/.config/git/hooks/commit-msg` runs `dotguard commit-msg`, which strips attribution, refuses provenance phrases, and checks the language.
-//! - `~/.config/git/hooks/pre-commit` runs `dotguard pre-commit`, the language and staged-diff gates.
+//! One binary serves four global entry points.
+//! `~/.local/bin/git` runs `dotguard git …`, which applies the argument policy and then executes git, and on Windows a copy named `git.exe` acts as the wrapper.
+//! `~/.config/git/hooks/pre-push` runs `dotguard pre-push`, the force-push gate.
+//! `~/.config/git/hooks/commit-msg` runs `dotguard commit-msg`, which strips attribution, refuses provenance phrases, and checks the language.
+//! `~/.config/git/hooks/pre-commit` runs `dotguard pre-commit`, the language and staged-diff gates.
 //!
 //! `core.hooksPath` in the global Git configuration points every repository at that hooks directory, so no repository needs to opt in.
 

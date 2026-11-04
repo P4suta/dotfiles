@@ -1,0 +1,14 @@
+---
+title: 京都の庭園
+description: >-
+  水辺を歩く。
+  木々を眺める。
+feature_image_caption: "庭園\u3000の池"
+slug: hidden-machine-field
+---
+
+本文の[案内](https://example.com/a_b)です。
+
+![庭園の池](../assets/garden.jpg)
+
+`literal  code`

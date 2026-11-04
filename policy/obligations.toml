@@ -6,6 +6,115 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/editorial_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_an_authored_list_as_flowing_prose() {
+    assert!(!production::layout_review(production::Context::Authored, production::Layout::List));
+}
+#[kani::proof]
+fn reject_an_authored_table_as_flowing_prose() {
+    assert!(!production::layout_review(production::Context::Authored, production::Layout::Table));
+}
+#[kani::proof]
+fn reject_rewriting_a_quoted_layout() {
+    assert!(production::layout_review(production::Context::Quotation, production::Layout::List));
+}
+#[kani::proof]
+fn reject_quoted_marker_as_authored() {
+    assert!(production::marker_review(true, true, production::Context::Quotation, true));
+}
+#[kani::proof]
+fn reject_expository_policy_for_general_prose() {
+    assert!(production::marker_review(true, false, production::Context::Authored, true));
+}
+#[kani::proof]
+fn reject_unfinished_marker_as_clean() {
+    assert!(!production::marker_review(true, false, production::Context::Authored, false));
+}
+#[kani::proof]
+fn reject_short_detailed_report_as_sufficient() {
+    assert!(!production::report_length_review(true, production::MIN_DETAILED_REPORT_CHARACTERS - 1));
+}
+#[kani::proof]
+fn reject_minimum_detailed_report_as_short() {
+    assert!(production::report_length_review(true, production::MIN_DETAILED_REPORT_CHARACTERS));
+}
+#[kani::proof]
+fn reject_applying_report_minimum_to_ordinary_prose() {
+    assert!(production::report_length_review(false, 0));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/copyedit_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_a_forbidden_authored_house_form_as_clean() {
+    assert!(!production::house_style_violation(true, false, true));
+}
+#[kani::proof]
+fn reject_changing_a_literal_source_to_follow_house_style() {
+    assert!(production::house_style_violation(true, true, true));
+}
+#[kani::proof]
+fn reject_retaining_a_typography_error_through_review() {
+    assert_eq!(production::review_verdict(production::ReviewCoverage { expected: 1, received: 1, errors: 1, binding: production::ReviewBinding::Current, exact: true, retained: true, evidence: true }), production::ReviewVerdict::Retained);
+}
+#[kani::proof]
+fn reject_reusing_review_decisions_for_another_report() {
+    assert_eq!(production::review_verdict(production::ReviewCoverage { expected: 1, received: 1, errors: 0, binding: production::ReviewBinding::Stale, exact: true, retained: true, evidence: true }), production::ReviewVerdict::Retained);
+}
+#[kani::proof]
+fn reject_an_empty_annotation_span() {
+    assert!(production::span_valid(1, 1, 1));
+}
+#[kani::proof]
+fn reject_missing_a_substantial_paragraph_duplicate() {
+    assert_eq!(production::duplication(production::Reuse { exact: true, facts_match: true, characters: 50, words: 12, shared: 10, union: 10 }), production::ReuseKind::None);
+}
+#[kani::proof]
+fn reject_missing_a_long_chain_of_dependent_clauses() {
+    assert!(!production::complex_sentence(production::Language::English, production::Complexity { words: 100, clauses: 5, distance: 40 }));
+}
+#[kani::proof]
+fn reject_a_lexical_exception_in_its_known_bad_context() {
+    assert!(production::calibrated_word(production::Calibration { word: true, role: true, counterexample: true }));
+}
+#[kani::proof]
+fn reject_replacing_native_japanese_rules_with_unqualified_grammar_rules() {
+    assert_eq!(production::profile(production::Language::Japanese).grammar, production::GrammarEngine::LanguageTool);
+}
+#[kani::proof]
+fn reject_a_mismatched_present_subject() {
+    use production::{AgreementClass::*, AgreementContext};
+    assert!(!production::disagrees(ThirdSingular, Other, AgreementContext { present: true, coordinated: false, protected: false }));
+}
+#[kani::proof]
+fn reject_adjacent_duplicate_function_words() {
+    assert!(!production::repeated_function(production::Repetition { same_surface: true, role: production::Role::Function, adjacent: true, protected: false }));
+}
+#[kani::proof]
+fn reject_decorative_cjk_spacing() {
+    assert_eq!(production::spacing(production::Script::Cjk, production::Script::Cjk, production::Space::Ordinary, false), production::SpaceFault::None);
+}
+#[kani::proof]
+fn reject_a_singular_determiner_for_a_plural_noun_in_a_finite_clause() {
+    assert!(!production::determiner_number(production::Determiner { singular: true, plural_noun: true, finite_clause: true, protected: production::Protection::Prose }));
+}
+#[kani::proof]
+fn reject_an_attributive_marker_in_the_adverbial_role() {
+    assert!(!production::chinese_modifier(production::ModifierRole::Adverbial, true, false));
+}
+#[kani::proof]
+fn reject_success_without_an_engine() {
+    assert_eq!(production::verdict(production::Coverage { expected: 1, received: 1, identity: true, spans: true, language_engine: production::Engine::Unavailable, diagnostics: false }), production::Verdict::Clean);
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/answer_rules.rs"
 probes = '''
 #[kani::proof]
@@ -1404,6 +1513,16 @@ fn reject_selecting_ambiguous_project_actionlint() {
 #[kani::proof]
 fn reject_global_fallback_for_a_missing_project_biome() {
     assert!(production::biome_source(true, false) == production::BiomeSource::Global);
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_losing_a_located_syntax_refusal() {
+    assert_eq!(production::shell_syntax(production::Outcome::Findings, "1:1: bad"), production::ShellSyntax::Unavailable);
+}
+#[kani::proof]
+#[kani::unwind(8)]
+fn reject_treating_a_parser_failure_as_a_syntax_refusal() {
+    assert_eq!(production::shell_syntax(production::Outcome::Failed, "1:1: bad"), production::ShellSyntax::Rejected);
 }
 #[kani::proof]
 #[kani::unwind(4)]

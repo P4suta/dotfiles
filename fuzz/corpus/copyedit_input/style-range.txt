@@ -1,0 +1,4 @@
+先頭。
+本文😀です。
+---JSON---
+{"ruleId":"sentence-length","line":2,"column":6021,"range":[8,10],"message":"Review this sentence."}
