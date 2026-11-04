@@ -33,7 +33,7 @@ When publication becomes authorized, link the actual local history with checked 
 The new remote start supplies no retroactive authority for earlier local edits.
 
 Assess every PR using the [importance criteria](references/importance.md) before publication.
-The checked workflow requires an authenticated current-diff assessment and defaults to no CodeRabbit for `low` and `medium`, guarded CLI for `high`, and PR review for `critical`.
+The checked workflow requires an authenticated current-diff assessment and defaults to no CodeRabbit review for `low`, `medium`, and `high`, and PR review for `critical`.
 An [owner-local repository policy](references/workflow.md#repository-pr-review-policy) selects PR review for every level without changing importance.
 The workflow keeps its assessments, pause records, and issue contexts in owner-local state, and published documents and tracked files never carry them.
 Keep severe levels exceptional and explain concrete consequences rather than escalating by filename or diff size.
