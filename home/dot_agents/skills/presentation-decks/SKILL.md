@@ -19,6 +19,13 @@ State the one message the talk must leave and the decision or impression it shou
 Lead with results when the audience comes from outside the team.
 Show growth through decisions inside the work instead of self-description.
 
+## Copy
+
+Use direct factual copy in professional slide titles, body text, and speaker notes.
+Use [descriptive headings](https://www.w3.org/WAI/WCAG22/Understanding/headings-and-labels.html) that name the subject, problem, decision, implementation, or result.
+Don't invent conversational hooks, rhetorical questions, inner monologues, wishes, or slogans in the presenter's voice.
+State documented motivations in ordinary prose and distinguish attributed source quotations from authored narration.
+
 ## Time budget
 
 Derive the slide count from the talk length, starting from about 25 seconds per spoken slide.
@@ -42,7 +49,8 @@ Keep superseded slides in a separate skipped section instead of deleting them.
 ## Script first
 
 Write the full script before building any slide.
-Give each spoken slide a title that states its message in one sentence and one figure that supports it.
+Use a descriptive subject title for background and setup, and a factual message title for a result or decision.
+Give each spoken slide one figure that supports its title.
 Draw the figure from words in the script, and make it readable in about three seconds.
 Read the titles in sequence and repair any gap in the argument they summarize.
 Choose the figure from the relationship it shows: a sequence, a comparison, a change, a structure, or a real example.
