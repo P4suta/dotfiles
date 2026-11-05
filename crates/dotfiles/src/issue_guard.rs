@@ -114,31 +114,23 @@ fn memory_refusal(path: &Path) -> anyhow::Error {
     .into()
 }
 
-/// Whether the nearest existing directory of `path` lies in a Git checkout.
-fn in_checkout(path: &Path) -> Result<bool> {
-    let parent = path.parent().context("edit has no parent directory")?;
-    let existing = parent
-        .ancestors()
-        .find(|directory| directory.is_dir())
-        .context("edit has no existing parent directory")?;
-    Ok(crate::canonical(existing)?
-        .ancestors()
-        .any(|directory| directory.join(".git").exists()))
-}
-
-/// The checkout that holds an absolute edit target, found from its nearest existing directory.
-fn edit_checkout(path: &Path) -> Result<PathBuf> {
+/// An edit target's checkout, or `None` when no candidate is a Git working tree.
+fn edit_checkout(path: &Path) -> Result<Option<PathBuf>> {
     let parent = path.parent().context("edit has no parent directory")?;
     let existing = parent
         .ancestors()
         .find(|directory| directory.is_dir())
         .context("edit has no existing parent directory")?;
     let existing = crate::canonical(existing)?;
-    let boundary = existing
+    for boundary in existing
         .ancestors()
-        .find(|directory| directory.join(".git").exists())
-        .context("edit has no checkout boundary")?;
-    platform::issue_context::checkout(boundary)
+        .filter(|directory| directory.join(".git").exists())
+    {
+        if let Some(root) = crate::line_endings::work_tree(boundary)? {
+            return Ok(Some(crate::canonical(&root)?));
+        }
+    }
+    Ok(None)
 }
 
 fn refuse_git_metadata(root: &Path, absolute: &Path) -> Result<()> {
@@ -203,18 +195,11 @@ pub fn check(input: &str) -> Result<()> {
             return Err(memory_refusal(path));
         }
     }
-    let mut checked = Vec::new();
-    for path in paths {
-        if in_checkout(&path)? {
-            checked.push(path);
-        }
-    }
-    if checked.is_empty() {
-        return Ok(());
-    }
     let mut checkouts: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-    for path in checked {
-        let root = edit_checkout(&path)?;
+    for path in paths {
+        let Some(root) = edit_checkout(&path)? else {
+            continue;
+        };
         let absolute = platform::issue_context::edit_path(&root, &path)?;
         refuse_git_metadata(&root, &absolute)?;
         let relative = absolute
@@ -305,10 +290,107 @@ mod tests {
         self::repository(&repository, true)?;
         let root = crate::canonical(&repository)?;
         let new = repository.join("new/directory/file.rs");
-        assert_eq!(edit_checkout(&new)?, root);
+        assert_eq!(edit_checkout(&new)?, Some(root.clone()));
         let outside = scope.path().join("outside.rs");
         assert!(platform::issue_context::edit_path(&root, &outside).is_err());
-        assert!(edit_checkout(&outside).is_err());
+        assert_eq!(edit_checkout(&outside)?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn empty_git_markers_do_not_create_checkout_boundaries() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        std::fs::create_dir(scope.path().join(".git"))?;
+        for path in [
+            PathBuf::from("config/new/directory/file.txt"),
+            scope.path().join("config/new/directory/file.txt"),
+        ] {
+            for (tool, input) in [
+                ("Write", serde_json::json!({"file_path": path})),
+                (
+                    "functions.apply_patch",
+                    serde_json::json!({"command": format!("*** Add File: {}\n", path.display())}),
+                ),
+            ] {
+                let packet = serde_json::json!({
+                    "cwd": scope.path(),
+                    "tool_name": tool,
+                    "tool_input": input
+                });
+                check(&packet.to_string())?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn an_empty_git_marker_does_not_hide_an_enclosing_checkout() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let repository = scope.path().join("repository");
+        self::repository(&repository, true)?;
+        let nested = repository.join("scratch");
+        std::fs::create_dir_all(nested.join(".git"))?;
+        let packet = serde_json::json!({
+            "cwd": scope.path(),
+            "tool_name": "Write",
+            "tool_input": {"file_path": nested.join("new.rs")}
+        });
+        let error = check(&packet.to_string()).unwrap_err();
+        assert!(
+            error.downcast_ref::<platform::refusal::Refusal>().is_some(),
+            "{error:#}"
+        );
+        assert!(
+            format!("{error:#}")
+                .contains("implementation edits require a checked destination-bound issue context"),
+            "{error:#}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_git_markers_keep_discovery_failures() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        std::fs::write(scope.path().join(".git"), "invalid gitfile\n")?;
+        let packet = serde_json::json!({
+            "cwd": scope.path(),
+            "tool_name": "Write",
+            "tool_input": {"file_path": scope.path().join("new.txt")}
+        });
+        let error = check(&packet.to_string()).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("invalid gitfile format"),
+            "{error:#}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn gitfile_checkouts_keep_their_issue_authority() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let repository = scope.path().join("repository");
+        let output = platform::process::command("git")
+            .args(["init", "--quiet", "--separate-git-dir"])
+            .arg(scope.path().join("metadata"))
+            .arg(&repository)
+            .output()?;
+        ensure!(output.status.success(), "{output:?}");
+        self::repository(&repository, true)?;
+        let packet = serde_json::json!({
+            "cwd": scope.path(),
+            "tool_name": "Write",
+            "tool_input": {"file_path": repository.join("new.rs")}
+        });
+        let error = check(&packet.to_string()).unwrap_err();
+        assert!(
+            error.downcast_ref::<platform::refusal::Refusal>().is_some(),
+            "{error:#}"
+        );
+        assert!(
+            format!("{error:#}")
+                .contains("implementation edits require a checked destination-bound issue context"),
+            "{error:#}"
+        );
         Ok(())
     }
 
@@ -321,7 +403,7 @@ mod tests {
             self::repository(repository, true)?;
         }
         let target = other.join("new.rs");
-        assert_eq!(edit_checkout(&target)?, crate::canonical(&other)?);
+        assert_eq!(edit_checkout(&target)?, Some(crate::canonical(&other)?));
         let packet = serde_json::json!({
             "cwd": session,
             "tool_name": "Write",

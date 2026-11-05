@@ -54,6 +54,11 @@ impl Wrapper {
         let scope = temporary.join(format!("dotguard-wrapper-{}-{name}", std::process::id()));
         platform::cleanup::remove_dir_all(&scope);
         std::fs::create_dir_all(scope.join("repository")).unwrap();
+        std::fs::write(
+            scope.join("gitconfig"),
+            "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+        )
+        .unwrap();
         let wrapper = Self {
             scope,
             git,
@@ -324,11 +329,6 @@ fn lefthook_drops_its_own_backup_stash_and_other_drops_stay_refused() {
 #[test]
 fn a_forced_checkout_that_only_restores_deleted_files_passes() {
     let wrapper = Wrapper::new("force-restore");
-    std::fs::write(
-        wrapper.scope.join("gitconfig"),
-        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
-    )
-    .unwrap();
     let repository = wrapper.scope.join("repository");
     let succeeds = |arguments: &[&str]| {
         let output = wrapper.run(arguments, None);
