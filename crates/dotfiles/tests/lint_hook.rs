@@ -1,13 +1,20 @@
 use serde_json::{Value, json};
+use std::ffi::OsStr;
 use std::io::Write;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 
-#[path = "../../platform/tests/support/fixture_process.rs"]
-mod fixture_process;
+#[path = "../../dotguard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
+use fixture_git::fixture_process;
+
+fn fixture_command(program: impl AsRef<OsStr>, root: &Path) -> Command {
+    fixture_git::command(program, &root.join(".fixture-gitconfig"))
+}
 
 fn hook(root: &Path, command: &str, payload: &Value) -> (bool, String) {
-    let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), root)
+    let mut child = fixture_command(env!("CARGO_BIN_EXE_dotfiles"), root)
         .arg(command)
         .current_dir(root)
         .stdin(Stdio::piped())
@@ -37,8 +44,8 @@ fn write_event(root: &Path, path: &str) -> Value {
 }
 
 fn init_repository(root: &Path) {
-    let output = platform::tool::Tool::Git
-        .command()
+    std::fs::create_dir_all(root).unwrap();
+    let output = fixture_git::command("git", &root.join(".fixture-gitconfig"))
         .args(["init", "--quiet"])
         .arg(root)
         .output()
@@ -138,6 +145,17 @@ fn scripts_assigned_in_commands_are_linted_and_unresolved_paths_have_a_next_acti
 #[test]
 fn a_wrapped_comment_sentence_blocks_and_one_sentence_per_line_is_admitted() {
     let root = tempfile::tempdir().unwrap();
+    let config = root
+        .path()
+        .join(".fixture-gitconfig")
+        .with_extension("config-home")
+        .join("ocomment/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(
+        config,
+        include_str!("../../../home/dot_config/ocomment/config.toml"),
+    )
+    .unwrap();
     let path = root.path().join("probe.rs");
     std::fs::write(
         &path,
@@ -236,7 +254,7 @@ fn biome_uses_the_project_installation_and_configuration_directory() {
         }
         let mut directories = vec![bin.clone()];
         directories.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
-        let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), scope.path())
+        let mut child = fixture_command(env!("CARGO_BIN_EXE_dotfiles"), &root)
             .arg("lint-hook")
             .current_dir(&root)
             .env("PATH", std::env::join_paths(directories).unwrap())
@@ -356,7 +374,7 @@ impl ActionlintFixture<'_> {
         }
         let mut directories = vec![self.bin.to_path_buf()];
         directories.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
-        let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), self.scope)
+        let mut child = fixture_command(env!("CARGO_BIN_EXE_dotfiles"), self.root)
             .arg("lint-hook")
             .current_dir(self.root)
             .env("PATH", std::env::join_paths(directories).unwrap())
@@ -632,7 +650,7 @@ fn opencode_blocks_a_shell_finding_and_admits_its_fix() {
         ("#!/bin/sh\nprintf '%s\\n' 'clean'\n", "clean"),
     ] {
         std::fs::write(root.path().join("probe.sh"), source).unwrap();
-        let output = fixture_process::command(platform::tool::Tool::Bun.executable(), root.path())
+        let output = fixture_command(platform::tool::Tool::Bun.executable(), root.path())
             .arg(&fixture)
             .arg(root.path())
             .arg(env!("CARGO_BIN_EXE_dotfiles"))
