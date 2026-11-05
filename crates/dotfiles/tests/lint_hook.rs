@@ -36,6 +36,16 @@ fn write_event(root: &Path, path: &str) -> Value {
     json!({"hook_event_name":"PostToolUse", "cwd":root, "tool_name":"Write", "tool_input":{"file_path":path}})
 }
 
+fn init_repository(root: &Path) {
+    let output = platform::tool::Tool::Git
+        .command()
+        .args(["init", "--quiet"])
+        .arg(root)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
 #[test]
 fn a_shell_finding_blocks_and_the_fixed_file_is_admitted() {
     let root = tempfile::tempdir().unwrap();
@@ -86,7 +96,7 @@ fn a_workflow_finding_blocks() {
 #[test]
 fn a_repository_exclusion_is_admitted() {
     let root = tempfile::tempdir().unwrap();
-    std::fs::create_dir(root.path().join(".git")).unwrap();
+    init_repository(root.path());
     std::fs::write(root.path().join("ruff.toml"), "exclude = [\"probe.py\"]\n").unwrap();
     std::fs::write(root.path().join("probe.py"), "import os\n").unwrap();
     let (success, clean) = hook(
@@ -171,7 +181,7 @@ fn unsupported_binary_files_stay_with_existing_gates() {
 #[test]
 fn repository_configs_are_respected_for_biome_taplo_and_shellcheck() {
     let root = tempfile::tempdir().unwrap();
-    std::fs::create_dir(root.path().join(".git")).unwrap();
+    init_repository(root.path());
     for (config, contents, path, source) in [
         (
             "biome.json",
@@ -204,7 +214,7 @@ fn biome_uses_the_project_installation_and_configuration_directory() {
     let scope = tempfile::tempdir().unwrap();
     let root = scope.path().join("project space 日本語");
     let bin = scope.path().join("bin");
-    std::fs::create_dir_all(root.join(".git")).unwrap();
+    init_repository(&root);
     std::fs::create_dir(&bin).unwrap();
     let executable = |name: &str| bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     let native = std::env::split_paths(&std::env::var_os("PATH").unwrap())
@@ -454,8 +464,8 @@ fn actionlint_uses_only_the_declared_project_installation() {
     let bin = scope.path().join("bin");
     let installation = scope.path().join("installed space 日本語");
     let action = root.join(".github/actions/probe/action.yml");
+    init_repository(&root);
     for directory in [
-        root.join(".git"),
         action.parent().unwrap().into(),
         bin.clone(),
         installation.clone(),
@@ -584,6 +594,7 @@ fn assignments_inside_scripts_and_all_invocation_forms_are_inspected() {
 #[test]
 fn configuration_outside_a_repository_cannot_disable_strict_defaults() {
     let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join(".git")).unwrap();
     std::fs::write(
         root.path().join("biome.json"),
         "{\"files\":{\"includes\":[\"**\",\"!probe.js\"]}}",
@@ -596,6 +607,20 @@ fn configuration_outside_a_repository_cannot_disable_strict_defaults() {
         &write_event(root.path(), "probe.js"),
     );
     assert!(blocked.contains("block"), "{blocked}");
+}
+
+#[test]
+fn malformed_git_markers_cannot_select_repository_configuration() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join(".git"), "invalid gitfile\n").unwrap();
+    std::fs::write(root.path().join("probe.py"), "import os\n").unwrap();
+    let (_, blocked) = hook(
+        root.path(),
+        "lint-hook",
+        &write_event(root.path(), "probe.py"),
+    );
+    assert!(blocked.contains("block"), "{blocked}");
+    assert!(blocked.contains("invalid gitfile format"), "{blocked}");
 }
 
 #[test]

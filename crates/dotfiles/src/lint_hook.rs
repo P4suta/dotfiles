@@ -206,11 +206,9 @@ fn tool(linter: Linter) -> Tool {
     }
 }
 
-fn repository(path: &Path) -> Option<PathBuf> {
-    path.parent()?
-        .ancestors()
-        .find(|directory| directory.join(".git").exists())
-        .map(Path::to_path_buf)
+fn repository(path: &Path) -> Result<Option<PathBuf>> {
+    path.parent()
+        .map_or(Ok(None), crate::line_endings::work_tree)
 }
 
 fn config_names(linter: Linter) -> &'static [&'static str] {
@@ -965,7 +963,7 @@ pub fn file(path: &Path, interpreter: Option<&str>) -> Result<Report> {
     } else {
         String::new()
     };
-    let root = repository(path);
+    let root = repository(path)?;
     let mut report = Report::default();
     let mut outcomes = Vec::new();
     for &linter in rules::linters(kind) {
