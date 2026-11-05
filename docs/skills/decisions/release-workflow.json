@@ -1,7 +1,7 @@
 {
-  "revision": "a473ba182a4c9e4513cd898884ada4126da8553ebe1cebcae7a6b160078144d6",
+  "revision": "844df339d23f503671d351b6279fec3bf31502606350e9fa861360502a76780f",
   "outcome": "keep",
-  "reason": "The revision removes the AI-assisted qualifier from the approval pointer.",
+  "reason": "The entrypoint delegates release-please configuration and recovery to its dedicated skill.",
   "evidence": [
     "home/dot_agents/skills/release-workflow/SKILL.md"
   ],
