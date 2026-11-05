@@ -136,3 +136,4 @@
 | [2026-11-04 Draw personal PRs and issues as monochrome D2 images](draw-personal-prs-and-issues-as-monochrome-d2-images.md) | accepted |  |
 | [2026-11-04 Preserve active tools behind managed guards](preserve-active-tools-behind-managed-guards.md) | proposed |  |
 | [2026-11-04 Require no CLI review for high PRs](require-no-cli-review-for-high-prs.md) | accepted |  |
+| [2026-11-05 Route desktop decisions through macOS guidance](route-desktop-decisions-through-macos-guidance.md) | accepted |  |
