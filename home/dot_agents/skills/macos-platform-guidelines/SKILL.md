@@ -17,6 +17,8 @@ Read [capture and sandbox](references/capture-and-sandbox.md) for Screen Recordi
 Read [verification and distribution](references/verification-and-distribution.md) for diagnostics, native acceptance, manifests, and signed artifacts.
 
 Use standard controls, system text styles, focus rings, selection, and window behavior when the project requests native appearance.
+Keep standard title bars and window controls at their system-defined sizes and positions.
+Don't shrink, redraw, rescale, or reposition system window buttons, including through a utility-window style chosen only to make a window float.
 Keep app decisions in testable types and platform effects in thin adapters.
 Preserve results when opening, copying, permission recovery, or relaunch fails.
 Bind asynchronous completions to their operation generation, reject obsolete results, and stop work on cancellation.

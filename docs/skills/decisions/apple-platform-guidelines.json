@@ -1,5 +1,5 @@
 {
-  "revision": "3c5892d8e12030af5514ef428f943dc95a9d5b1c55f824554e470ad45cf9338d",
+  "revision": "44978b35c289381638cbdee25a45bd2fe0550ef4f2d7b93e9fa68161821a6372",
   "outcome": "implemented",
   "reason": "Common guidance routes desktop decisions to macOS references and keeps mobile lifecycle APIs with their supported platforms. Topic references distinguish privacy declaration scope, primary sources, and empirical evidence from core proofs.",
   "evidence": [

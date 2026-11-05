@@ -1,5 +1,14 @@
 # Capture and sandboxing
 
+## Development identity
+
+Apple's [code identity requirements](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements) explain how privacy authorization follows signed code across updates.
+Use an existing Apple Development certificate for interactive development builds that must keep Screen Recording authorization across rebuilds.
+An ad hoc signature identifies particular code bytes, so a rebuild can invalidate an earlier grant while System Settings still lists the app as enabled.
+Keep verification bundles separate from the interactive app and verify that checks preserve its contents and signing identity.
+Distinguish an unavailable capability from the user's actual setting.
+An access preflight alone doesn't reveal the cause of a stale grant.
+
 ## Permission and screenshot scope
 
 Read [ScreenCaptureKit guidance](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos) and the selected API's availability.

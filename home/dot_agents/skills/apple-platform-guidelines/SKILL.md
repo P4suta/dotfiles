@@ -18,6 +18,8 @@ For iOS, iPadOS, tvOS, watchOS, or visionOS, read [platform behavior](references
 Read [shared sources](references/shared-sources.md) for feedback, privacy, logging, localization, or networking decisions.
 Apply `source-bound-interface-design` and the owner's visual preferences within the current artifact's explicit requirements.
 Prefer native system behavior when the artifact calls for standard platform colors, selection, materials, or accessibility accommodations.
+Preserve system-owned chrome and the platform's default control metrics and placement.
+Keep app content enlargement separate from window and navigation controls owned by the system.
 
 Apple documentation supports a Markdown view at the page URL with `.md` appended.
 If unavailable, read the DocC JSON at `https://developer.apple.com/tutorials/data/documentation/PATH.json`, or `https://developer.apple.com/tutorials/data/design/human-interface-guidelines/PAGE.json` for a design page.
