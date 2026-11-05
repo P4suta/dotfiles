@@ -1,0 +1,10 @@
+{
+  "revision": "59ba749f54e4257db21b840093d04c14dc1a44201bdae753fb05736cfbde3011",
+  "outcome": "implemented",
+  "reason": "The owner asked to reuse the GitHub Light slide design built for an internship talk. The skill records the Primer-based semantic tokens, the type ramp, the components, the page types, and the checks from that design system. It applies only on an explicit request, because monochrome-design states that explicit requirements for the current artifact take precedence and remains the default for other visual work.",
+  "evidence": [
+    "home/dot_agents/skills/github-style-slides/SKILL.md",
+    "home/dot_agents/skills/monochrome-design/SKILL.md"
+  ],
+  "revisit": null
+}
