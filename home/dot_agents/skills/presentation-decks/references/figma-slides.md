@@ -8,6 +8,7 @@ Clone a designed slide to reuse its layout, then replace its header with a heade
 Mark slides kept out of the talk as skipped, and leave them in a named section.
 Hold the page counter in a header component text property, and update every counter in one pass after a reorder.
 Give header tabs, appendix references, and table-of-contents entries a node hyperlink to the slide they name.
+Match each returned screenshot to the slide ID it came from, because one script may return fewer images than it requested.
 Write the script to each slide's speaker notes.
 Load each text node's current fonts before changing its characters.
 Keep the return value of one script under the tool's size limit by reading slides in batches.

@@ -22,6 +22,7 @@ Read the applicable [Primer component guidance](https://primer.style/product/com
 For a document, use descriptive headings and a working table of contents based on [Primer's navigation guidance](https://primer.style/product/components/nav-list/).
 Use repository controls, pull request states, and Actions views only when their actual functions or documented meaning belong to the artifact.
 Use documented activity and real project status for counters and badges.
+Give a Merged badge only to work with a confirmed merged pull request, and give other work a neutral label with its documented status.
 
 ## Canvas
 

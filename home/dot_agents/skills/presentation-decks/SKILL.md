@@ -40,6 +40,7 @@ A closed argument keeps the appendix details in the appendix.
 List all the work with each item's actual status, and mark the items the talk covers.
 Keep the title page, the overview, and the summary from presenting the covered items as the whole of the work.
 State each status as it stands, such as stopped before production, unmerged, or prototype.
+Keep implementation, adoption, operation, and measured effect apart, and use the same wording for an unconfirmed status on the slides, in the notes, and in the appendix.
 Put a results summary that shows each outcome side by side before the lessons, with the remaining work beside it.
 Define each specialist term on the slide where it first appears.
 Report results with measured numbers, and leave a number out instead of inventing one.
@@ -56,10 +57,19 @@ Read the titles in sequence and repair any gap in the argument they summarize.
 Choose the figure from the relationship it shows: a sequence, a comparison, a change, a structure, or a real example.
 Store the script in the speaker notes of each slide.
 
+## Building
+
+Revise an existing deck slide by slide, and keep the figures that already express each message.
+Rebuild a page only when its figure can't carry the new message.
+Design each slide for its own content, and inspect its screenshot before building the next one.
+Don't generate a deck in bulk from a text outline through one generic page renderer.
+Keep a person in the loop for a rebuild, and hand a delegated build back for review after the first few slides.
+
 ## Verification
 
 Compare every phrase on each spoken slide with that slide's script and resolve each phrase the script lacks.
 Read the script aloud and compare its duration with the slot.
+Record the method behind an estimate, and keep a synthetic reading apart from the presenter's timed reading.
 Check that the speaker notes hold the current script and that page counters follow the slide order.
 Capture each changed slide and inspect clipping, overlap, and connectors that miss their targets.
 Review the deck from distinct viewpoints, such as an outside listener, a domain reviewer, and title, figure, and script consistency.
