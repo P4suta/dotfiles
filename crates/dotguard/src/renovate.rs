@@ -845,8 +845,13 @@ const PRIVATE_FOLDER: u32 = 0o700;
 
 /// The lookup cache under the user's cache folder, created private to the user.
 /// Renovate expires each registry response by its own lifetimes, so a reused response is one that Renovate itself would trust.
-fn lookup_cache() -> Option<PathBuf> {
-    let directory = platform::home::cache_home(&platform::home::home()?).join(LOOKUP_CACHE);
+fn lookup_cache(uid: u32, gid: u32) -> Option<PathBuf> {
+    let root = platform::home::cache_home(&platform::home::home()?).join(LOOKUP_CACHE);
+    lookup_cache_at(&root, uid, gid)
+}
+
+fn lookup_cache_at(root: &Path, uid: u32, gid: u32) -> Option<PathBuf> {
+    let directory = root.join(format!("{uid}-{gid}"));
     std::fs::create_dir_all(&directory).ok()?;
     #[cfg(unix)]
     {
@@ -1009,7 +1014,7 @@ fn prepare(offered: Option<&str>, passthrough: &[String]) -> Option<RunConfig> {
             .filter(|s| !s.is_empty())
             .or_else(doppler_token),
         passthrough: passthrough.to_vec(),
-        cache: lookup_cache(),
+        cache: lookup_cache(uid, gid),
     })
 }
 
@@ -1173,7 +1178,10 @@ fn run_prepared(cfg: &RunConfig, quiet_stdout: bool) -> Option<i32> {
 
 #[cfg(test)]
 mod run_tests {
-    use super::{RunConfig, docker_plan, doppler_scope, image_is_pinned};
+    use super::{
+        DEFAULT_GID, DEFAULT_UID, RunConfig, docker_plan, doppler_scope, image_is_pinned,
+        lookup_cache_at,
+    };
     use std::path::PathBuf;
 
     #[test]
@@ -1215,6 +1223,42 @@ mod run_tests {
             a.iter()
                 .position(|arg| arg.starts_with("renovate/renovate:"))
                 > mount
+        );
+    }
+
+    #[test]
+    fn lookup_cache_identities_are_separate_and_reuse_only_their_own_entries() {
+        let scope = tempfile::tempdir().unwrap();
+        let first = lookup_cache_at(scope.path(), DEFAULT_UID, DEFAULT_GID).unwrap();
+        std::fs::write(first.join("entry"), b"registry response").unwrap();
+        let same = lookup_cache_at(scope.path(), DEFAULT_UID, DEFAULT_GID).unwrap();
+        assert_eq!(same, first);
+        assert_eq!(
+            std::fs::read(same.join("entry")).unwrap(),
+            b"registry response"
+        );
+        for (uid, gid) in [
+            (DEFAULT_UID + 1, DEFAULT_GID),
+            (DEFAULT_UID, DEFAULT_GID + 1),
+            (u32::MAX, u32::MAX),
+        ] {
+            let other = lookup_cache_at(scope.path(), uid, gid).unwrap();
+            assert_ne!(other, first);
+            assert!(!other.join("entry").exists());
+        }
+    }
+
+    #[test]
+    fn a_lookup_cache_namespace_preserves_the_existing_shared_cache() {
+        let scope = tempfile::tempdir().unwrap();
+        let existing = scope.path().join("renovate");
+        std::fs::create_dir_all(&existing).unwrap();
+        std::fs::write(existing.join("entry"), b"old cache response").unwrap();
+        let selected = lookup_cache_at(scope.path(), DEFAULT_UID, DEFAULT_GID).unwrap();
+        assert_ne!(selected, scope.path());
+        assert_eq!(
+            std::fs::read(existing.join("entry")).unwrap(),
+            b"old cache response"
         );
     }
 
