@@ -12,7 +12,7 @@ pub fn command(program: &str) -> Command {
     cmd
 }
 
-/// The managed tool directories followed by this process's `PATH`.
+/// Managed installations, the active tool environment, and tool-resolution fallbacks.
 pub fn augmented_path() -> OsString {
     home_dir()
         .and_then(|home| platform::home::managed_path(&home).ok())

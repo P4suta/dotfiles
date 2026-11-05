@@ -63,16 +63,16 @@ pub fn mise_shims(home: &Path) -> PathBuf {
     })
 }
 
-/// The directories under `home` that hold the tools this repository installs, in lookup order.
-/// Each one derives from `home` alone, so a process started for another home finds only that home's tools.
-#[must_use]
-pub fn tool_directories(home: &Path) -> Vec<PathBuf> {
-    let mut directories = vec![
+fn installed_directories(home: &Path) -> Vec<PathBuf> {
+    vec![
         home.join(".local/bin"),
         home.join(".cargo/bin"),
         home.join(".nix-profile/bin"),
-        mise_shims(home),
-    ];
+    ]
+}
+
+fn fallback_directories(home: &Path) -> Vec<PathBuf> {
+    let mut directories = vec![mise_shims(home)];
     if cfg!(target_os = "macos") {
         directories.extend([HOMEBREW_BIN.into(), HOMEBREW_SBIN.into()]);
     }
@@ -86,19 +86,28 @@ pub fn tool_directories(home: &Path) -> Vec<PathBuf> {
     directories
 }
 
-/// The tool directories followed by `inherited`, without the retired launcher directory.
+/// The managed installations followed by tool-resolution fallbacks.
+#[must_use]
+pub fn tool_directories(home: &Path) -> Vec<PathBuf> {
+    let mut directories = installed_directories(home);
+    directories.extend(fallback_directories(home));
+    directories
+}
+
+/// Managed installations, then the active environment, then tool-resolution fallbacks.
 ///
 /// # Errors
 ///
 /// Returns an error when a directory holds the platform's `PATH` separator.
 pub fn path_with(home: &Path, inherited: &OsStr) -> Result<OsString, std::env::JoinPathsError> {
-    let mut directories = tool_directories(home);
+    let mut directories = installed_directories(home);
     directories.extend(std::env::split_paths(inherited));
+    directories.extend(fallback_directories(home));
     directories.retain(|directory| !directory.ends_with(".local/share/dotfiles/bin"));
     std::env::join_paths(directories)
 }
 
-/// The `PATH` a managed process starts with: the tool directories, then this process's `PATH`.
+/// The `PATH` that preserves managed installations and the active tool environment.
 ///
 /// # Errors
 ///
@@ -112,7 +121,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_tool_directories_precede_the_inherited_path_without_the_retired_launchers() {
+    fn managed_guards_precede_the_active_environment_and_fallback_tools() {
         let home = Path::new("/home/fixture");
         let inherited = std::env::join_paths([
             Path::new("/usr/bin"),
@@ -122,11 +131,35 @@ mod tests {
         let path: Vec<PathBuf> =
             std::env::split_paths(&path_with(home, &inherited).unwrap()).collect();
         assert_eq!(path[0], home.join(".local/bin"));
-        assert_eq!(
-            path.last().map(PathBuf::as_path),
-            Some(Path::new("/usr/bin"))
-        );
+        assert_eq!(path[1], home.join(".cargo/bin"));
+        assert_eq!(path[2], home.join(".nix-profile/bin"));
+        assert_eq!(path[3], Path::new("/usr/bin"));
         assert!(!path.iter().any(|entry| entry.ends_with("dotfiles/bin")));
         assert!(path.contains(&mise_shims(home)));
+    }
+
+    #[test]
+    fn active_project_tools_precede_every_managed_fallback() {
+        let home = Path::new("/home/fixture");
+        let selected = home.join("mise/installs/just/pinned");
+        let inherited = std::env::join_paths([&selected, &home.join(".local/bin")]).unwrap();
+        let path: Vec<PathBuf> =
+            std::env::split_paths(&path_with(home, &inherited).unwrap()).collect();
+        assert_eq!(path[0], home.join(".local/bin"));
+        assert_eq!(path[3], selected);
+        for fallback in fallback_directories(home) {
+            assert!(path.iter().position(|entry| entry == &fallback).unwrap() > 3);
+        }
+    }
+
+    #[test]
+    fn a_missing_active_environment_keeps_every_managed_tool_directory() {
+        let home = Path::new("/home/fixture");
+        let path: Vec<PathBuf> =
+            std::env::split_paths(&path_with(home, OsStr::new("")).unwrap()).collect();
+        for fallback in tool_directories(home) {
+            assert!(path.contains(&fallback));
+        }
+        assert_eq!(path[0], home.join(".local/bin"));
     }
 }
