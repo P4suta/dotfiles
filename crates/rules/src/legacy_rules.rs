@@ -104,13 +104,16 @@ pub fn wrapper_prefix<T: AsRef<str>>(kind: WrapperKind, arguments: &[T]) -> Comm
 
 #[must_use]
 pub fn mise_prefix<T: AsRef<str>>(arguments: &[T]) -> CommandPrefix {
+    let stable_option = |flag: &str| {
+        matches!(
+            flag,
+            "-q" | "--quiet" | "-v" | "--verbose" | "-y" | "--yes" | "--locked" | "--silent"
+        )
+    };
     let original = arguments;
     let mut arguments = arguments;
     while let [flag, child @ ..] = arguments
-        && matches!(
-            flag.as_ref(),
-            "-q" | "--quiet" | "-v" | "--verbose" | "-y" | "--yes" | "--locked" | "--silent"
-        )
+        && stable_option(flag.as_ref())
     {
         arguments = child;
     }
@@ -123,10 +126,10 @@ pub fn mise_prefix<T: AsRef<str>>(arguments: &[T]) -> CommandPrefix {
                 return CommandPrefix::Unknown;
             };
             let (tools, child) = arguments.split_at(separator);
-            if tools
-                .iter()
-                .any(|tool| tool.as_ref().is_empty() || tool.as_ref().starts_with('-'))
-            {
+            if tools.iter().any(|tool| {
+                let tool = tool.as_ref();
+                tool.is_empty() || tool.starts_with('-') && !stable_option(tool)
+            }) {
                 return CommandPrefix::Unknown;
             }
             match child {
@@ -403,6 +406,79 @@ mod proofs {
         }
     }
 
+    fn spec_mise_exec_options(choice: u8, position: u8, selector: bool, short_verb: bool) {
+        let option = match choice % 8 {
+            0 => "-q",
+            1 => "--quiet",
+            2 => "-v",
+            3 => "--verbose",
+            4 => "-y",
+            5 => "--yes",
+            6 => "--locked",
+            _ => "--silent",
+        };
+        let verb = if short_verb { "x" } else { "exec" };
+        let child = ["cargo", "clippy", "--", "-D", "warnings"];
+        let (arguments, start): (&[&str], usize) = match (position % 3, selector) {
+            (0, false) => (
+                &[
+                    option, verb, "--", "cargo", "clippy", "--", "-D", "warnings",
+                ],
+                3,
+            ),
+            (0, true) => (
+                &[
+                    option,
+                    verb,
+                    "rust@1.99.0",
+                    "--",
+                    "cargo",
+                    "clippy",
+                    "--",
+                    "-D",
+                    "warnings",
+                ],
+                4,
+            ),
+            (1, true) => (
+                &[
+                    verb,
+                    option,
+                    "rust@1.99.0",
+                    "--",
+                    "cargo",
+                    "clippy",
+                    "--",
+                    "-D",
+                    "warnings",
+                ],
+                4,
+            ),
+            (2, true) => (
+                &[
+                    verb,
+                    "rust@1.99.0",
+                    option,
+                    "--",
+                    "cargo",
+                    "clippy",
+                    "--",
+                    "-D",
+                    "warnings",
+                ],
+                4,
+            ),
+            _ => (
+                &[
+                    verb, option, "--", "cargo", "clippy", "--", "-D", "warnings",
+                ],
+                3,
+            ),
+        };
+        assert_eq!(mise_prefix(arguments), CommandPrefix::Child { start });
+        assert_eq!(arguments.get(start..), Some(child.as_slice()));
+    }
+
     fn spec_mise_terminal(choice: u8) {
         let arguments: &[&str] = match choice % 8 {
             0 => &["ls"],
@@ -423,6 +499,10 @@ mod proofs {
             &["trust", "-Cdir", "file"],
             &["--unknown", "ls"],
             &["x", "", "--", "cargo"],
+            &["x", "--locked", "--unknown", "--", "cargo"],
+            &["exec", "--locked", "--cd=dir", "--", "cargo"],
+            &["x", "--locked", "rust@1.99.0", "-Cdir", "--", "cargo"],
+            &["x", "--locked", "--"],
         ] {
             assert_eq!(mise_prefix(arguments), CommandPrefix::Unknown);
         }
@@ -552,6 +632,29 @@ mod proofs {
                 spec_startup_ownership(choice, second, third);
             }
         }
+    }
+
+    #[test]
+    fn mise_exec_options_preserve_the_child_suffix() {
+        for choice in 0..8 {
+            for position in 0..3 {
+                for [selector, short_verb] in crate::domain::flags() {
+                    spec_mise_exec_options(choice, position, selector, short_verb);
+                }
+            }
+        }
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    #[kani::unwind(64)]
+    fn mise_exec_options_keep_their_ownership_before_the_child_separator() {
+        let choice: u8 = kani::any();
+        let position: u8 = kani::any();
+        let [selector, short_verb]: [bool; 2] = kani::any();
+        spec_mise_exec_options(choice, position, selector, short_verb);
+        kani::cover!(position % 3 == 1 && !selector);
+        kani::cover!(position % 3 == 2 && selector && short_verb);
     }
 
     #[cfg(kani)]

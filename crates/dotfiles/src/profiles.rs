@@ -852,6 +852,7 @@ mod tests {
     #[test]
     fn an_apply_from_another_checkout_preserves_configured_entry_points() -> Result<()> {
         let scope = tempfile::tempdir()?;
+        fs::create_dir(scope.path().join(".git"))?;
         let source = scope.path().join("configured source");
         let other = scope.path().join("temporary worktree");
         let destination = scope.path().join("destination");
@@ -874,6 +875,7 @@ mod tests {
         ];
         for checkout in [&source, &other] {
             fs::create_dir_all(checkout.join("home"))?;
+            fs::create_dir(checkout.join(".git"))?;
             fs::write(checkout.join(".chezmoiroot"), "home\n")?;
             for template in templates {
                 let template = checkout.join("home").join(template);
