@@ -777,6 +777,16 @@ fn reject_admitting_a_mise_owned_directory_option() {
 }
 #[kani::proof]
 #[kani::unwind(64)]
+fn reject_refusing_a_supported_mise_exec_option() {
+    assert!(production::mise_prefix(&["x", "--locked", "rust@1.99.0", "--", "cargo", "--version"]) == production::CommandPrefix::Unknown);
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_admitting_a_directory_option_beside_a_supported_mise_option() {
+    assert!(matches!(production::mise_prefix(&["exec", "--locked", "rust@1.99.0", "--cd=dir", "--", "cargo"]), production::CommandPrefix::Child { .. }));
+}
+#[kani::proof]
+#[kani::unwind(64)]
 fn reject_admitting_an_unknown_wrapper_option() {
     assert!(matches!(production::wrapper_prefix(production::WrapperKind::Env, &["--unknown", "bash", "check.sh"]), production::CommandPrefix::Child { .. }));
 }
