@@ -420,7 +420,7 @@ fn target(arguments: &[String]) -> Result<Option<Target<'_>>> {
     if group == "release"
         && arguments
             .get(index)
-            .is_some_and(|verb| matches!(verb.as_str(), "view" | "list"))
+            .is_some_and(|verb| matches!(verb.as_str(), "view" | "list" | "upload" | "download"))
     {
         return Ok(None);
     }
@@ -926,6 +926,88 @@ mod tests {
             let bodies = collect(&words, None, None, None, false);
             assert!(bodies.is_empty(), "{arguments:?}: {bodies:?}");
         }
+    }
+
+    #[test]
+    fn release_asset_transfers_do_not_require_description_bodies() {
+        for arguments in [
+            vec!["gh", "release", "upload", "v0.1.0", "app.dmg"],
+            vec![
+                "gh",
+                "--repo",
+                "owner/repo",
+                "release",
+                "upload",
+                "v0.1.0",
+                "SHA256SUMS",
+            ],
+            vec![
+                "gh",
+                "release",
+                "--repo",
+                "owner/repo",
+                "download",
+                "v0.1.0",
+            ],
+            vec!["gh", "release", "download", "v0.1.0", "--dir", "download"],
+        ] {
+            let words: Vec<String> = arguments.iter().map(|word| (*word).to_owned()).collect();
+            let bodies = collect(&words, None, None, None, false);
+            assert!(bodies.is_empty(), "{arguments:?}: {bodies:?}");
+        }
+    }
+
+    #[test]
+    fn release_description_changes_and_unknown_operations_remain_refused() {
+        for verb in [
+            "create",
+            "edit",
+            "delete",
+            "delete-asset",
+            "unknown",
+            "Upload",
+            "upload-extra",
+        ] {
+            let words = [
+                "gh",
+                "release",
+                verb,
+                "v0.1.0",
+                "--notes",
+                "'Unchecked text.'",
+            ]
+            .map(str::to_owned);
+            assert!(
+                matches!(
+                    &collect(&words, None, None, None, false)[..],
+                    [Body::Unreadable(detail)] if detail.contains("GitHub command has no supported body contract")
+                ),
+                "{verb}"
+            );
+        }
+    }
+
+    #[test]
+    fn release_rest_descriptions_still_supply_their_prose_to_inspection() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let body = directory.path().join("notes.md");
+        std::fs::write(&body, "The release passed its checks.\n")?;
+        let words = [
+            "gh",
+            "api",
+            "repos/owner/repo/releases",
+            "--method",
+            "POST",
+            "-F",
+            "body=@notes.md",
+        ]
+        .map(str::to_owned);
+        let spellings: Vec<_> = words.iter().map(String::as_str).collect();
+        assert!(matches!(
+            &collect(&words, Some(&spellings), None, Some(directory.path()), true)[..],
+            [Body::Text { text, .. }] if text == "The release passed its checks.\n"
+        ));
+        Ok(())
     }
 
     #[test]
