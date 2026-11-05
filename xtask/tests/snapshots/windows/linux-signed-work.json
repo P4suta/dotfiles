@@ -27,7 +27,7 @@
     {"mode":"0755","path":".agents/skills/code-signing","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/code-signing/SKILL.md","sha256":"55f2340d8ad582f2f5302801042fa6dca2ddacec89c154ccf0bbb088cc0b02ea","type":"file"},
     {"mode":"0755","path":".agents/skills/code-signing/references","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/code-signing/references/apple.md","sha256":"2148cadec403b9435a51ae6425ea1a12e977ac6e58dff8d276ea9501d5145e73","type":"file"},
+    {"mode":"0644","path":".agents/skills/code-signing/references/apple.md","sha256":"95380d2bacc84805d7d294bcc7b94fc62c20f28be5d805079d69c321195bff20","type":"file"},
     {"mode":"0644","path":".agents/skills/code-signing/references/windows.md","sha256":"f6d2a0f3ee24110e914f71a7b789c5d40945edaa26351f0d3802ab07e3503031","type":"file"},
     {"mode":"0755","path":".agents/skills/coderabbit","sha256":null,"type":"dir"},
     {"mode":"0755","path":".agents/skills/coderabbit-review","sha256":null,"type":"dir"},

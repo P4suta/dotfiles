@@ -1,9 +1,10 @@
 {
-  "revision": "63a73b22a102974b982720eca974a62544608620bfcae0cde94a15b37784cb9d",
+  "revision": "0645085b66809f5d2160c7e20850e0c8e371806bf327b132bc3ea206379e10f8",
   "outcome": "keep",
-  "reason": "Keep shared signing inputs canonical and separate retrieval authority, service operations, and public release authority.\nDeliver only the credentials each signing or completion stage needs.",
+  "reason": "Keep shared signing inputs canonical and separate retrieval authority, service operations, and public release authority.\nDeliver only the credentials each signing or completion stage needs.\nUse current native app assessments and distinguish them from fresh installation evidence.",
   "evidence": [
     "home/dot_agents/skills/code-signing/SKILL.md",
+    "home/dot_agents/skills/code-signing/references/apple.md",
     "docs/adr/purpose-scoped-doppler-workload-identities.md"
   ],
   "revisit": null

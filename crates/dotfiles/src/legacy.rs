@@ -948,6 +948,9 @@ mod tests {
                 "mise x -- cargo clippy --locked --all-targets --all-features --manifest-path .ci/ci-policy/Cargo.toml -- -D warnings",
                 "mise x rust@1.99.0 -- cargo clippy -- -D warnings",
                 "mise exec rust@1.99.0 just@1.58.0 -- cargo clippy -- -D warnings",
+                "mise x --locked -- cargo clippy -- -D warnings",
+                "mise --quiet exec --locked rust@1.99.0 --yes -- cargo clippy -- -D warnings",
+                "mise x rust@1.99.0 -y --locked -- cargo clippy -- -D warnings",
                 "env -- cargo check -C child --chdir other --directory next --cd final",
                 "sudo -- cargo clippy -- -D warnings",
                 "mise x -- env -- sudo -- cargo clippy -- -D warnings",
@@ -987,6 +990,9 @@ mod tests {
                 "mise x -- env --unknown bash check.sh",
                 "sudo --unknown bash check.sh",
                 "mise x --unknown -- bash check.sh",
+                "mise x --locked --unknown -- bash check.sh",
+                "mise exec --locked --cd=/unresolved -- bash check.sh",
+                "mise x --locked rust@1.99.0 -C/unresolved -- bash check.sh",
                 "mise x -c 'bash check.sh'",
                 "mise x rust@1.99.0 --",
             ] {
@@ -1014,6 +1020,9 @@ mod tests {
                 "mise x -- env MODE=check sudo -- bash check.sh",
                 "env -- mise x rust@1.99.0 -- bash check.sh",
                 "sudo -n -- mise exec rust@1.99.0 -- bash check.sh",
+                "mise x --locked -- bash check.sh",
+                "env -- mise --quiet exec rust@1.99.0 --locked -- bash check.sh",
+                "sudo -n -- mise x -y rust@1.99.0 --silent -- bash check.sh",
                 "env -u BASH_ENV bash check.sh",
             ] {
                 let report = findings_in_shell(command, Some(directory.path()), shell)?;

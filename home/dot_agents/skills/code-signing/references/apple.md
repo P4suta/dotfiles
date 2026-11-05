@@ -14,6 +14,9 @@ security find-identity -v -p codesigning
 Match the intended publisher and team, check validity, and confirm the private key.
 For automated signing, pass the 40-character certificate SHA-1 hash from that output to `codesign --sign` unchanged.
 Neither a Keychain label nor the certificate's common name works as that selector.
+Save the public certificate chain with one `--extract-certificates=PREFIX` argument to `codesign --display`.
+A separate prefix argument can make `codesign` inspect another code object.
+Compare the extracted leaf certificate's fingerprint with the selected identity.
 See [Apple's explanation of signing identity lookup](https://developer.apple.com/documentation/technotes/tn3161-inside-code-signing-certificates).
 
 Reuse an existing certificate and private key.
@@ -141,5 +144,13 @@ Apple staples no ticket to a standalone executable.
 Staple only a distributed `.app` bundle, disk image, or installer package.
 Staple and verify an accepted ticket without fetching a signing key or notarization API key.
 Verify archive checksums, build provenance, and the extracted binary's signature.
+
+For app assessment on macOS 14 or later, run `syspolicy_check distribution /path/to/App.app`.
+Use `spctl` for an app on an older host and for disk-image or installer assessment with the matching artifact type.
+Keep the command-line assessment separate from a fresh installation test.
+Apple recommends downloading through a quarantining client onto a fresh Mac or restored virtual machine, then installing and using the actual distribution.
+Test offline when validating the stapled ticket, preferably within the virtual machine so the test doesn't disrupt the development host.
+Record an unavailable fresh-machine or offline test as unrun.
+Notarization success and a local assessment don't establish those installation outcomes.
 
 See [Apple's native notarization test procedure](https://developer.apple.com/forums/thread/130560).
