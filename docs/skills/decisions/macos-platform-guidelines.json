@@ -1,0 +1,12 @@
+{
+  "revision": "554e118b2479c911c87e8fabedd258a5b9dcd670dc711b7bc6e5d35a35748e32",
+  "outcome": "implemented",
+  "reason": "Desktop guidance covers settings, window ownership, screen capture, sandbox migration, diagnostics, and distribution with platform-specific primary sources. Native acceptance remains distinct from core proofs.",
+  "evidence": [
+    "home/dot_agents/skills/macos-platform-guidelines/SKILL.md",
+    "home/dot_agents/skills/macos-platform-guidelines/references/desktop-interaction.md",
+    "home/dot_agents/skills/macos-platform-guidelines/references/capture-and-sandbox.md",
+    "home/dot_agents/skills/macos-platform-guidelines/references/verification-and-distribution.md"
+  ],
+  "revisit": null
+}
