@@ -1,219 +1,317 @@
-//! Images that personal PR and issue bodies show from a branch of their own repository, such as `diagrams` or `screenshots`.
-
-use crate::{GITHUB, gh};
+use crate::ValidatedDocument;
 use anyhow::{Context, Result, ensure};
-use base64::Engine as _;
-use std::ffi::OsString;
-use std::io::Write as _;
+use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
+use std::fs;
+use std::io::{Read as _, Write as _};
+use std::path::{Path, PathBuf};
 
-/// The mode of a regular file in a Git tree.
-const FILE_MODE: &str = "100644";
-/// The suffix of an image address that makes GitHub serve the file itself.
-const RAW: &str = "?raw=true";
+pub(crate) const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+const CACHE: &str = ".local/state/pr-workflow/figures";
+pub(crate) const ATTACHMENT_URL: &str = "https://github.com/user-attachments/assets/";
+const MINIMUM_CODE_FENCE: usize = 3;
 
-/// The bytes of one file that a figure branch stores.
-pub(crate) enum Content<'a> {
-    Text(&'a str),
-    Binary(&'a [u8]),
+pub(crate) fn private_directory(path: &Path) -> Result<()> {
+    fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
+        fs::set_permissions(path, fs::Permissions::from_mode(PRIVATE_DIRECTORY_MODE))?;
+    }
+    Ok(())
 }
 
-/// One file to add to a figure branch.
-pub(crate) struct File<'a> {
-    pub(crate) name: String,
-    pub(crate) content: Content<'a>,
-}
-
-/// The address prefix of every file that a repository's branch stores.
-pub(crate) fn prefix(repository: &str, branch: &str) -> String {
-    format!("{GITHUB}/{repository}/blob/{branch}/")
-}
-
-/// The Markdown image line that shows a stored file.
-pub(crate) fn image_line(repository: &str, branch: &str, file: &str, alt: &str) -> String {
-    format!(
-        "![{}]({}{file}{RAW})",
-        alt.trim(),
-        prefix(repository, branch)
-    )
-}
-
-/// The stored filename that an image address names on a repository's branch, if it names one.
-pub(crate) fn stored_name<'a>(repository: &str, branch: &str, address: &'a str) -> Option<&'a str> {
-    let prefix = prefix(repository, branch);
-    address
-        .get(..prefix.len())
-        .filter(|start| start.eq_ignore_ascii_case(&prefix))?;
-    address.get(prefix.len()..)?.strip_suffix(RAW)
-}
-
-/// Refuses an image description that a Markdown image can't carry on one line.
-///
-/// # Errors
-/// Returns an error for an empty description or one with a line break or a bracket.
 pub(crate) fn check_alt(alt: &str) -> Result<()> {
     ensure!(
         !alt.trim().is_empty() && !alt.contains(['\n', '[', ']']),
-        "--alt must describe the image on one line without brackets"
+        "an image needs a nonempty description without newlines or brackets"
     );
     Ok(())
 }
 
-fn json_file(value: &serde_json::Value) -> Result<tempfile::NamedTempFile> {
-    let mut file = tempfile::NamedTempFile::new()?;
-    serde_json::to_writer(file.as_file_mut(), value)?;
-    file.as_file_mut().flush()?;
-    Ok(file)
-}
-
-/// Sends one GitHub API request with a JSON body and returns the response object.
-fn api(method: &str, endpoint: &str, body: &serde_json::Value) -> Result<serde_json::Value> {
-    let input = json_file(body)?;
-    let args: Vec<OsString> = vec![
-        "api".into(),
-        "--hostname".into(),
-        "github.com".into(),
-        "--method".into(),
-        method.into(),
-        endpoint.into(),
-        "--input".into(),
-        input.path().as_os_str().to_owned(),
-    ];
-    serde_json::from_str(&gh(&args)?).with_context(|| format!("read the {endpoint} response"))
-}
-
-fn sha(response: &serde_json::Value) -> Result<String> {
-    response["sha"]
-        .as_str()
-        .map(str::to_owned)
-        .context("GitHub returned no object id")
-}
-
-/// The tip of a figure branch.
-struct Tip {
-    commit: String,
-    tree: String,
-}
-
-/// The tip of a branch, if the branch exists, and whether it already holds the named file.
-fn branch_state(repository: &str, branch: &str, file: &str) -> Result<(Option<Tip>, bool)> {
-    let (owner, repository_name) = repository
-        .split_once('/')
-        .context("repository must be OWNER/REPO")?;
-    let query = "query($owner:String!,$name:String!,$ref:String!,$expression:String!){repository(owner:$owner,name:$name){ref(qualifiedName:$ref){target{oid ... on Commit{tree{oid}}}} object(expression:$expression){oid}}}";
-    let response = api(
-        "POST",
-        "graphql",
-        &serde_json::json!({
-            "query": query,
-            "variables": {
-                "owner": owner,
-                "name": repository_name,
-                "ref": format!("refs/heads/{branch}"),
-                "expression": format!("{branch}:{file}"),
-            }
-        }),
-    )?;
-    let repository = &response["data"]["repository"];
+pub(crate) fn cache(bytes: &[u8], extension: &str) -> Result<PathBuf> {
     ensure!(
-        repository.is_object(),
-        "GitHub returned no repository for the image: {response}"
+        !bytes.is_empty() && bytes.len() <= MAX_IMAGE_BYTES,
+        "an image needs between 1 and {MAX_IMAGE_BYTES} bytes"
     );
-    let target = &repository["ref"]["target"];
-    let tip = match (target["oid"].as_str(), target["tree"]["oid"].as_str()) {
-        (Some(commit), Some(tree)) => Some(Tip {
-            commit: commit.to_owned(),
-            tree: tree.to_owned(),
-        }),
-        (None, None) if repository["ref"].is_null() => None,
-        _ => anyhow::bail!("the {branch} branch doesn't point at a commit: {response}"),
-    };
-    Ok((tip, repository["object"]["oid"].is_string()))
+    let directory = platform::home::home()
+        .context("figure cache needs the user home directory")?
+        .join(CACHE);
+    private_directory(&directory)?;
+    let name = crate::build_inputs::hex(&Sha256::digest(bytes));
+    let path = directory.join(format!("{name}.{extension}"));
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(mut file) => {
+            file.write_all(bytes)?;
+            file.sync_all()?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            ensure!(read_image(&path)? == bytes, "cached image content changed");
+        }
+        Err(error) => return Err(error.into()),
+    }
+    Ok(path)
 }
 
-/// Adds files to a branch in one commit, and starts the branch as an orphan when it's absent.
-/// The first file names the image, and a branch that already holds it keeps its tip.
-///
-/// # Errors
-/// Returns an error when GitHub refuses a request or another writer moved the branch first.
-pub(crate) fn store(repository: &str, branch: &str, files: &[File<'_>]) -> Result<()> {
-    let image = files.first().context("a figure needs its image file")?;
-    let (tip, stored) = branch_state(repository, branch, &image.name)?;
-    if stored {
+pub(crate) fn read_image(path: &Path) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(u64::try_from(MAX_IMAGE_BYTES)?.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        !bytes.is_empty() && bytes.len() <= MAX_IMAGE_BYTES,
+        "an image needs between 1 and {MAX_IMAGE_BYTES} bytes"
+    );
+    Ok(bytes)
+}
+
+pub(crate) fn image_line(path: &Path, alt: &str) -> Result<String> {
+    image_with_title(path, alt, "")
+}
+
+fn image_with_title(path: &Path, alt: &str, title: &str) -> Result<String> {
+    check_alt(alt)?;
+    let path = path
+        .to_str()
+        .context("image path must be UTF-8")?
+        .replace('\\', "/");
+    ensure!(!path.contains(['\n', '<', '>']), "unsupported image path");
+    let title = if title.is_empty() {
+        String::new()
+    } else {
+        format!(" \"{}\"", title.replace('\\', "\\\\").replace('"', "\\\""))
+    };
+    Ok(format!("![{}](<{path}>{title})", alt.trim()))
+}
+
+pub(crate) fn source_details(source: &str) -> String {
+    details(source, "D2 source", "d2")
+}
+
+pub(crate) fn text_details(source: &str) -> String {
+    details(source, "File source", "text")
+}
+
+fn details(source: &str, summary: &str, language: &str) -> String {
+    let width = source
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(width.saturating_add(1).max(MINIMUM_CODE_FENCE));
+    format!(
+        "<details><summary>{summary}</summary>\n\n{fence}{language}\n{}\n{fence}\n\n</details>",
+        source.trim_end()
+    )
+}
+
+fn local_image(address: &str) -> bool {
+    (!address.is_empty() && !address.starts_with(['#', '/']) && !address.contains(':'))
+        || (Path::new(address).is_absolute() && !address.starts_with("//"))
+}
+
+fn staged_image(directory: &Path, address: &str) -> Result<PathBuf> {
+    let path = directory.join(address);
+    let bytes =
+        read_image(&path).with_context(|| format!("read local image {}", path.display()))?;
+    let extension = crate::screenshot::extension(&bytes)
+        .or_else(|| {
+            std::str::from_utf8(&bytes)
+                .ok()
+                .filter(|svg| svg.contains("<svg") && svg.contains("</svg>"))
+                .map(|_| "svg")
+        })
+        .context("an attachment must be an SVG, PNG, JPEG, GIF, or WebP image")?;
+    cache(&bytes, extension)
+}
+
+pub(crate) fn prepare_document(document: &mut ValidatedDocument, body_file: &Path) -> Result<()> {
+    let directory = body_file
+        .parent()
+        .context("body file has no parent directory")?;
+    let mut replacements = Vec::new();
+    let mut images = BTreeSet::new();
+    let mut active: Option<(usize, String, String, String)> = None;
+    for (event, range) in Parser::new(&document.body).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Image {
+                dest_url, title, ..
+            }) if local_image(&dest_url) => {
+                active = Some((
+                    range.start,
+                    dest_url.into_string(),
+                    String::new(),
+                    title.into_string(),
+                ));
+            }
+            Event::Text(text) | Event::Code(text) => {
+                if let Some((_, _, alt, _)) = &mut active {
+                    alt.push_str(&text);
+                }
+            }
+            Event::End(TagEnd::Image) => {
+                if let Some((start, address, alt, title)) = active.take() {
+                    check_alt(&alt)?;
+                    let image = staged_image(directory, &address)?;
+                    replacements.push((start..range.end, image_with_title(&image, &alt, &title)?));
+                    images.insert(image);
+                }
+            }
+            _ => {}
+        }
+    }
+    for (range, replacement) in replacements.into_iter().rev() {
+        document.body.replace_range(range, &replacement);
+    }
+    document.attachments = images.into_iter().collect();
+    Ok(())
+}
+
+fn publication_shape(body: &str) -> String {
+    let mut replacements = Vec::new();
+    let mut active: Option<(usize, String, String)> = None;
+    for (event, range) in Parser::new(body).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Image {
+                dest_url, title, ..
+            }) if local_image(&dest_url) || dest_url.starts_with(ATTACHMENT_URL) => {
+                active = Some((range.start, String::new(), title.into_string()));
+            }
+            Event::Text(text) | Event::Code(text) => {
+                if let Some((_, alt, _)) = &mut active {
+                    alt.push_str(&text);
+                }
+            }
+            Event::End(TagEnd::Image) => {
+                if let Some((start, alt, title)) = active.take() {
+                    replacements.push((
+                        start..range.end,
+                        format!("![{alt}](attachment \"{title}\")"),
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut shape = body.to_owned();
+    for (range, replacement) in replacements.into_iter().rev() {
+        shape.replace_range(range, &replacement);
+    }
+    shape.trim_end().to_owned()
+}
+
+pub(crate) fn verify_publication(
+    document: &ValidatedDocument,
+    kind: &str,
+    repository: &str,
+    number: u64,
+) -> Result<()> {
+    if document.attachments.is_empty() {
         return Ok(());
     }
-    let endpoint = |path: &str| format!("repos/{repository}/git/{path}");
-    let mut entries = Vec::new();
-    for file in files {
-        let body = match file.content {
-            Content::Text(text) => serde_json::json!({"content": text, "encoding": "utf-8"}),
-            Content::Binary(bytes) => serde_json::json!({
-                "content": base64::engine::general_purpose::STANDARD.encode(bytes),
-                "encoding": "base64",
-            }),
-        };
-        let blob = api("POST", &endpoint("blobs"), &body)?;
-        entries.push(serde_json::json!({
-            "path": file.name,
-            "mode": FILE_MODE,
-            "type": "blob",
-            "sha": sha(&blob)?,
-        }));
-    }
-    let mut tree = serde_json::json!({"tree": entries});
-    if let Some(tip) = &tip {
-        tree["base_tree"] = serde_json::json!(tip.tree);
-    }
-    let tree = sha(&api("POST", &endpoint("trees"), &tree)?)?;
-    let commit = sha(&api(
-        "POST",
-        &endpoint("commits"),
-        &serde_json::json!({
-            "message": format!("docs: add {}", image.name),
-            "tree": tree,
-            "parents": tip.iter().map(|tip| &tip.commit).collect::<Vec<_>>(),
-        }),
-    )?)?;
-    if tip.is_some() {
-        api(
-            "PATCH",
-            &endpoint(&format!("refs/heads/{branch}")),
-            &serde_json::json!({"sha": commit, "force": false}),
-        )?;
-    } else {
-        api(
-            "POST",
-            &endpoint("refs"),
-            &serde_json::json!({"ref": format!("refs/heads/{branch}"), "sha": commit}),
-        )?;
+    let response = crate::gh(&[
+        kind.into(),
+        "view".into(),
+        number.to_string().into(),
+        "--repo".into(),
+        repository.into(),
+        "--json".into(),
+        "body".into(),
+    ])?;
+    let response: serde_json::Value = serde_json::from_str(&response)?;
+    let body = response["body"]
+        .as_str()
+        .context("published document has no body")?;
+    verify_body(&document.body, body)
+        .with_context(|| format!("inspect {repository} #{number} before retrying"))
+}
+
+pub(crate) fn verify_body(expected: &str, body: &str) -> Result<()> {
+    ensure!(
+        publication_shape(body) == publication_shape(expected),
+        "published attachment or document content differs"
+    );
+    for event in Parser::new(body) {
+        if let Event::Start(Tag::Image { dest_url, .. }) = event {
+            ensure!(
+                !local_image(&dest_url),
+                "published document still references a local image"
+            );
+        }
     }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{check_alt, image_line, stored_name};
+    use super::*;
 
     #[test]
-    fn an_image_line_names_its_file_on_the_branch() {
-        let line = image_line("P4suta/project", "screenshots", "a.png", " Screen ");
-        assert_eq!(
-            line,
-            "![Screen](https://github.com/P4suta/project/blob/screenshots/a.png?raw=true)"
-        );
-        let address = line.trim_start_matches("![Screen](").trim_end_matches(')');
-        assert_eq!(
-            stored_name("p4suta/PROJECT", "screenshots", address),
-            Some("a.png")
-        );
-        assert_eq!(stored_name("P4suta/project", "diagrams", address), None);
-        assert_eq!(stored_name("P4suta/other", "screenshots", address), None);
+    fn remote_and_hidden_images_are_not_local_attachments() {
+        for address in [
+            "https://example.com/image.svg",
+            "//example.com/a.png",
+            "data:image/png;base64,AAA",
+            "#image",
+            "",
+        ] {
+            assert!(!local_image(address), "{address}");
+        }
+        assert!(local_image("after.png"));
+        assert!(local_image("./figures/after.png"));
     }
 
     #[test]
-    fn a_description_stays_on_one_line_without_brackets() {
-        assert!(check_alt("Settings screen").is_ok());
-        for alt in ["", "  ", "a\nb", "a [b]"] {
-            assert!(check_alt(alt).is_err(), "{alt:?}");
-        }
+    fn source_fences_preserve_embedded_markdown() {
+        let source = "label: |md\n```rust\nvalue\n```\n|";
+        let details = source_details(source);
+        assert!(details.contains("````d2\n"));
+        assert!(details.contains(source));
+        assert!(details.ends_with("````\n\n</details>"));
+    }
+
+    #[test]
+    fn publication_comparison_preserves_text_and_alternative_text() {
+        let local = "Before.\n\n![Failure](</cache/image.svg>)\n\nAfter.\n";
+        let uploaded =
+            "Before.\n\n![Failure](https://github.com/user-attachments/assets/fixture)\n\nAfter.\n";
+        assert_eq!(publication_shape(local), publication_shape(uploaded));
+        assert_ne!(
+            publication_shape(local),
+            publication_shape(&uploaded.replace("Failure", "Success"))
+        );
+        assert_ne!(
+            publication_shape(local),
+            publication_shape(&uploaded.replace("Before.", "Changed."))
+        );
+    }
+
+    #[test]
+    fn publication_comparison_preserves_image_titles() {
+        let local = "![Failure](</cache/image.svg> \"Retry state\")";
+        let uploaded =
+            "![Failure](https://github.com/user-attachments/assets/fixture \"Retry state\")";
+        assert_eq!(publication_shape(local), publication_shape(uploaded));
+        assert_ne!(
+            publication_shape(local),
+            publication_shape(&uploaded.replace("Retry state", "Success state"))
+        );
+    }
+
+    #[test]
+    fn image_reads_reject_empty_and_oversize_files() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("image.png");
+        let file = fs::File::create(&path)?;
+        assert!(read_image(&path).is_err());
+        file.set_len(u64::try_from(MAX_IMAGE_BYTES)?.saturating_add(1))?;
+        assert!(read_image(&path).is_err());
+        Ok(())
     }
 }

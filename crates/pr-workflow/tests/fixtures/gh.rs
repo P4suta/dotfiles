@@ -59,6 +59,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
     }
     if std::env::var("GH_FIXTURE_FAILURE").ok().as_ref() == args.get(1) {
+        if let Ok(url) = std::env::var("GH_FIXTURE_PARTIAL_URL") {
+            println!("{url}");
+        }
         eprintln!("injected gh failure");
         std::process::exit(42);
     }

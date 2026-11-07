@@ -4461,3 +4461,37 @@ schema = "schemas/vendor/opencode-theme.schema.json.gz"
 encoded_sha256 = "6fd84b36e5d6dab4823122d5803ecd6f30d8ce4382e3064d14f83efab4f1f37d"
 sha256 = "315b18b00549814b545841c32170d9922127faf307d4e66d62299443268ef244"
 targets = [".config/opencode/themes/tokyonight.json"]
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/figure_migration_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_retirement_without_a_matching_token() {
+    assert!(production::permits_retirement(production::ScopeMatch::Different, production::ScopeMatch::Exact));
+}
+#[kani::proof]
+fn reject_retirement_outside_the_permitted_request() {
+    assert!(production::permits_retirement(production::ScopeMatch::Exact, production::ScopeMatch::Different));
+}
+#[kani::proof]
+fn reject_retiring_a_branch_with_references() {
+    assert!(production::may_retire(production::Mode::Apply, production::Evidence {
+        archive: production::Verification::Complete, inventory: production::Verification::Complete, documents: production::Verification::Complete,
+        remaining_references: 1, branch: production::BranchIdentity::Unchanged,
+    }));
+}
+#[kani::proof]
+fn reject_retiring_without_a_verified_archive() {
+    assert!(production::may_retire(production::Mode::Apply, production::Evidence {
+        archive: production::Verification::Missing, inventory: production::Verification::Complete, documents: production::Verification::Complete,
+        remaining_references: 0, branch: production::BranchIdentity::Unchanged,
+    }));
+}
+#[kani::proof]
+fn reject_read_only_retirement() {
+    assert!(production::may_retire(production::Mode::Plan, production::Evidence {
+        archive: production::Verification::Complete, inventory: production::Verification::Complete, documents: production::Verification::Complete,
+        remaining_references: 0, branch: production::BranchIdentity::Unchanged,
+    }));
+}
+'''

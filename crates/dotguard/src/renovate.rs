@@ -205,6 +205,9 @@ fn unavailable(cause: &str) -> i32 {
 }
 
 fn gate(remote: &str, input: &str) -> i32 {
+    if crate::figure_retirement::update_permitted(remote, input) {
+        return 0;
+    }
     for line in input.lines() {
         let result = gate_ref(remote, line);
         if result != 0 {

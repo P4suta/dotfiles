@@ -717,14 +717,143 @@ fn install_shared_skills(root: &Path) -> Result<()> {
 }
 
 fn install_pr_workflow(root: &Path) -> Result<()> {
+    let source = platform::build_inputs::content_hash(root)?;
+    let guard = build_workflow_guard(root)?;
     let binary = release_binary(root, "pr-workflow", "pr-workflow")?;
     platform::freshness::verify_artifact(root, &binary, Built::PrWorkflow)?;
+    ensure!(
+        source == platform::build_inputs::content_hash(root)?,
+        "workflow bundle sources changed during the build"
+    );
     let user_directory = user_directory()?;
-    pr_workflow::deploy(root, &binary, &user_directory, |paths| {
-        apply_sources(root, "dirs,files,symlinks", paths)
-            .context("scoped PR skill installation failed")
+    install_attachment_cli(root, &user_directory)?;
+    pr_workflow::deploy_workflow(root, &binary, &user_directory, |paths| {
+        let instructions = [
+            "home/dot_codex/AGENTS.md.tmpl",
+            "home/dot_claude/CLAUDE.md.tmpl",
+            "home/dot_config/opencode/AGENTS.md.tmpl",
+        ]
+        .map(|path| root.join(path));
+        apply_sources(
+            root,
+            "dirs,files,symlinks",
+            paths.iter().chain(instructions.iter()),
+        )
+        .context("scoped PR skill installation failed")
     })?;
+    let directory = user_directory.join(".local/bin");
+    install_workflow_guard(&guard, &directory)?;
+    let probe = platform::process::command(
+        directory.join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .args(["renovate-gate", "origin"])
+    .stdin(std::process::Stdio::null())
+    .output()
+    .context("probe installed Git guard policy dispatch")?;
+    ensure!(
+        probe.status.success(),
+        "installed Git guard policy dispatch failed: {}",
+        String::from_utf8_lossy(&probe.stderr)
+    );
     platform::freshness::record_installation(&user_directory, root, Built::PrWorkflow)
+}
+
+fn install_workflow_guard(guard: &Path, directory: &Path) -> Result<()> {
+    let companion = guard.with_file_name(format!(
+        "{}{}",
+        dotguard::RENOVATE_BINARY,
+        std::env::consts::EXE_SUFFIX
+    ));
+    for binary in [&companion, guard] {
+        ensure!(
+            binary.is_file(),
+            "Git guard bundle is missing {}",
+            binary.display()
+        );
+    }
+    for binary in [&companion, guard] {
+        let name = binary.file_name().context("Git guard bundle filename")?;
+        let destination = directory.join(name);
+        platform::aside::install(binary, &destination)?;
+        ensure!(
+            fs::read(binary)? == fs::read(&destination)?,
+            "installed {} differs from its verified build",
+            name.to_string_lossy()
+        );
+    }
+    #[cfg(windows)]
+    platform::aside::install(guard, &directory.join("git.exe"))?;
+    Ok(())
+}
+
+fn build_workflow_guard(root: &Path) -> Result<PathBuf> {
+    let before = platform::build_inputs::content_hash(root)?;
+    let profile = dotfiles::setup::GUARD_PROFILE;
+    cargo(
+        root,
+        Path::new("Cargo.toml"),
+        &[
+            "build",
+            "--locked",
+            "--profile",
+            profile,
+            "--package",
+            "dotguard",
+            "--bin",
+            "dotguard",
+            "--bin",
+            dotguard::RENOVATE_BINARY,
+        ],
+    )?;
+    ensure!(
+        before == platform::build_inputs::content_hash(root)?,
+        "Git guard sources changed during the build"
+    );
+    let configured = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from);
+    Ok(check_build_dir(root, configured.as_deref())
+        .join(profile)
+        .join(format!("dotguard{}", std::env::consts::EXE_SUFFIX)))
+}
+
+fn install_attachment_cli(root: &Path, user_directory: &Path) -> Result<()> {
+    let selected = Tool::Mise
+        .command()
+        .current_dir(root)
+        .args(["which", "gh"])
+        .output()?;
+    ensure!(
+        selected.status.success(),
+        "the pinned GitHub CLI is unavailable"
+    );
+    let source = PathBuf::from(String::from_utf8(selected.stdout)?.trim());
+    ensure!(
+        source.is_absolute() && source.is_file(),
+        "mise returned no native GitHub CLI path"
+    );
+    let help = platform::process::command(&source)
+        .args(["help", "pr", "create"])
+        .output()?;
+    ensure!(
+        help.status.success() && String::from_utf8(help.stdout)?.contains("--attach"),
+        "the pinned GitHub CLI lacks attachment support"
+    );
+    let directory = user_directory.join(".local/bin");
+    fs::create_dir_all(&directory)?;
+    let destination = directory.join(format!("gh{}", std::env::consts::EXE_SUFFIX));
+    let mut staged = tempfile::NamedTempFile::new_in(&directory)?;
+    fs::copy(&source, staged.path())?;
+    staged.as_file_mut().sync_all()?;
+    ensure!(
+        fs::read(&source)? == fs::read(staged.path())?,
+        "native GitHub CLI copy differs from the pinned executable"
+    );
+    let (_, staged) = staged.keep()?;
+    platform::aside::replace(&staged, &destination)?;
+    println!(
+        "Installed attachment-capable GitHub CLI in {}",
+        destination.display()
+    );
+    Ok(())
 }
 
 fn install_pr_workflow_binary(root: &Path) -> Result<()> {
@@ -932,6 +1061,49 @@ fn benchmarks_prepared(root: &Path, container: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incomplete_workflow_guard_bundle_keeps_the_installed_guard() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let built = scope.path().join("built");
+        let installed = scope.path().join("installed");
+        fs::create_dir_all(&built)?;
+        fs::create_dir_all(&installed)?;
+        let name = format!("dotguard{}", std::env::consts::EXE_SUFFIX);
+        fs::write(built.join(&name), b"replacement guard")?;
+        fs::write(installed.join(&name), b"installed guard")?;
+        assert!(install_workflow_guard(&built.join(&name), &installed).is_err());
+        assert_eq!(fs::read(installed.join(&name))?, b"installed guard");
+        Ok(())
+    }
+
+    #[test]
+    fn scoped_workflow_guard_install_replaces_the_policy_companion() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let built = scope.path().join("built");
+        let installed = scope.path().join("installed");
+        fs::create_dir_all(&built)?;
+        fs::create_dir_all(&installed)?;
+        let binary = |name: &str| format!("{name}{}", std::env::consts::EXE_SUFFIX);
+        fs::write(
+            built.join(binary("dotguard")),
+            b"guard from the current source",
+        )?;
+        fs::write(
+            built.join(binary(dotguard::RENOVATE_BINARY)),
+            b"matching policy companion",
+        )?;
+        fs::write(
+            installed.join(binary(dotguard::RENOVATE_BINARY)),
+            b"stale policy companion",
+        )?;
+        install_workflow_guard(&built.join(binary("dotguard")), &installed)?;
+        assert_eq!(
+            fs::read(installed.join(binary(dotguard::RENOVATE_BINARY)))?,
+            b"matching policy companion"
+        );
+        Ok(())
+    }
 
     #[test]
     fn benchmark_observation_is_closed_and_never_accepts_a_verification_flag() {

@@ -46,6 +46,7 @@ pub mod doppler_organization_rules;
 pub mod editorial_rules;
 pub mod env_expansion_rules;
 pub mod eol_rules;
+pub mod figure_migration_rules;
 pub mod freshness_rules;
 pub mod gate_rules;
 pub mod gh_read_rules;

@@ -133,7 +133,10 @@
 | [2026-11-03 Carry issue contexts through leased restacks](carry-issue-contexts-through-leased-restacks.md) | accepted |  |
 | [2026-11-03 Keep the previous build running after a failed reinstall](keep-the-previous-build-running-after-a-failed-reinstall.md) | accepted |  |
 | [2026-11-03 Give each generated SSH host its own login](per-host-ssh-logins.md) | accepted |  |
-| [2026-11-04 Draw personal PRs and issues as monochrome D2 images](draw-personal-prs-and-issues-as-monochrome-d2-images.md) | accepted |  |
+| [2026-11-04 Draw personal PRs and issues as monochrome D2 images](draw-personal-prs-and-issues-as-monochrome-d2-images.md) | superseded | [2026-11-07](attach-figures-without-storage-branches.md) |
 | [2026-11-04 Preserve active tools behind managed guards](preserve-active-tools-behind-managed-guards.md) | proposed |  |
 | [2026-11-04 Require no CLI review for high PRs](require-no-cli-review-for-high-prs.md) | accepted |  |
 | [2026-11-05 Route desktop decisions through macOS guidance](route-desktop-decisions-through-macos-guidance.md) | accepted |  |
+| [2026-11-07 Attach figures without storage branches](attach-figures-without-storage-branches.md) | accepted |  |
+| [2026-11-07 Authorize verified figure retirement](authorize-verified-figure-retirement.md) | accepted |  |
+| [2026-11-07 Capture reusable knowledge as shared skills](capture-reusable-knowledge-as-shared-skills.md) | accepted |  |

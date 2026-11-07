@@ -13,6 +13,7 @@
 pub mod attribution;
 pub mod bypass;
 pub mod clock;
+pub mod figure_retirement;
 pub mod git_wrapper;
 pub mod gitargv;
 #[cfg(unix)]

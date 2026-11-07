@@ -9,7 +9,8 @@ metadata:
 
 # Screenshots
 
-Show each user-visible change you can capture as a screenshot in its issue or PR, beside the D2 diagram that `pull-request` requires.
+Show each user-visible change you can capture as a screenshot in its issue or PR.
+Use [diagram-explanations](../diagram-explanations/SKILL.md) for complementary explanations of behavior or relationships.
 Capture the screen before the change and after it at the same size and state, so a reader can compare the two.
 Leave a capture out only when no tool here reaches the screen, and name the screen that the document lacks.
 
@@ -33,11 +34,11 @@ Crop to the part that changed when the rest of the screen distracts from it.
 ## Publish
 
 In a personal non-fork repository, run `pr-workflow screenshot --repo OWNER/REPO --file after.png --alt TEXT` for each image.
-It stores the image on the repository's `screenshots` branch under its content hash and prints the image line for the body.
+It prepares a local image reference that the checked document command attaches without creating a storage branch.
 Describe in the alternative text the screen and the state that the image shows.
 Put the lines from before and after the change next to each other under a heading that names the screen.
 
 ## Verification
 
-Open each printed image address and confirm that it shows the intended screen.
+Open each prepared image and confirm that it shows the intended screen.
 Read back the published body and confirm that every image renders.
