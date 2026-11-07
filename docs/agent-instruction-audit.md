@@ -117,6 +117,14 @@ Once run, `pr-workflow start` refuses a personal non-fork repository without a q
 Follow-up F4: nothing stops a direct `gh pr create`.
 Whether a diff fits an issue's scope stays judgment.
 
+> - Use `adr` before consequential architecture choices and when reviewing or replacing a decision.
+
+Judgment: selecting a consequential decision requires understanding its effects.
+
+>   Keep ADRs concise, run the shared gate, and leave a record proposed while material findings remain.
+
+Judgment: the shared `adr` skill supplies the gate, and determining whether findings remain needs review.
+
 > - In personal repositories, use stable descriptive document paths and name new ADRs after the decision with a front-matter date, as the shared `adr` skill describes.
 
 Follow-up F8: the shared `adr` skill states the convention, and `xtask/src/adr.rs` checks the dotfiles collection.
@@ -145,9 +153,55 @@ The `monochrome-design` skill states the defaults, and a project's browser check
 Judgment: whether a change decides interface structure, controls, accessibility behavior, or copy, and whether a cited page supports that decision, stays a review.
 The `source-bound-interface-design` skill lists the sources, and no gate checks that a proposal or PR cites them.
 
-> - For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
+> - Before implementation edits, read development-assurance, formal-assurance, verification-tools, and the applicable testing skills.
 
 Judgment: selecting relevant skill instructions and checking their verification obligations requires a review of the implementation and its evidence.
+
+>   Use the project's maintained commands, record the required tests before and after production changes, and complete affected verification before reporting implementation completion.
+
+Judgment: selecting tests and interpreting their results requires the implementation and its intended behavior.
+
+>   Require the full verification inventory before release.
+
+Judgment: the `verification-tools` skill defines the inventory, and release scope determines applicability.
+
+> - Treat applicable recommendations in shared skills and governing primary sources as required completion criteria.
+
+Judgment: the owner adopts applicable recommendations as completion policy.
+
+>   Determine applicability from the task, platform, source conditions, and explicit requirements.
+
+Judgment: source conditions and task scope need interpretation.
+
+>   Record the rule, exact source, applicability, implementation, and verification in the task's existing evidence.
+
+Judgment: meaningful evidence requires comparison with the implementation.
+
+>   Preserve the source's normative status and identify stronger adoption as owner policy.
+
+Judgment: stronger owner policy doesn't change the external source's authority.
+
+>   Resolve conflicts and justify exclusions explicitly.
+
+Judgment: conflicts and exclusions depend on the governing instructions and task.
+
+>   An unresolved applicable rule blocks a completion claim.
+
+Judgment: determining whether a rule remains unresolved needs review.
+
+>   Enforce observable requirements through maintained project gates with rejecting fixtures, and review semantic suitability directly.
+
+Judgment: a gate checks observable behavior, while semantic suitability needs source comparison.
+
+> - Use diagram-explanations proactively when a diagram can explain relationships, mechanisms, changes, or decisions.
+
+Judgment: the `diagram-explanations` skill guides representation and rendered review.
+Selecting a diagram and checking its explanation require the subject's evidence.
+
+> - Proactively use knowledge-to-skills to preserve reusable knowledge from research, implementation, debugging, review, failures, and feedback without waiting for a request.
+
+Judgment: the `knowledge-to-skills` skill guides reuse, evidence, and applicability.
+Determining which lesson improves future work requires review.
 
 > - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
 

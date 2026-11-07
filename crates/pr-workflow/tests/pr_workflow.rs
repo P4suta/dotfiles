@@ -3622,9 +3622,13 @@ fn issue_bodies_pass_the_checker_before_gh_publishes_them() -> Result<()> {
             .arg(&undrawn.body)
             .args(&extra)
             .output()?;
-        assert_eq!(rule(&output), "pr.diagram", "{action}");
+        assert!(
+            output.status.success(),
+            "{action}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
-    assert!(!undrawn.log.try_exists()? || !undrawn.log()?.contains("\nissue\n"));
+    assert!(undrawn.log()?.contains("\nissue\n"));
     let accepted = Fixture::new(&format!("The parser keeps every edit.\n\n{DIAGRAM}\n"))?;
     for (action, extra) in [
         ("check", vec![]),
@@ -3664,6 +3668,72 @@ fn issue_bodies_pass_the_checker_before_gh_publishes_them() -> Result<()> {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    Ok(())
+}
+
+#[test]
+fn local_issue_images_attach_without_storage_branches() -> Result<()> {
+    let fixture = Fixture::new("The parser preserves edits.\n\n![Preserved edits](after.png)\n")?;
+    fs::write(
+        fixture.body.with_file_name("after.png"),
+        b"\x89PNG\r\n\x1a\nfixture",
+    )?;
+    let output = fixture
+        .personal_command("issue create")?
+        .env("GH_FIXTURE_VIEW", serde_json::json!({"body":"The parser preserves edits.\n\n![Preserved edits](https://github.com/user-attachments/assets/fixture)\n"}).to_string())
+        .args(["--title", "Preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = fixture.log()?;
+    assert!(log.contains("\n--attach\n"), "{log}");
+    assert!(log.contains("![Preserved edits]("), "{log}");
+    assert!(!log.contains("/git/refs"), "{log}");
+    Ok(())
+}
+
+#[test]
+fn unchanged_local_image_references_fail_publication_readback() -> Result<()> {
+    let fixture = Fixture::new("The parser preserves edits.\n\n![Preserved edits](after.png)\n")?;
+    fs::write(
+        fixture.body.with_file_name("after.png"),
+        b"\x89PNG\r\n\x1a\nfixture",
+    )?;
+    let output = fixture
+        .personal_command("issue create")?
+        .args(["--title", "Preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("still references a local image"));
+    assert_eq!(fixture.log()?.matches("\ncreate\n").count(), 1);
+    Ok(())
+}
+
+#[test]
+fn a_partial_attachment_failure_preserves_the_created_identity_without_retry() -> Result<()> {
+    let fixture = Fixture::new("The parser preserves edits.\n\n![Preserved edits](after.png)\n")?;
+    fs::write(
+        fixture.body.with_file_name("after.png"),
+        b"\x89PNG\r\n\x1a\nfixture",
+    )?;
+    let url = "https://github.com/P4suta/project/issues/24";
+    let output = fixture
+        .personal_command("issue create")?
+        .env("GH_FIXTURE_FAILURE", "create")
+        .env("GH_FIXTURE_PARTIAL_URL", url)
+        .args(["--title", "Preserve edits", "--body-file"])
+        .arg(&fixture.body)
+        .output()?;
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains(url), "{error}");
+    assert!(error.contains("inspect GitHub before retrying"), "{error}");
+    assert_eq!(fixture.log()?.matches("\ncreate\n").count(), 1);
     Ok(())
 }
 
@@ -6324,6 +6394,118 @@ fn scoped_install_ignores_experimental_records_without_opt_in() -> Result<()> {
     let after = ops::read_approved(&manifest)?;
     assert!(after.catalog.skills.contains_key("pull-request"));
     assert_eq!(after.reviewed, before.reviewed);
+    Ok(())
+}
+
+#[test]
+fn scoped_install_preserves_current_unrelated_content_without_granting_review_credit() -> Result<()>
+{
+    use skill_ops as ops;
+    let (source, home, binary) = scoped_install_fixture()?;
+    let skills = home.path().join(".agents/skills");
+    let manifest = home.path().join(".config/skill-ops/approved.json");
+    let mut before = ops::read_approved(&manifest)?;
+    before.reviewed.insert(
+        "base-skill".into(),
+        ops::Reviewed {
+            revision: before.catalog.skills["base-skill"].revision.clone(),
+            size: false,
+        },
+    );
+    ops::write_json(&manifest, &before, true)?;
+    let path = skills.join("base-skill/SKILL.md");
+    let current = format!(
+        "{}\nPreserve the owner's existing additions.\n",
+        fs::read_to_string(&path)?
+    );
+    fs::write(&path, &current)?;
+    pr_workflow::deploy(source.path(), &binary, home.path(), |paths| {
+        apply_pr_skill(source.path(), &skills, paths)
+    })?;
+    let after = ops::read_approved(&manifest)?;
+    assert_eq!(fs::read_to_string(path)?, current);
+    assert_eq!(after.reviewed, before.reviewed);
+    assert_ne!(
+        after.catalog.skills["base-skill"].revision,
+        after.reviewed["base-skill"].revision
+    );
+    assert_eq!(after.policy_hash, before.policy_hash);
+    assert!(!platform::incidents::enabled_at(home.path()));
+    Ok(())
+}
+
+#[test]
+fn scoped_install_refuses_unrelated_content_changed_during_application() -> Result<()> {
+    let (source, home, binary) = scoped_install_fixture()?;
+    let skills = home.path().join(".agents/skills");
+    let manifest = home.path().join(".config/skill-ops/approved.json");
+    let before = fs::read(&manifest)?;
+    let error = pr_workflow::deploy(source.path(), &binary, home.path(), |paths| {
+        apply_pr_skill(source.path(), &skills, paths)?;
+        let path = skills.join("base-skill/SKILL.md");
+        fs::write(
+            &path,
+            format!("{}\nA concurrent owner edit.\n", fs::read_to_string(&path)?),
+        )?;
+        Ok(())
+    })
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("changed during scoped installation"),
+        "{error:#}"
+    );
+    assert_eq!(fs::read(manifest)?, before);
+    Ok(())
+}
+
+#[test]
+fn experimental_install_still_refuses_unreviewed_unrelated_drift() -> Result<()> {
+    use skill_ops as ops;
+    let (source, home, binary) = scoped_install_fixture()?;
+    let catalog = ops::catalog(&source.path().join("home/dot_agents/skills"))?;
+    for (name, skill) in &catalog.skills {
+        ops::write_json(
+            &source
+                .path()
+                .join(ops::DECISIONS)
+                .join(format!("{name}.json")),
+            &serde_json::json!({
+                "revision": skill.revision,
+                "outcome": "implemented",
+                "reason": "The fixture binds an explicit reviewed source revision.",
+                "evidence": [format!("home/dot_agents/skills/{name}/SKILL.md")],
+                "revisit": null
+            }),
+            false,
+        )?;
+    }
+    fs::write(
+        home.path().join(platform::incidents::EXPERIMENTAL),
+        rules::incident_rules::EXPERIMENTAL_OPT_IN,
+    )?;
+    let path = home.path().join(".agents/skills/base-skill/SKILL.md");
+    fs::write(
+        &path,
+        format!(
+            "{}\nUnreviewed owner content.\n",
+            fs::read_to_string(&path)?
+        ),
+    )?;
+    let manifest = home.path().join(".config/skill-ops/approved.json");
+    let before = fs::read(&manifest)?;
+    let error = pr_workflow::deploy(source.path(), &binary, home.path(), |_| {
+        panic!("experimental installation must inspect unrelated drift before applying")
+    })
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("unrelated installed managed skills have changed"),
+        "{error:#}"
+    );
+    assert_eq!(fs::read(manifest)?, before);
     Ok(())
 }
 

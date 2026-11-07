@@ -1,0 +1,10 @@
+{
+  "revision": "c8467c49b688b6a8f61ccb271979a8c9982345b0d2b6610fe9efbb83d5993176",
+  "outcome": "implemented",
+  "reason": "The owner requests proactive capture of reusable knowledge from research, implementation, debugging, reviews, failures, and feedback. The skill prefers existing guidance, preserves evidence and applicability, and leaves experimental maintenance disabled.",
+  "evidence": [
+    "home/dot_agents/skills/knowledge-to-skills/SKILL.md",
+    "docs/adr/capture-reusable-knowledge-as-shared-skills.md"
+  ],
+  "revisit": null
+}

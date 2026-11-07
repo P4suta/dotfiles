@@ -5,6 +5,7 @@ mod current_checks;
 mod diagram;
 mod evidence;
 mod figure;
+mod figure_migration;
 mod link_issue;
 mod local;
 mod merge;
@@ -132,6 +133,8 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    /// Plan or apply historical figure attachment migration and verified branch retirement.
+    MigrateFigures(figure_migration::Action),
     /// Report the verified route of the actual current PR assessment without requesting review.
     ReviewRoute {
         #[command(flatten)]
@@ -263,9 +266,9 @@ pub enum Commands {
         #[command(subcommand)]
         action: StackAction,
     },
-    /// Render a D2 source in black and white, store it on the personal repository's `diagrams` branch, and print the image line for a PR or issue body.
+    /// Render D2 locally and print its attachment reference with editable source.
     Diagram {
-        /// The exact personal GitHub repository that stores the image.
+        /// The exact destination repository.
         #[arg(long)]
         repo: String,
         /// The D2 source, which leaves configuration and colors to this command.
@@ -275,9 +278,9 @@ pub enum Commands {
         #[arg(long)]
         alt: String,
     },
-    /// Store a captured screen image on the personal repository's `screenshots` branch, and print the image line for a PR or issue body.
+    /// Prepare a local screenshot and print its Markdown attachment reference.
     Screenshot {
-        /// The exact personal GitHub repository that stores the image.
+        /// The exact destination repository.
         #[arg(long)]
         repo: String,
         /// The captured image.
@@ -390,6 +393,7 @@ pub struct IssueDocument {
 impl Commands {
     fn name(&self) -> &'static str {
         match self {
+            Self::MigrateFigures(_) => "migrate-figures",
             Self::ReviewRoute { .. } => "review-route",
             Self::Assess { .. } => "assess",
             Self::Start { .. } => "start",
@@ -877,6 +881,7 @@ struct LiveIssue {
 pub struct ValidatedDocument {
     title: String,
     body: String,
+    attachments: Vec<PathBuf>,
 }
 
 /// Refuse a title or body that carries a line claiming authorship for an agent.
@@ -1288,12 +1293,17 @@ pub(crate) fn validate(
         )
         .into());
     }
-    Ok(ValidatedDocument { title, body })
+    Ok(ValidatedDocument {
+        title,
+        body,
+        attachments: Vec::new(),
+    })
 }
 
 fn read_document(document: DocumentArgs, final_check: bool) -> Result<(Target, ValidatedDocument)> {
     let body = fs::read_to_string(&document.body_file).context("read UTF-8 PR body file")?;
-    let validated = validate(&document.target, document.title, body, final_check)?;
+    let mut validated = validate(&document.target, document.title, body, final_check)?;
+    figure::prepare_document(&mut validated, &document.body_file)?;
     Ok((document.target, validated))
 }
 
@@ -1314,51 +1324,28 @@ fn written_to_standard(
     )
 }
 
-/// Refuses a newly written title or body that fails the personal writing standard or, in a personal repository, shows no stored diagram.
-/// Ready and merge read an existing body through [`written_to_standard`] alone, so a PR written before the diagram rule still lands.
+/// Applies the personal writing standard without requiring an image for every change.
 fn authored_to_standard(
     destination: Destination,
-    repo: &str,
+    _repo: &str,
     kind: prose::Publication,
     document: &ValidatedDocument,
 ) -> Result<()> {
-    written_to_standard(destination, kind, document)?;
-    if standard_applies(destination.personal, destination.fork)
-        && !diagram::shown(repo, &document.body)
-    {
-        return Err(diagram::missing(repo).into());
-    }
-    Ok(())
+    written_to_standard(destination, kind, document)
 }
 
-/// An image that a personal repository stores on a branch of its own.
+/// A figure to prepare for attachment to a document.
 enum Figure<'a> {
     Diagram(&'a Path),
     Screenshot(&'a Path),
 }
 
-/// Stores a figure for a personal non-fork repository and prints its image line.
+/// Prepares a local figure without creating a GitHub branch.
 fn store_figure(repo: &str, figure: &Figure<'_>, alt: &str) -> Result<()> {
-    let github = Github::connect()?;
-    let destination = destination(&github, repo)?;
-    let (rule, kind) = match figure {
-        Figure::Diagram(_) => ("pr.diagram", "diagrams"),
-        Figure::Screenshot(_) => ("pr.screenshot", "screenshots"),
-    };
-    require(
-        standard_applies(destination.personal, destination.fork),
-        || {
-            Refusal::new(
-                rule,
-                format!("only a personal non-fork repository stores {kind} on its own branch"),
-                "attach the image through the destination's own interface",
-            )
-            .evidence(format!("repository: {repo}"))
-        },
-    )?;
+    offline_destination(repo)?;
     let line = match figure {
-        Figure::Diagram(source) => diagram::publish(repo, source, alt)?,
-        Figure::Screenshot(file) => screenshot::publish(repo, file, alt)?,
+        Figure::Diagram(source) => diagram::prepare(source, alt)?,
+        Figure::Screenshot(file) => screenshot::prepare(file, alt)?,
     };
     println!("{line}");
     Ok(())
@@ -1390,7 +1377,9 @@ fn validate_issue(document: &IssueDocument) -> Result<ValidatedDocument> {
     };
     target.conventional_required()?;
     let body = fs::read_to_string(&document.body_file).context("read UTF-8 issue body file")?;
-    validate_issue_contents(&document.title, body)
+    let mut validated = validate_issue_contents(&document.title, body)?;
+    figure::prepare_document(&mut validated, &document.body_file)?;
+    Ok(validated)
 }
 
 fn validate_issue_contents(title: &str, body: String) -> Result<ValidatedDocument> {
@@ -1426,6 +1415,7 @@ fn validate_issue_contents(title: &str, body: String) -> Result<ValidatedDocumen
     Ok(ValidatedDocument {
         title: title.to_owned(),
         body,
+        attachments: Vec::new(),
     })
 }
 
@@ -1436,11 +1426,21 @@ fn gh(args: &[OsString]) -> Result<String> {
         .args(args)
         .output()
         .context("start gh")?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let publication = stdout
+        .lines()
+        .find(|line| {
+            line.starts_with(&format!("{GITHUB}/"))
+                && (line.contains("/pull/") || line.contains("/issues/"))
+                && !line.chars().any(char::is_whitespace)
+        })
+        .unwrap_or("none");
     ensure!(
         output.status.success(),
-        "gh failed with {}: {}; inspect GitHub before retrying an uncertain mutation",
+        "gh failed with {}: {}; publication URL: {}; inspect GitHub before retrying an uncertain mutation",
         output.status,
-        String::from_utf8_lossy(&output.stderr).trim()
+        String::from_utf8_lossy(&output.stderr).trim(),
+        publication
     );
     String::from_utf8(output.stdout).context("gh returned non-UTF-8 output")
 }
@@ -2147,6 +2147,9 @@ fn write_document(
         OsString::from("--body-file"),
         body.path().as_os_str().to_owned(),
     ]);
+    for attachment in &document.attachments {
+        args.extend(["--attach".into(), attachment.as_os_str().to_owned()]);
+    }
     Ok(body)
 }
 
@@ -2297,6 +2300,7 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             }
         }
         Commands::PruneMerged { target, dry_run } => prune_merged(&target, dry_run)?,
+        Commands::MigrateFigures(action) => figure_migration::run(&action)?,
         Commands::Stack { action } => stack(action, rerun)?,
         Commands::Issue { action } => issue(action)?,
         Commands::Diagram { repo, source, alt } => {
@@ -2543,6 +2547,7 @@ fn create(
     let created = gh(&args)?;
     print!("{created}");
     let number = created_number(&created)?;
+    figure::verify_publication(&document, "pr", &target.repo, number)?;
     review_policy::remember(&checked, &target, &github, number)?;
     stack.published(&target, number)?;
     work.published(number)
@@ -2595,6 +2600,7 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     ];
     let _body = write_document(&mut args, &document)?;
     print!("{}", gh(&args)?);
+    figure::verify_publication(&document, "pr", &target.repo, pr)?;
     review_policy::remember(&checked, &target, &github, pr)?;
     settle_pause(&target.repo, pr, checked.route, &document.body)
 }
@@ -3120,16 +3126,20 @@ struct Lease {
     token: String,
 }
 
+fn lease_token() -> Result<String> {
+    let probe = tempfile::NamedTempFile::new()?;
+    let mut seed = Sha256::new();
+    seed.update(std::process::id().to_le_bytes());
+    seed.update(format!("{:?}", std::time::SystemTime::now()));
+    seed.update(probe.path().as_os_str().as_encoded_bytes());
+    Ok(crate::build_inputs::hex(&seed.finalize()))
+}
+
 impl Lease {
     fn acquire() -> Result<Self> {
         let directory = git_output(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
         let path = Path::new(directory.trim()).join(STACK_LEASE);
-        let probe = tempfile::NamedTempFile::new()?;
-        let mut seed = Sha256::new();
-        seed.update(std::process::id().to_le_bytes());
-        seed.update(format!("{:?}", std::time::SystemTime::now()));
-        seed.update(probe.path().as_os_str().as_encoded_bytes());
-        let token = crate::build_inputs::hex(&seed.finalize());
+        let token = lease_token()?;
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -3873,8 +3883,13 @@ fn issue(action: IssueAction) -> Result<()> {
     }
     args.extend(["--repo".into(), OsString::from(&document.repo)]);
     let _body = write_document(&mut args, &validated)?;
-    print!("{}", gh(&args)?);
-    Ok(())
+    let published = gh(&args)?;
+    print!("{published}");
+    let number = match number {
+        Some(number) => number,
+        None => created_number(&published)?,
+    };
+    figure::verify_publication(&validated, "issue", &document.repo, number)
 }
 
 pub(crate) fn install(binary: &std::path::Path, user_directory: &std::path::Path) -> Result<()> {
@@ -3978,6 +3993,40 @@ pub fn deploy(
     source: &std::path::Path,
     binary: &std::path::Path,
     user_directory: &std::path::Path,
+    apply: impl FnMut(&[PathBuf]) -> Result<()>,
+) -> Result<()> {
+    deploy_selected(source, binary, user_directory, &["pull-request"], apply)
+}
+
+/// Installs the PR workflow's authoring skills without changing unrelated managed skills.
+///
+/// # Errors
+/// Returns an error for changed unrelated skills, a missing source, or an incomplete installation.
+pub fn deploy_workflow(
+    source: &Path,
+    binary: &Path,
+    user_directory: &Path,
+    apply: impl FnMut(&[PathBuf]) -> Result<()>,
+) -> Result<()> {
+    deploy_selected(
+        source,
+        binary,
+        user_directory,
+        &[
+            "pull-request",
+            "screenshots",
+            "diagram-explanations",
+            "knowledge-to-skills",
+        ],
+        apply,
+    )
+}
+
+fn deploy_selected(
+    source: &Path,
+    binary: &Path,
+    user_directory: &Path,
+    selected: &[&str],
     mut apply: impl FnMut(&[PathBuf]) -> Result<()>,
 ) -> Result<()> {
     use skill_ops as ops;
@@ -3986,79 +4035,72 @@ pub fn deploy(
         ops::check_catalog(source)?;
     }
     let manifest = user_directory.join(".config/skill-ops/approved.json");
-    let mut approved = ops::read_approved(&manifest)?;
-    ensure!(
-        ops::hash(&approved.catalog)? == approved.catalog_hash,
-        "installed managed catalog is inconsistent"
-    );
-    let mut retained = approved.catalog.clone();
-    retained.skills.remove("pull-request");
-    for skill in retained.skills.values_mut() {
-        skill.references.remove("pull-request");
-    }
-    let skills = user_directory.join(".agents/skills");
-    let installed = ops::catalog_owned(&skills, &retained);
-    if !installed
-        .as_ref()
-        .is_ok_and(|installed| *installed == retained)
-    {
-        return Err(changed_skills(&skills, &retained, installed.err())?.into());
-    }
-    let policy: ops::Policy =
-        ops::read_json(&user_directory.join(".config/skill-ops/policy.json"))?;
-    ensure!(
-        ops::hash(&policy)? == approved.policy_hash,
-        "installed policy differs from its managed identity"
-    );
+    let (mut approved, retained) = preserved_catalog(user_directory, selected, experimental)?;
     let expected = ops::catalog(&source.join("home/dot_agents/skills"))?;
-    approved.catalog.skills.insert(
-        "pull-request".into(),
-        expected
-            .skills
-            .get("pull-request")
-            .context("source PR skill is missing")?
-            .clone(),
-    );
+    for name in selected {
+        approved.catalog.skills.insert(
+            (*name).into(),
+            expected
+                .skills
+                .get(*name)
+                .with_context(|| format!("source skill {name} is missing"))?
+                .clone(),
+        );
+    }
     let available: BTreeSet<_> = approved.catalog.skills.keys().cloned().collect();
-    approved
-        .catalog
-        .skills
-        .get_mut("pull-request")
-        .context("planned PR skill is missing")?
-        .references
-        .retain(|name| available.contains(name));
+    for name in selected {
+        approved
+            .catalog
+            .skills
+            .get_mut(*name)
+            .context("planned authoring skill is missing")?
+            .references
+            .retain(|name| available.contains(name));
+    }
     if experimental {
         let reviewed = ops::adoptable_revisions(
             &expected,
             &ops::tracked_decisions(&source.join(ops::DECISIONS))?,
         );
-        match reviewed.get("pull-request") {
-            Some(skill) => approved
-                .reviewed
-                .insert("pull-request".into(), skill.clone()),
-            None => approved.reviewed.remove("pull-request"),
-        };
+        for name in selected {
+            match reviewed.get(*name) {
+                Some(skill) => approved.reviewed.insert((*name).into(), skill.clone()),
+                None => approved.reviewed.remove(*name),
+            };
+        }
     }
-    let tree = source.join("home/dot_agents/skills/pull-request");
-    let symlink = source.join("home/dot_claude/skills/symlink_pull-request");
     let paths: Vec<_> = skill_ops::skill_source_paths(source)?
         .into_iter()
-        .filter(|path| path.starts_with(&tree) || *path == symlink)
+        .filter(|path| {
+            selected.iter().any(|name| {
+                path.starts_with(source.join("home/dot_agents/skills").join(name))
+                    || *path
+                        == source
+                            .join("home/dot_claude/skills")
+                            .join(format!("symlink_{name}"))
+            })
+        })
         .collect();
     ensure!(
-        paths.len() >= SKILL_WITH_ALIAS,
+        paths.len() >= SKILL_WITH_ALIAS * selected.len(),
         "scoped PR skill installation is empty"
     );
     apply(&paths)?;
     let installed = ops::catalog_owned(&user_directory.join(".agents/skills"), &approved.catalog)?;
-    ensure!(
-        installed.skills.get("pull-request") == approved.catalog.skills.get("pull-request"),
-        "installed PR skill differs from the reviewed source"
-    );
+    for name in selected {
+        ensure!(
+            installed.skills.get(*name) == approved.catalog.skills.get(*name),
+            "installed authoring skill differs from the reviewed source"
+        );
+    }
     let mut unchanged = installed.clone();
-    unchanged.skills.remove("pull-request");
+    for name in selected {
+        unchanged.skills.remove(*name);
+    }
     for skill in unchanged.skills.values_mut() {
-        skill.references.remove("pull-request");
+        skill
+            .references
+            .retain(|name| !selected.contains(&name.as_str()));
     }
     ensure!(
         unchanged == retained,
@@ -4069,4 +4111,47 @@ pub fn deploy(
     approved.catalog_hash = ops::hash(&approved.catalog)?;
     ops::write_json(&manifest, &approved, true)?;
     Ok(())
+}
+
+fn preserved_catalog(
+    user_directory: &Path,
+    selected: &[&str],
+    experimental: bool,
+) -> Result<(skill_ops::Approved, skill_ops::Catalog)> {
+    use skill_ops as ops;
+    let mut approved = ops::read_approved(&user_directory.join(".config/skill-ops/approved.json"))?;
+    ensure!(
+        ops::hash(&approved.catalog)? == approved.catalog_hash,
+        "installed managed catalog is inconsistent"
+    );
+    let mut retained = approved.catalog.clone();
+    for name in selected {
+        retained.skills.remove(*name);
+    }
+    for skill in retained.skills.values_mut() {
+        skill
+            .references
+            .retain(|name| !selected.contains(&name.as_str()));
+    }
+    let skills = user_directory.join(".agents/skills");
+    let installed = ops::catalog_owned(&skills, &retained);
+    if installed.is_err()
+        || (experimental
+            && !installed
+                .as_ref()
+                .is_ok_and(|installed| *installed == retained))
+    {
+        return Err(changed_skills(&skills, &retained, installed.err())?.into());
+    }
+    let retained = installed?;
+    for (name, skill) in &retained.skills {
+        approved.catalog.skills.insert(name.clone(), skill.clone());
+    }
+    let policy: ops::Policy =
+        ops::read_json(&user_directory.join(".config/skill-ops/policy.json"))?;
+    ensure!(
+        ops::hash(&policy)? == approved.policy_hash,
+        "installed policy differs from its managed identity"
+    );
+    Ok((approved, retained))
 }

@@ -24,24 +24,30 @@ pub fn run<const SPEECH: bool>(argv: &[String]) -> ExitCode {
         let full: Vec<String> = std::iter::once("git".to_owned())
             .chain(argv.iter().cloned())
             .collect();
+        let retirement =
+            denial.rule == bypass::Rule::Force && crate::figure_retirement::command_permitted(argv);
         let tooling = denial.stack && stack::leased(gitargv::global_options(argv));
-        match gate_rules::admission(denial.stack, tooling, bypass::bypassed(denial.rule)) {
-            Admission::Tooling => {
-                bypass::record("STACK", denial.rule, &denial.reason, &full);
-            }
-            Admission::Waived => {
-                bypass::record("BYPASS", denial.rule, &denial.reason, &full);
-                eprintln!(
-                    "::warning:: {}=1 — allowing {}",
-                    denial.rule.env().unwrap_or_default(),
-                    denial.reason
-                );
-            }
-            Admission::Refused => {
-                bypass::record("REJECT", denial.rule, &denial.reason, &full);
-                gitargv::refusal(&denial, argv).emit();
-                spoken.finish(false);
-                return ExitCode::FAILURE;
+        if retirement {
+            bypass::record("FIGURE_RETIREMENT", denial.rule, &denial.reason, &full);
+        } else {
+            match gate_rules::admission(denial.stack, tooling, bypass::bypassed(denial.rule)) {
+                Admission::Tooling => {
+                    bypass::record("STACK", denial.rule, &denial.reason, &full);
+                }
+                Admission::Waived => {
+                    bypass::record("BYPASS", denial.rule, &denial.reason, &full);
+                    eprintln!(
+                        "::warning:: {}=1 — allowing {}",
+                        denial.rule.env().unwrap_or_default(),
+                        denial.reason
+                    );
+                }
+                Admission::Refused => {
+                    bypass::record("REJECT", denial.rule, &denial.reason, &full);
+                    gitargv::refusal(&denial, argv).emit();
+                    spoken.finish(false);
+                    return ExitCode::FAILURE;
+                }
             }
         }
     }

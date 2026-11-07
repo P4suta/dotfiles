@@ -1,0 +1,11 @@
+{
+  "revision": "9d71204b239f531e889ee8ebc8f369b116578ee92aa0750a5f8c96ca538e7616",
+  "outcome": "implemented",
+  "reason": "The owner wants proactive diagrams that explain actual mechanisms. The skill binds a reader question and concrete relationships to inspected evidence, applies relevant primary guidance, and requires review at the destination size.",
+  "evidence": [
+    "home/dot_agents/skills/diagram-explanations/SKILL.md",
+    "home/dot_agents/skills/diagram-explanations/assets/pr-image-publication.d2",
+    "docs/adr/attach-figures-without-storage-branches.md"
+  ],
+  "revisit": null
+}

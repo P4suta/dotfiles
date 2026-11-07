@@ -2804,6 +2804,113 @@ fn a_rewrite_is_refused_with_the_integration_step_and_a_bypass_for_exactly_that_
     );
 }
 
+#[test]
+fn a_figure_retirement_permit_admits_only_its_exact_remote_update() {
+    let (repository, base) = published("figure-retirement");
+    let permit = repository
+        .path()
+        .join(".git/dotguard-figure-retirement.json");
+    std::fs::write(
+        &permit,
+        serde_json::to_vec(&serde_json::json!({
+            "token":"retirement-token", "remote":"origin", "branch":"diagrams", "oid":base,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let deletion = format!("(delete) {ZERO} refs/heads/diagrams {base}\n");
+    let token = [("DOTGUARD_FIGURE_RETIREMENT", "retirement-token")];
+    assert_eq!(
+        refusal(&repository.dotguard(&["pre-push", "origin"], &deletion, &[])).rule,
+        "push.history"
+    );
+    let permitted = repository.dotguard_with(&["pre-push", "origin"], &deletion, &[], &token);
+    assert!(
+        permitted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&permitted.stderr)
+    );
+    for (remote, input) in [
+        ("other", deletion.clone()),
+        (
+            "origin",
+            format!("(delete) {ZERO} refs/heads/screenshots {base}\n"),
+        ),
+        (
+            "origin",
+            format!(
+                "(delete) {ZERO} refs/heads/diagrams {}\n",
+                "a".repeat(ZERO.len())
+            ),
+        ),
+        (
+            "origin",
+            format!("{deletion}(delete) {ZERO} refs/heads/topic {base}\n"),
+        ),
+    ] {
+        assert_eq!(
+            refusal(&repository.dotguard_with(&["pre-push", remote], &input, &[], &token)).rule,
+            "push.history"
+        );
+    }
+    let wrong = [("DOTGUARD_FIGURE_RETIREMENT", "other-token")];
+    assert_eq!(
+        refusal(&repository.dotguard_with(&["pre-push", "origin"], &deletion, &[], &wrong)).rule,
+        "push.history"
+    );
+    std::fs::remove_file(&permit).unwrap();
+    assert_eq!(
+        refusal(&repository.dotguard_with(&["pre-push", "origin"], &deletion, &[], &token)).rule,
+        "push.history"
+    );
+}
+
+#[test]
+fn verified_figure_retirement_requires_no_worktree_or_dependency_lookup() {
+    let (repository, base) = published("figure-retirement-bare-policy");
+    repository.git(&["config", "core.bare", "true"]);
+    std::fs::write(
+        repository
+            .path()
+            .join(".git/dotguard-figure-retirement.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "token":"retirement-token", "remote":"origin", "branch":"diagrams", "oid":base,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let deletion = format!("(delete) {ZERO} refs/heads/diagrams {base}\n");
+    let token = [("DOTGUARD_FIGURE_RETIREMENT", "retirement-token")];
+    let permitted = repository.dotguard_with(&["renovate-gate", "origin"], &deletion, &[], &token);
+    assert!(
+        permitted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&permitted.stderr)
+    );
+    for (remote, input, context) in [
+        ("origin", deletion.clone(), "other-token"),
+        ("other", deletion.clone(), "retirement-token"),
+        (
+            "origin",
+            format!("(delete) {ZERO} refs/heads/screenshots {base}\n"),
+            "retirement-token",
+        ),
+        (
+            "origin",
+            format!("{deletion}(delete) {ZERO} refs/heads/topic {base}\n"),
+            "retirement-token",
+        ),
+    ] {
+        let variables = [("DOTGUARD_FIGURE_RETIREMENT", context)];
+        assert!(
+            !repository
+                .dotguard_with(&["renovate-gate", remote], &input, &[], &variables)
+                .status
+                .success()
+        );
+    }
+}
+
 /// The stack tooling pushes a rewrite while it holds the lease, and never a deletion.
 #[test]
 fn only_the_leased_stack_tooling_pushes_a_rewrite() {

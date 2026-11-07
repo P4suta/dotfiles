@@ -1,14 +1,8 @@
-//! Screenshots that personal PR and issue bodies show from the repository's `screenshots` branch.
+//! Local screenshots prepared for GitHub document attachments.
 
 use crate::figure;
-use anyhow::{Context, Result, ensure};
-use sha2::{Digest, Sha256};
+use anyhow::{Context, Result};
 use std::path::Path;
-
-/// The branch of a personal repository that holds each screenshot under its content hash.
-const BRANCH: &str = "screenshots";
-/// The largest screenshot this command stores, which keeps a body quick to load.
-const MAX_BYTES: usize = 10 * 1024 * 1024;
 
 /// The image formats a browser shows inline, each with its file signature.
 /// <https://www.w3.org/TR/png-3/#5PNG-file-signature>, <https://www.w3.org/Graphics/JPEG/jfif3.pdf>, <https://developers.google.com/speed/webp/docs/riff_container>
@@ -24,7 +18,7 @@ const WEBP_MARKER: &[u8] = b"WEBP";
 const WEBP_MARKER_OFFSET: usize = 8;
 
 /// The extension of an image whose bytes start with a known signature.
-fn extension(bytes: &[u8]) -> Option<&'static str> {
+pub(crate) fn extension(bytes: &[u8]) -> Option<&'static str> {
     FORMATS
         .iter()
         .find(|(extension, signature)| {
@@ -36,34 +30,16 @@ fn extension(bytes: &[u8]) -> Option<&'static str> {
         .map(|(extension, _)| *extension)
 }
 
-/// Stores a screenshot on the repository's `screenshots` branch and returns the body's image line.
+/// Caches a screenshot locally and returns a Markdown attachment reference.
 ///
 /// # Errors
 /// Returns an error for an unreadable, empty, or unknown image, an image over the size limit, and a GitHub failure.
-pub(crate) fn publish(repository: &str, file: &Path, alt: &str) -> Result<String> {
+pub(crate) fn prepare(file: &Path, alt: &str) -> Result<String> {
     figure::check_alt(alt)?;
-    let bytes = std::fs::read(file).with_context(|| format!("read {}", file.display()))?;
-    ensure!(
-        !bytes.is_empty() && bytes.len() <= MAX_BYTES,
-        "a screenshot needs between 1 byte and {MAX_BYTES} bytes, and {} has {}",
-        file.display(),
-        bytes.len()
-    );
+    let bytes = figure::read_image(file).with_context(|| format!("read {}", file.display()))?;
     let extension = extension(&bytes)
         .with_context(|| format!("{} isn't a PNG, JPEG, GIF, or WebP image", file.display()))?;
-    let name = format!(
-        "{}.{extension}",
-        crate::build_inputs::hex(&Sha256::digest(&bytes))
-    );
-    figure::store(
-        repository,
-        BRANCH,
-        &[figure::File {
-            name: name.clone(),
-            content: figure::Content::Binary(&bytes),
-        }],
-    )?;
-    Ok(figure::image_line(repository, BRANCH, &name, alt))
+    figure::image_line(&figure::cache(&bytes, extension)?, alt)
 }
 
 #[cfg(test)]

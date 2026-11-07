@@ -81,9 +81,11 @@ The shell guard checks literal GitHub body, body-file, close and reopen comment,
 An unreadable file, unresolved expansion, ambiguous standard input, or unsupported publishing command supplies no completed check and blocks the command.
 Use a readable UTF-8 body file with a direct command in its known execution directory, and keep issue and PR documents on the checked workflow route.
 Use `Why`, `Changes`, and `Validation` when no template exists, and state the actual validation outcome.
-In a personal non-fork repository, draw the change in D2 and run `pr-workflow diagram --repo OWNER/REPO --source FILE.d2 --alt TEXT`.
-Paste the image line it prints into the issue or PR body, because `check`, `create`, `edit`, and the issue commands refuse a body without one.
-Draw the shape that the change has, such as a flow, a sequence, or the structure before and after it.
+Use [diagram-explanations](../diagram-explanations/SKILL.md) proactively to show relationships, state transitions, boundaries, or behavioral differences that readers need to understand.
+Draw the actual change in D2 with `pr-workflow diagram --repo OWNER/REPO --source FILE.d2 --alt TEXT` and include its printed local reference and editable source section in the body.
+The checked publication command attaches local images and verifies the resulting body without creating a storage branch.
+Read [attachments and historical figures](references/attachments.md) when publishing images or migrating stored figures.
+Use prose when a diagram adds no explanatory relationship, such as a spelling correction.
 The command adds the black-and-white theme and refuses colors, transparency, effects, icons, and its own D2 configuration in the source.
 Load `screenshots` for a change that a reader can see on a screen, and attach its captures beside the diagram.
 Rewrite the description around the final change if the scope changed.
