@@ -1,0 +1,10 @@
+{
+  "revision": "1acb6cc5bc8d95143c580cccbc773955f3f4be93154f96d620cfa0d78fc63940",
+  "outcome": "implemented",
+  "reason": "The owner asked for a reusable slide-creation skill after building a timed internship talk. The method fixes the script before the slides, keeps each spoken slide to the words the presenter says, closes the argument in the main part, and moves details into an appendix that the audience can read in advance. Verification compares slide phrases with the script, times a reading, checks page counters and speaker notes, and repeats reviews from distinct viewpoints. Figma Slides specifics stay in a conditional reference.",
+  "evidence": [
+    "home/dot_agents/skills/presentation-decks/SKILL.md",
+    "home/dot_agents/skills/presentation-decks/references/figma-slides.md"
+  ],
+  "revisit": null
+}
