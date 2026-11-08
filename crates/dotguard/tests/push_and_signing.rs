@@ -1548,6 +1548,43 @@ fn http_backend_report() -> serde_json::Value {
     }}}})
 }
 
+#[test]
+fn renovate_preserves_literal_http_download_sizes() {
+    let (repository, _, initial) = renovate_fixture("renovate-http-size-literals");
+    for size in ["37881954", "\"37881954\"", "\"18446744073709551615\""] {
+        let manifest = format!("{HTTP_MANIFEST}size = {size}\n");
+        let offered = changed_file(&repository, "mise.toml", &manifest, &initial);
+        let output = report_gate(&repository, &initial, &offered, &http_backend_report());
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    for size in [
+        "-1",
+        "\"-1\"",
+        "\"\"",
+        "\"1.5\"",
+        "\"18446744073709551616\"",
+        "true",
+        "[]",
+    ] {
+        let manifest = format!("{HTTP_MANIFEST}size = {size}\n");
+        let offered = changed_file(&repository, "mise.toml", &manifest, &initial);
+        assert_eq!(
+            refusal(&report_gate(
+                &repository,
+                &initial,
+                &offered,
+                &http_backend_report()
+            ))
+            .rule,
+            "push.evidence"
+        );
+    }
+}
+
 const HTTP_TAG_MANIFEST: &str = r#"[tools."http:libwebp"]
 version = "1.6.0"
 version_list_url = "https://api.github.com/repos/webmproject/libwebp/tags"

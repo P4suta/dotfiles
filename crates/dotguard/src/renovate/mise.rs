@@ -203,10 +203,14 @@ fn download_options(entry: &toml::Table) -> Option<DownloadOptions<'_>> {
             value.as_str()?;
         }
     }
-    for field in ["size", "strip_components"] {
-        if let Some(value) = entry.get(field) {
-            u64::try_from(value.as_integer()?).ok()?;
-        }
+    if let Some(value) = entry.get("size") {
+        value
+            .as_str()
+            .and_then(|size| size.parse::<u64>().ok())
+            .or_else(|| u64::try_from(value.as_integer()?).ok())?;
+    }
+    if let Some(value) = entry.get("strip_components") {
+        u64::try_from(value.as_integer()?).ok()?;
     }
     let url = match entry.get("url") {
         Some(value) => Some(value.as_str().filter(|url| !url.is_empty())?),
