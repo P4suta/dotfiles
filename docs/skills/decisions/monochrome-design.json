@@ -1,7 +1,7 @@
 {
-  "revision": "d62fe959c7bec138837dc594414dbe8a01a8cab63b0c863fd5370dba238695cf",
+  "revision": "7ec0fb21650f7a08b67ab4b7594177f49bc6ececcf686ad5a924bf1bc4f6c823",
   "outcome": "implemented",
-  "reason": "The owner requested black-and-white designs, literal service headings, and meaningful typography; this skill records those defaults, adds canonical discovery and a common policy reference, and requires browser checks with positive and negative fixtures while preserving semantic clarity as a human review boundary. This revision points structure, form control, accessibility, and copy decisions to source-bound-interface-design so they cite primary sources.",
+  "reason": "The skill connects the owner's monochrome preferences to the full task, semantic grouping, readable browser typography, labeled controls, and meaningful verification. It distinguishes the owner's stronger defaults from source minima and keeps browser units separate from native platform guidance.",
   "evidence": [
     "home/dot_agents/skills/monochrome-design/SKILL.md",
     "home/dot_claude/skills/symlink_monochrome-design",
