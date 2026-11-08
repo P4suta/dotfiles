@@ -80,5 +80,13 @@ Unrelated handlers remain in their existing groups.
 {{-     $_ := set $current $key $value -}}
 {{-   end -}}
 {{- end -}}
+{{- $onePassword := includeTemplate "partials/onepassword_mcp_command" . -}}
+{{- $plugins := dig "enabledPlugins" (dict) $current -}}
+{{- if $onePassword -}}
+{{- $_ := set $plugins "1password@1password" true -}}
+{{- $current = setValueAtPath "extraKnownMarketplaces.1password" (dict "source" (dict "source" "github" "repo" "1Password/1password-claude-plugin")) $current -}}
+{{- else if hasKey $plugins "1password@1password" -}}
+{{- $_ := set $plugins "1password@1password" false -}}
+{{- end -}}
 {{ mergeOverwrite $current $managed | toPrettyJson "  " | trim }}
 
