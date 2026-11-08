@@ -22,6 +22,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+pub mod adr;
 pub mod copyedit;
 pub mod editorial;
 pub mod house;
@@ -810,6 +811,9 @@ pub fn check(bundle: &Bundle, channel: Channel, path: &str, text: &str) -> Resul
                 _ => text.to_owned(),
             };
             let input = Input::new(path, &text, channel == Channel::Document);
+            if channel == Channel::Document {
+                findings.extend(adr::check(path, &text));
+            }
             findings.extend(language(&input, lang::Mode::English));
             findings.extend(sentence_per_line(&input));
             findings.extend(vale(bundle, std::slice::from_ref(&input))?);
@@ -1440,16 +1444,12 @@ pub fn personal_owners() -> Result<Vec<String>> {
     Ok(owners)
 }
 
-/// The commit-msg gate every repository on a host runs: it checks the message when the repository takes the personal standard.
-///
-/// # Errors
-///
-/// Returns an error when Git can't report the repository's standard, the bundle can't load, or the message fails the standard.
-pub fn commit_gate(
-    repository: &Path,
-    message: &Path,
-    bundle: impl FnOnce() -> Result<Bundle>,
-) -> Result<()> {
+struct RepositoryContext {
+    standard: Standard,
+    remotes: Vec<(String, String)>,
+}
+
+fn repository_context(repository: &Path) -> Result<RepositoryContext> {
     let output = Tool::Git
         .hook_command()
         .current_dir(repository)
@@ -1483,7 +1483,29 @@ pub fn commit_gate(
             String::from_utf8_lossy(&setting.stderr).trim()
         ),
     };
-    match remotes_standard(declared, &remotes, &personal_owners()?, ssh_host_name) {
+    let standard = remotes_standard(declared, &remotes, &personal_owners()?, ssh_host_name);
+    Ok(RepositoryContext { standard, remotes })
+}
+
+/// The writing standard selected by local configuration and repository remotes.
+///
+/// # Errors
+/// Returns an error when Git or the declared standard is invalid.
+pub fn standard(repository: &Path) -> Result<Standard> {
+    Ok(repository_context(repository)?.standard)
+}
+
+/// The commit-msg gate checks messages in repositories that take the personal standard.
+///
+/// # Errors
+/// Returns an error when Git, the bundle, or the message check fails.
+pub fn commit_gate(
+    repository: &Path,
+    message: &Path,
+    bundle: impl FnOnce() -> Result<Bundle>,
+) -> Result<()> {
+    let RepositoryContext { standard, remotes } = repository_context(repository)?;
+    match standard {
         Standard::Applies => {}
         Standard::Skips => return Ok(()),
         Standard::Undetermined => {

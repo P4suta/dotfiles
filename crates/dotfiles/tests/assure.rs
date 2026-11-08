@@ -24,6 +24,93 @@ fn catalog() -> Result<Catalog> {
     )
 }
 
+#[test]
+fn adr_gates_preserve_untouched_history_and_refuse_an_oversize_change() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let record = "docs/adr/bound-the-retry-queue.md";
+    fixture.write(record, &"Historical detail.\n".repeat(200))?;
+    fixture.commit("historical decision")?;
+    let catalog = fixture.catalog()?;
+    assert!(
+        assure::stop(&fixture.root, &catalog)?
+            .refusal(&catalog)
+            .is_none()
+    );
+    fixture.write(record, &"Changed detail.\n".repeat(201))?;
+    let error = assure::stop(&fixture.root, &catalog).unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<Refusal>()
+            .unwrap()
+            .text()
+            .contains("ADR.WordBudget"),
+        "{error:#}"
+    );
+    fixture.stage()?;
+    let error = assure::commit(&fixture.root, &catalog).unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<Refusal>()
+            .unwrap()
+            .text()
+            .contains("ADR.WordBudget"),
+        "{error:#}"
+    );
+    fixture.commit("changed decision")?;
+    let base = fixture.git(&["rev-parse", "HEAD^"])?;
+    let head = fixture.git(&["rev-parse", "HEAD"])?;
+    let error = assure::ready(&fixture.root, &catalog, &base, &head).unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<Refusal>()
+            .unwrap()
+            .text()
+            .contains("ADR.WordBudget"),
+        "{error:#}"
+    );
+    Ok(())
+}
+
+#[test]
+fn adr_stop_hook_returns_a_block_and_external_repositories_keep_their_rules() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.write("docs/adr/queue.md", &"Unnecessary detail.\n".repeat(201))?;
+    let home = fixture.scope.path().join("home");
+    hook_catalog::install(&home)?;
+    let output = fixture.agent(&home, &["assure", "stop"], &serde_json::json!({}))?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(response["decision"], "block", "{response}");
+    assert!(
+        response["reason"]
+            .as_str()
+            .unwrap()
+            .contains("ADR.WordBudget"),
+        "{response}"
+    );
+    fixture.git(&[
+        "remote",
+        "set-url",
+        "origin",
+        "https://github.com/example/fixture.git",
+    ])?;
+    let output = fixture.agent(&home, &["assure", "stop"], &serde_json::json!({}))?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout)?,
+        serde_json::json!({})
+    );
+    Ok(())
+}
+
 struct Fixture {
     scope: tempfile::TempDir,
     root: std::path::PathBuf,

@@ -517,6 +517,7 @@ fn the_check_command_reports_multiple_selected_gate_failures_in_one_run() -> Res
             "Checking issue.context",
             "Checking prose.lint",
             "Checking prose.adr",
+            "Checking prose.adr-content",
             "Checking prose.editorconfig",
             "Checking prose.comments",
             "Checking prose.comment-style",
