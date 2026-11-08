@@ -113,6 +113,7 @@ pub mod stale_rules;
 pub mod start_health_rules;
 pub mod tailscale_rules;
 pub mod target_rules;
+pub mod third_party_rules;
 pub mod timeout_rules;
 pub mod tool_lock_rules;
 pub mod tool_rules;

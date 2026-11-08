@@ -6,6 +6,21 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/third_party_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_inheriting_an_extra_upstream_occurrence() {
+    let mut remaining = 0;
+    assert!(production::consume(&mut remaining));
+}
+#[kani::proof]
+fn reject_accepting_an_escaping_publisher_member() {
+    assert!(production::normalized_relative(b"../escape"));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/verification_rules.rs"
 probes = '''
 #[kani::proof]

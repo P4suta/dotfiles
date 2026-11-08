@@ -977,6 +977,14 @@ pub fn file(path: &Path, interpreter: Option<&str>) -> Result<Report> {
     } else {
         String::new()
     };
+    let original = upstream_original(path, root.as_deref())?;
+    if !check_adr
+        && original
+            .as_ref()
+            .is_some_and(|original| fs::read(path).is_ok_and(|current| current == *original))
+    {
+        return Ok(Report::default());
+    }
     let mut report = Report::default();
     let mut outcomes = Vec::new();
     if check_adr && let Some(adr_path) = adr_path {
@@ -987,6 +995,18 @@ pub fn file(path: &Path, interpreter: Option<&str>) -> Result<Report> {
         }
     }
     for &linter in rules::linters(kind) {
+        if linter == Linter::Ocomment
+            && let (Some(root), Some(original)) = (&root, &original)
+        {
+            let findings = upstream_comment_findings(root, path, original)?;
+            outcomes.push(if findings.is_empty() {
+                Outcome::Clean
+            } else {
+                Outcome::Findings
+            });
+            report.findings.extend(findings);
+            continue;
+        }
         match lint(path, linter, root.as_deref()) {
             Ok((outcome, finding)) => {
                 outcomes.push(outcome);
@@ -1013,6 +1033,34 @@ pub fn file(path: &Path, interpreter: Option<&str>) -> Result<Report> {
         report.findings.clear();
     }
     Ok(report)
+}
+
+fn upstream_comment_findings(root: &Path, path: &Path, original: &[u8]) -> Result<Vec<String>> {
+    let relative = path
+        .strip_prefix(root)?
+        .to_str()
+        .context("upstream source path is not UTF-8")?
+        .replace('\\', "/");
+    let inputs = prose::upstream_comment_inputs(root, &relative, original, &fs::read(path)?)?;
+    if inputs.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(prose::check_inputs(&prose::Bundle::installed()?, &inputs)?
+        .iter()
+        .map(ToString::to_string)
+        .collect())
+}
+
+fn upstream_original(path: &Path, root: Option<&Path>) -> Result<Option<Vec<u8>>> {
+    let Some(root) = root else {
+        return Ok(None);
+    };
+    let relative = path
+        .strip_prefix(root)?
+        .to_str()
+        .context("upstream source path is not UTF-8")?
+        .replace('\\', "/");
+    platform::upstream::original(root, &relative)
 }
 
 fn paths(event: &Value) -> Result<Vec<PathBuf>> {

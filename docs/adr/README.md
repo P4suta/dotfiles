@@ -143,6 +143,7 @@
 | [2026-11-06 Read source-bound verifier receipts](read-source-bound-verifier-receipts.md) | proposed |  |
 | [2026-11-06 Enforce concise architecture decision records](require-evidence-before-accepting-architecture-decisions.md) | proposed |  |
 | [2026-11-06 Require verification results before implementation completion](require-verification-results-before-implementation-completion.md) | deprecated |  |
+| [2026-11-06 Verify preserved upstream before reusing findings](verify-preserved-upstream-before-reusing-findings.md) | proposed |  |
 | [2026-11-07 Attach figures without storage branches](attach-figures-without-storage-branches.md) | accepted |  |
 | [2026-11-07 Authorize verified figure retirement](authorize-verified-figure-retirement.md) | accepted |  |
 | [2026-11-07 Capture reusable knowledge as shared skills](capture-reusable-knowledge-as-shared-skills.md) | accepted |  |
