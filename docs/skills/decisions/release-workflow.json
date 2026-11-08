@@ -1,9 +1,10 @@
 {
-  "revision": "844df339d23f503671d351b6279fec3bf31502606350e9fa861360502a76780f",
+  "revision": "881d28e7372b8c303b345381e6445dc9fd7b2ac131ec751de4128bb44be16bff",
   "outcome": "keep",
-  "reason": "The entrypoint delegates release-please configuration and recovery to its dedicated skill.",
+  "reason": "Keep one shared entrypoint for independent release operations, required dependency checks, version preparation, and candidate reconciliation. Platform-specific details stay in a reference, and release-please configuration remains in its dedicated skill. The guidance covers unrelated presentation changes, shared contracts, infrastructure plans, and ambiguous provider outcomes without granting publication authority.",
   "evidence": [
-    "home/dot_agents/skills/release-workflow/SKILL.md"
+    "home/dot_agents/skills/release-workflow/SKILL.md",
+    "home/dot_agents/skills/release-workflow/references/independent-delivery.md"
   ],
   "revisit": null
 }
