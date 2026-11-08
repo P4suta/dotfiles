@@ -25,6 +25,7 @@ struct Cli {
 enum Action {
     DopplerMigrate(xtask::doppler_migration::Request),
     DopplerOrganize(xtask::doppler_migration::organization::Request),
+    DopplerSync(xtask::doppler_migration::native_sync::Request),
     CheckSecrets,
     CheckAdapters,
     /// Checks portable uv locks for every tool, regardless of its OS filter.
@@ -497,6 +498,7 @@ fn run() -> Result<()> {
     match cli.command {
         Action::DopplerMigrate(request) => xtask::doppler_migration::run(&request)?,
         Action::DopplerOrganize(request) => xtask::doppler_migration::organization::run(&request)?,
+        Action::DopplerSync(request) => xtask::doppler_migration::native_sync::run(&request)?,
         Action::PushCheck => push_check(&cli.root)?,
         Action::CheckSecrets => xtask::quality::secrets(&cli.root)?,
         Action::ToolLocks => xtask::tool_locks::check(&cli.root)?,

@@ -109,6 +109,9 @@ doppler-migrate *args: trust
 doppler-organize *args: trust
     mise x -- cargo xtask doppler-organize {{ args }}
 
+doppler-sync *args: trust
+    mise x -- cargo xtask doppler-sync {{ args }}
+
 gen: trust
     mise x -- cargo xtask gen
 
