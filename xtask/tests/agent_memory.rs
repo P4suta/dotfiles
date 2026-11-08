@@ -485,7 +485,7 @@ fn codex_runtime_hooks_have_native_windows_commands() {
             .filter(|hook| hook["command"].as_str().is_some_and(runs_the_runtime))
             .collect();
         // Windows adds the process-start probe at session start.
-        let expected = if profile == "windows" { 10 } else { 9 };
+        let expected = if profile == "windows" { 8 } else { 7 };
         assert_eq!(handlers.len(), expected, "{profile}: {rendered}");
         for handler in handlers {
             assert_eq!(

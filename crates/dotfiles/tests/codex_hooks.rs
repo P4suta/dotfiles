@@ -50,6 +50,13 @@ fn records(home: &Path) -> Result<Vec<Value>> {
 #[test]
 fn hook_trace_preserves_success_and_exposes_actual_execution() -> Result<()> {
     let home = tempfile::tempdir()?;
+    let mut begin = runtime(home.path());
+    begin.args(["answer", "begin"]);
+    let request = input(
+        begin,
+        br#"{"session_id":"payload-session","prompt":"Inspect the hook execution evidence."}"#,
+    )?;
+    assert!(request.status.success(), "{request:?}");
     let output = input(
         traced(home.path(), "assure-stop", &["assure", "stop"]),
         br#"{"session_id":"payload-session"}"#,

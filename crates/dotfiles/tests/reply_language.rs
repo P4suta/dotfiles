@@ -9,7 +9,32 @@ use std::process::{Output, Stdio};
 #[path = "../../platform/tests/support/fixture_process.rs"]
 mod fixture_process;
 
+fn begin(home: &Path) -> Result<()> {
+    let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), home)
+        .current_dir(home)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .args(["answer", "begin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(&json!({
+            "session_id": "synthetic-session",
+            "cwd": home,
+            "prompt": "Check the reply language."
+        }))?)?;
+    let output = child.wait_with_output()?;
+    assert!(output.status.success(), "{output:?}");
+    Ok(())
+}
+
 fn stop(home: &Path, language: &str, input: &Value) -> Result<Output> {
+    begin(home)?;
     let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), home)
         .current_dir(home)
         .env("HOME", home)
@@ -81,6 +106,7 @@ fn both_clients_block_english_then_admit_a_japanese_rewrite() -> Result<()> {
 #[test]
 fn a_japanese_reply_follows_the_installed_word_rules() -> Result<()> {
     let home = tempfile::tempdir()?;
+    begin(home.path())?;
     let rules = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/prose");
     let stop_with_rules = |reply: &str| -> Result<Value> {
         let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), home.path())

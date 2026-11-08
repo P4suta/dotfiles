@@ -171,7 +171,12 @@ pub fn edit_path(root: &Path, path: &Path) -> Result<PathBuf> {
         canonical.starts_with(root),
         "edit path escapes the checkout through a symlink"
     );
-    Ok(canonical.join(absolute.strip_prefix(ancestor)?))
+    let suffix = absolute.strip_prefix(ancestor)?;
+    Ok(if suffix.as_os_str().is_empty() {
+        canonical
+    } else {
+        canonical.join(suffix)
+    })
 }
 
 /// # Errors
@@ -866,6 +871,21 @@ mod tests {
     const UNION_OBJECT: &str = "3333333333333333333333333333333333333333";
     const OTHER_OBJECT: &str = "4444444444444444444444444444444444444444";
     const CLASSIFIED_OBJECT: &str = "5555555555555555555555555555555555555555";
+
+    #[test]
+    fn existing_edit_paths_remain_readable_native_file_paths() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let root = crate::paths::canonical(directory.path())?;
+        let report = root.join("report.json");
+        fs::write(&report, b"{}")?;
+        let resolved = edit_path(&root, &report)?;
+        assert_eq!(fs::read(resolved).unwrap(), b"{}");
+        let pending = edit_path(&root, Path::new("new/report.json"))?;
+        assert_eq!(pending, root.join("new/report.json"));
+        assert!(!pending.exists());
+        assert!(edit_path(&root, Path::new("../outside.json")).is_err());
+        Ok(())
+    }
 
     fn fixture_command(
         program: impl AsRef<std::ffi::OsStr>,

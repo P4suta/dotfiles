@@ -1,7 +1,7 @@
 {
-  "revision": "ce48876943d10a78af2bf94822c64a9befb4dfd7e78e39560744f60c305495bf",
+  "revision": "07c8201595523e7279fd20fc600c86dee276f6c0ad2679ec40ef5d06301612d9",
   "outcome": "implemented",
-  "reason": "Separate source evidence, semantic interpretation, formal entailment, comparisons, and decisions, and bind automated checks to the current answer draft.",
+  "reason": "Keep source and argument review with a short reason based on completed checks instead of routine evidence submissions.",
   "evidence": [
     "home/dot_agents/skills/checked-arguments/SKILL.md",
     "home/dot_agents/skills/checked-arguments/references/argument-quality.md",

@@ -2644,13 +2644,15 @@ fn make_ready(
     };
     planned(Operation::Ready, target, Some(pr), draft, issue, checks)?;
     dotfiles::hosts::require_publication_admission(Path::new("."), head)?;
-    dotfiles::assure::ready(
+    dotfiles::assure::check_adrs(
         Path::new("."),
-        &dotfiles::assure::installed()?,
-        live.base_ref_oid
-            .as_deref()
-            .context("PR base commit missing")?,
-        head,
+        &dotfiles::assure::Tree::Commit(Some(
+            live.base_ref_oid
+                .as_deref()
+                .context("PR base commit missing")?
+                .to_owned(),
+        )),
+        &dotfiles::assure::Tree::Commit(Some(head.to_owned())),
     )?;
     admit_review_request(
         Operation::Ready,

@@ -6,6 +6,80 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/verification_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_unresolved_dependency_source() {
+    assert!(production::unresolved_source_requires_production(false, false, true));
+}
+#[kani::proof]
+fn reject_unresolved_verification_source() {
+    assert!(production::unresolved_source_requires_production(true, true, true));
+}
+#[kani::proof]
+fn reject_resolved_production_source() {
+    assert!(production::unresolved_source_requires_production(true, false, false));
+}
+#[kani::proof]
+fn reject_a_module_with_a_production_owner() {
+    assert!(production::verification_module(2, 1, false));
+}
+#[kani::proof]
+fn reject_a_module_without_an_owner() {
+    assert!(production::verification_module(0, 0, false));
+}
+#[kani::proof]
+fn reject_an_empty_native_witness() {
+    assert!(production::native_assertion_witness(1, 1, 0, true));
+}
+#[kani::proof]
+fn reject_failed_checks_as_successful() {
+    assert!(production::native_assertion_witness(1, 0, 1, true));
+}
+#[kani::proof]
+fn reject_configuration_changed_behavior() {
+    assert!(production::configuration_admitted(production::ConfigurationSource::Rust, false));
+}
+#[kani::proof]
+fn reject_untyped_config_source() {
+    assert!(production::configuration_admitted(production::ConfigurationSource::Executable, true));
+}
+#[kani::proof]
+fn reject_a_changed_verifier_definition() {
+    assert!(production::coverage_extension(false, true));
+}
+#[kani::proof]
+fn reject_missing_existing_subjects() {
+    assert!(production::coverage_extension(true, false));
+}
+#[kani::proof]
+fn reject_missing_verification() {
+    assert_eq!(production::completion(1, 0, true, true), production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_stale_results() {
+    assert_eq!(production::completion(1, 1, false, true), production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_missing_tdd_order() {
+    assert_eq!(production::completion(1, 1, true, false), production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_effects_without_fault_injection() {
+    assert_eq!(production::required(production::Risk::Effects) & production::Method::Fault.bit(), 0);
+}
+#[kani::proof]
+fn reject_aliasing_method_flags() {
+    assert_eq!(production::Method::Test.bit(), production::Method::Proof.bit());
+}
+#[kani::proof]
+fn reject_a_green_run_before_its_required_test_phase() {
+    assert!(production::ordered(production::TestHistory { expected: production::TestOutcome::Failed, actual: production::TestOutcome::Failed, completed: true, matching_source: true, matching_test: true, before: 2, after: 1 }));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/editorial_rules.rs"
 probes = '''
 #[kani::proof]

@@ -137,8 +137,14 @@
 | [2026-11-04 Preserve active tools behind managed guards](preserve-active-tools-behind-managed-guards.md) | proposed |  |
 | [2026-11-04 Require no CLI review for high PRs](require-no-cli-review-for-high-prs.md) | accepted |  |
 | [2026-11-05 Route desktop decisions through macOS guidance](route-desktop-decisions-through-macos-guidance.md) | accepted |  |
+| [2026-11-06 Admit configuration by unchanged executable tokens](admit-configuration-by-unchanged-executable-tokens.md) | proposed |  |
+| [2026-11-06 Classify Rust modules by every declaration](classify-rust-modules-by-every-declaration.md) | proposed |  |
+| [2026-11-06 Keep project checks authoritative in agent sessions](keep-project-checks-authoritative-in-agent-sessions.md) | proposed |  |
+| [2026-11-06 Read source-bound verifier receipts](read-source-bound-verifier-receipts.md) | proposed |  |
 | [2026-11-06 Enforce concise architecture decision records](require-evidence-before-accepting-architecture-decisions.md) | proposed |  |
+| [2026-11-06 Require verification results before implementation completion](require-verification-results-before-implementation-completion.md) | deprecated |  |
 | [2026-11-07 Attach figures without storage branches](attach-figures-without-storage-branches.md) | accepted |  |
 | [2026-11-07 Authorize verified figure retirement](authorize-verified-figure-retirement.md) | accepted |  |
 | [2026-11-07 Capture reusable knowledge as shared skills](capture-reusable-knowledge-as-shared-skills.md) | accepted |  |
+| [2026-11-07 Confirm verification with a short reason](confirm-verification-with-a-short-reason.md) | proposed |  |
 | [2026-11-07 Require applicable recommendations](require-applicable-recommendations.md) | proposed |  |

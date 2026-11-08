@@ -488,7 +488,7 @@ pub fn resolve(root: &Path, name: &str) -> Result<Option<String>> {
 }
 
 /// Every path in `tree`.
-fn paths(root: &Path, tree: &Tree) -> Result<Vec<String>> {
+pub(crate) fn paths(root: &Path, tree: &Tree) -> Result<Vec<String>> {
     Ok(match tree {
         Tree::Commit(None) => Vec::new(),
         Tree::Commit(Some(commit)) => split_nul(&git(
@@ -513,7 +513,11 @@ fn paths(root: &Path, tree: &Tree) -> Result<Vec<String>> {
 }
 
 /// The contents of `wanted` in `tree`, leaving out a path the tree lacks.
-fn contents(root: &Path, tree: &Tree, wanted: &[String]) -> Result<BTreeMap<String, Vec<u8>>> {
+pub(crate) fn contents(
+    root: &Path,
+    tree: &Tree,
+    wanted: &[String],
+) -> Result<BTreeMap<String, Vec<u8>>> {
     let prefix = match tree {
         Tree::Commit(None) => return Ok(BTreeMap::new()),
         Tree::WorkingTree => {
@@ -1075,6 +1079,62 @@ fn check_adr_paths(root: &Path, after: &Tree, paths: &BTreeSet<String>) -> Resul
 /// Returns an error when Git, ownership, text decoding, or the ADR check fails.
 pub fn check_adrs(root: &Path, before: &Tree, after: &Tree) -> Result<()> {
     check_adr_paths(root, after, &changed(root, before, after)?)
+}
+
+pub(crate) fn push_adrs(root: &Path, remote: &str, input: &[u8]) -> Result<()> {
+    for line in std::str::from_utf8(input)?.lines() {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        let [_, local, _, theirs] = fields[..] else {
+            bail!("malformed pre-push input: {line}");
+        };
+        ensure!(
+            shape_rules::commit_id(local.as_bytes()) && shape_rules::commit_id(theirs.as_bytes()),
+            "pre-push input needs exact commit IDs"
+        );
+        let zero = |oid: &str| oid.bytes().all(|byte| byte == b'0');
+        if zero(local) {
+            continue;
+        }
+        let after = Tree::Commit(Some(local.to_owned()));
+        if !paths(root, &after)?
+            .iter()
+            .any(|path| prose::adr::is_record(path))
+        {
+            continue;
+        }
+        if prose::standard(root)? == prose::prose_rules::Standard::Skips {
+            continue;
+        }
+        let base = if zero(theirs) {
+            let advertised = remote_git(root, &["ls-remote", remote, "HEAD"])?;
+            if advertised.is_empty() && remote_git(root, &["ls-remote", remote])?.is_empty() {
+                None
+            } else {
+                let advertised = std::str::from_utf8(&advertised)?;
+                let tip = advertised
+                    .strip_suffix("\tHEAD\n")
+                    .filter(|commit| shape_rules::commit_id(commit.as_bytes()))
+                    .context("ADR comparison needs the remote's advertised default commit")?;
+                ensure!(
+                    resolve(root, tip)?.is_some(),
+                    "fetch the remote default commit before checking changed ADRs"
+                );
+                Some(
+                    String::from_utf8(git(root, &["merge-base", local, tip])?)?
+                        .trim()
+                        .to_owned(),
+                )
+            }
+        } else {
+            ensure!(
+                resolve(root, theirs)?.is_some(),
+                "fetch the remote commit before checking changed ADRs"
+            );
+            Some(theirs.to_owned())
+        };
+        check_adrs(root, &Tree::Commit(base), &after)?;
+    }
+    Ok(())
 }
 
 fn renames_from_diff(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
@@ -1972,7 +2032,7 @@ pub(crate) struct RequestBaseline {
     pub(crate) commit: String,
 }
 
-fn worktree_snapshot(root: &Path) -> Result<RequestBaseline> {
+pub(crate) fn worktree_snapshot(root: &Path) -> Result<RequestBaseline> {
     let root = platform::paths::canonical(root)?;
     let scope = tempfile::tempdir()?;
     let index = scope.path().join("index");
@@ -2124,7 +2184,7 @@ pub fn start(root: &Path, catalog: &Catalog) -> Result<Option<String>> {
         return Ok(None);
     }
     let mut report = format!(
-        "The owner's local catalog finds {} verification gaps in this repository ({}). Publication refuses new gaps and PR readiness also refuses weakened budgets:\n",
+        "The optional local catalog inspection finds {} verification gaps in this repository ({}):\n",
         outcome.gaps.len(),
         outcome.inputs.description(),
     );
@@ -2172,7 +2232,12 @@ pub fn ready(root: &Path, catalog: &Catalog, base: &str, head: &str) -> Result<(
 pub enum AgentPoint {
     Start,
     Stop,
+    Remind,
+    Reply,
 }
+
+/// The routine verification confirmation shared by managed agents and Git hooks.
+pub const VERIFICATION_REMINDER: &str = "Before completing work and before every push, inspect the diff, affected CI jobs, and project check commands. Run every applicable local check required for that action, fix failures, and rerun affected checks after changes. Confirm completion with a short reason naming actual checks and successful outcomes. Never use an unverified disclaimer to skip required work. If a required check cannot run, repair the environment or use a justified equivalent; if still blocked, ask the user for a concrete decision before claiming completion. Checks assigned to later CI or release stages keep their own timing. Do not create evidence JSON, signed declarations, claim ledgers, or per-answer proofs unless explicitly requested. Existing project checks, release requirements, owner authorization, and push pauses still apply.\n";
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum ReplyLanguage {
@@ -2191,6 +2256,28 @@ impl From<ReplyLanguage> for Language {
     }
 }
 
+fn reply_reasons(reply: &str) -> Result<Vec<String>> {
+    let mut reasons: Vec<_> = prose::house::check("reply.md", reply, prose::Bundle::installed)?
+        .into_iter()
+        .map(|finding| {
+            format!(
+                "Reply line {}: {}: {}",
+                finding.line, finding.rule, finding.message
+            )
+        })
+        .collect();
+    if let Some(root) = repository()
+        && let Err(error) = check_adrs(
+            &root,
+            &Tree::Commit(resolve(&root, "HEAD")?),
+            &Tree::WorkingTree,
+        )
+    {
+        reasons.push(error.downcast::<Refusal>()?.text());
+    }
+    Ok(reasons)
+}
+
 /// The agent hook of `point`: the session start report on standard output, or the stop decision as the client's JSON.
 ///
 /// # Errors
@@ -2198,6 +2285,10 @@ impl From<ReplyLanguage> for Language {
 /// Returns an error when the hook input holds no JSON, the host lacks the catalog, or Git fails.
 pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
     match point {
+        AgentPoint::Remind => {
+            print!("{VERIFICATION_REMINDER}");
+            Ok(())
+        }
         AgentPoint::Start => {
             let Some(root) = repository() else {
                 return Ok(());
@@ -2208,7 +2299,7 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
             }
             Ok(())
         }
-        AgentPoint::Stop => {
+        AgentPoint::Stop | AgentPoint::Reply => {
             let mut input = String::new();
             std::io::stdin().read_to_string(&mut input)?;
             let input = if input.trim().is_empty() {
@@ -2252,7 +2343,14 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                     "The reply prose must be in Japanese. Rewrite your last reply to the user in Japanese; keep code, commands, and outward artifacts as they are.".to_owned(),
                 );
             }
-            if let Some(root) = repository() {
+            if point == AgentPoint::Reply {
+                reasons.extend(reply_reasons(
+                    input.last_assistant_message.as_deref().unwrap_or_default(),
+                )?);
+            }
+            if point == AgentPoint::Stop
+                && let Some(root) = repository()
+            {
                 let catalog = installed()?;
                 let baseline = input
                     .session_id

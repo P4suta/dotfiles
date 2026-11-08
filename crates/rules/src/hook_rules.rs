@@ -52,7 +52,7 @@ pub enum Gate {
     Dotguard,
     /// The machine and ready-PR gates of a push to a remote URL.
     PushHosts,
-    /// Refuses added code of a shape that nothing verifies.
+    /// Gives the verification reminder and checks changed ADR content independently of optional catalogs.
     Verification,
     /// The language and prose check of the commit message.
     CommitProse,

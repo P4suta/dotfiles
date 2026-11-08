@@ -1,0 +1,25 @@
+diff --git a/dist/route/media.d.ts b/dist/route/media.d.ts
+--- a/dist/route/media.d.ts
++++ b/dist/route/media.d.ts
+@@ -13,8 +13,8 @@
+         readonly provider: ProviderID;
+         readonly http?: HttpOptions;
+     };
+-    readonly http?: HttpOptions;
++    readonly http?: HttpOptions | undefined;
+ }
+ /** Deployment inputs every media model factory accepts; provider facades fill these from `configure(...)`. */
+ export interface ModelInput {
+     readonly id: string;
+diff --git a/dist/schema/events.d.ts b/dist/schema/events.d.ts
+--- a/dist/schema/events.d.ts
++++ b/dist/schema/events.d.ts
+@@ -644,7 +644,7 @@
+     readonly id: ID | string;
+ };
+ type WithUsage<Event extends {
+-    readonly usage?: Usage;
++    readonly usage?: Usage | undefined;
+ }> = Omit<Event, "type" | "usage"> & {
+     readonly usage?: UsageInput;
+ };

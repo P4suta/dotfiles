@@ -602,22 +602,26 @@ impl Run<'_> {
     }
 }
 
-/// The verification gate of `pre-commit` and `pre-push`, which refuses a change that adds code of a shape nothing verifies.
 fn verification(hook: Hook, arguments: &[OsString], input: &[u8]) -> Result<()> {
-    if !matches!(hook, Hook::PreCommit | Hook::PrePush) {
-        return Ok(());
-    }
+    eprint!("{}", crate::assure::VERIFICATION_REMINDER);
     let Some(root) = crate::assure::repository() else {
         return Ok(());
     };
-    let catalog = crate::assure::installed()?;
-    if matches!(hook, Hook::PrePush) {
-        let remote = arguments
-            .first()
-            .context("the pre-push hook needs the remote name")?;
-        crate::assure::push(&root, &catalog, &remote.to_string_lossy(), input)
-    } else {
-        crate::assure::commit(&root, &catalog)
+    match hook {
+        Hook::PreCommit => crate::assure::check_adrs(
+            &root,
+            &crate::assure::Tree::Commit(crate::assure::resolve(&root, "HEAD")?),
+            &crate::assure::Tree::Index,
+        ),
+        Hook::PrePush => crate::assure::push_adrs(
+            &root,
+            &arguments
+                .first()
+                .context("the pre-push hook needs the remote name")?
+                .to_string_lossy(),
+            input,
+        ),
+        _ => Ok(()),
     }
 }
 

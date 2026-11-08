@@ -23,6 +23,16 @@ A project's own instructions take precedence when they conflict.
 
 - Make the smallest change that accomplishes the task, and keep its diff reviewable.
 - Verify changes with a project's own lint, typecheck, and test commands when they exist.
+- Before completion and every push, inspect the diff and affected CI jobs, run every applicable local check required for the action, fix failures, and rerun affected checks after changes.
+  Confirm completion with a short reason naming actual checks and successful outcomes.
+  Never substitute an unsupported affirmation or an unverified disclaimer for required work.
+  Repair a blocked environment or use a justified equivalent check.
+  If a required check still can't run, ask the user for the concrete decision needed before claiming completion.
+  Checks assigned to later CI or release stages keep their own timing.
+- Don't require detailed agent evidence submissions, evidence JSON, signed declarations, claim ledgers, or per-answer proofs, including for releases, unless the user explicitly requests them.
+  Base the short confirmation on actual tool results and source checks.
+  Project-owned checks and release artifacts remain required.
+  This reporting policy takes precedence over shared skill instructions that require detailed task evidence.
 - Before GitHub-bound implementation, run `pr-workflow start` for the exact destination.
 - Use `pr-workflow` for PR creation, document edits, and ready transitions, and keep the diff within the issue's scope.
 - Use `adr` before consequential architecture choices and when reviewing or replacing a decision.
@@ -31,8 +41,8 @@ A project's own instructions take precedence when they conflict.
   Preserve existing filenames and references, and regenerate shared indexes from source records when the repository has a generator.
 - Use decision-naming before labeling a plan, design, diagram, branch, API, schema, or file, so names carry the decision or property instead of v1, v2, new, old, final, or next.
 - Before implementation edits, read development-assurance, formal-assurance, verification-tools, and the applicable testing skills.
-  Use the project's maintained commands, record the required tests before and after production changes, and complete affected verification before reporting implementation completion.
-  Require the full verification inventory before release.
+  Use the project's maintained commands, run required checks before and after production changes, and complete affected verification before reporting implementation completion.
+  Run the project's required checks before release.
 - Use japanese-lexicon to verify Japanese readings and romanizations with identified public lexical records or major dictionaries and a named spelling standard.
 - Use checked-arguments for substantive reasoning, comparisons, explanations, and recommendations, including the checks for scope, semantic roles, evidence, counterarguments, and suitable formal methods.
 - Use monochrome-design for every visual design task, including interfaces, websites, diagrams, and documents.
@@ -46,7 +56,6 @@ A project's own instructions take precedence when they conflict.
   Enforce observable requirements through maintained project gates with rejecting fixtures, and review semantic suitability directly.
 - Use diagram-explanations proactively when a diagram can explain relationships, mechanisms, changes, or decisions.
 - Proactively use knowledge-to-skills to preserve reusable knowledge from research, implementation, debugging, review, failures, and feedback without waiting for a request.
-- Before completing a request, check the exact answer draft with `dotfiles answer check` using the request's managed session context.
 - Keep premise truth, natural-language interpretation, formal entailment, and decision relevance separate, and report unsupported or incomplete checks without claiming verification.
 - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
 - Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.

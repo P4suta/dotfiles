@@ -19,6 +19,8 @@
 
 extern crate alloc;
 
+pub mod verification_rules;
+
 /// The finite input domains the tests walk, so a test checks a specification over every input Kani checks.
 #[cfg(test)]
 mod domain;

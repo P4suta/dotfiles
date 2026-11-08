@@ -226,17 +226,16 @@ pub fn check(input: &str) -> Result<()> {
         let local_provider = platform::home::home()
             .and_then(|home| platform::local_issues::active_for(root, &home).ok())
             .unwrap_or(true);
-        if !crate::issue_guard_rules::needs_issue_context(has_remote, local_provider) {
-            continue;
+        if crate::issue_guard_rules::needs_issue_context(has_remote, local_provider) {
+            platform::issue_context::guard(root, mutations).map_err(|error| {
+                platform::refusal::Refusal::new(
+                    "pr.issue-context",
+                    "implementation edits require a checked destination-bound issue context",
+                    "pr-workflow start --repo OWNER/REPO --issue NUMBER --path PATH",
+                )
+                .evidence(format!("{error:#}"))
+            })?;
         }
-        platform::issue_context::guard(root, mutations).map_err(|error| {
-            platform::refusal::Refusal::new(
-                "pr.issue-context",
-                "implementation edits require a checked destination-bound issue context",
-                "pr-workflow start --repo OWNER/REPO --issue NUMBER --path PATH",
-            )
-            .evidence(format!("{error:#}"))
-        })?;
     }
     Ok(())
 }
