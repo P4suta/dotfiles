@@ -149,3 +149,4 @@
 | [2026-11-07 Capture reusable knowledge as shared skills](capture-reusable-knowledge-as-shared-skills.md) | accepted |  |
 | [2026-11-07 Confirm verification with a short reason](confirm-verification-with-a-short-reason.md) | proposed |  |
 | [2026-11-07 Require applicable recommendations](require-applicable-recommendations.md) | proposed |  |
+| [2026-11-08 Sync stored credentials to protected GitHub environments](sync-stored-credentials-to-protected-github-environments.md) | proposed |  |

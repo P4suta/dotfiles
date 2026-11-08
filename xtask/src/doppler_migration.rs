@@ -10,6 +10,7 @@ use std::process::Stdio;
 use crate::tool::Tool;
 
 mod connections;
+pub mod native_sync;
 pub mod organization;
 
 const API: &str = "https://api.doppler.com";
