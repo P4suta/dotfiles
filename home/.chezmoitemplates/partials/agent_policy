@@ -39,7 +39,7 @@ A project's own instructions take precedence when they conflict.
 - Use source-bound-interface-design to read and cite primary sources before deciding interface structure, form controls, accessibility behavior, or user-facing copy.
 - Treat applicable recommendations in shared skills and governing primary sources as required completion criteria.
   Determine applicability from the task, platform, source conditions, and explicit requirements.
-  Record the rule, exact source, applicability, implementation, and verification in the task's existing evidence.
+  Apply each relevant rule and verify its result without a separate evidence submission.
   Preserve the source's normative status and identify stronger adoption as owner policy.
   Resolve conflicts and justify exclusions explicitly.
   An unresolved applicable rule blocks a completion claim.

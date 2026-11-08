@@ -173,9 +173,9 @@ Judgment: the owner adopts applicable recommendations as completion policy.
 
 Judgment: source conditions and task scope need interpretation.
 
->   Record the rule, exact source, applicability, implementation, and verification in the task's existing evidence.
+>   Apply each relevant rule and verify its result without a separate evidence submission.
 
-Judgment: meaningful evidence requires comparison with the implementation.
+Judgment: source applicability and the agent's short confirmation need direct review of actual checks and behavior.
 
 >   Preserve the source's normative status and identify stronger adoption as owner policy.
 
