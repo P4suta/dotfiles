@@ -5,6 +5,7 @@ use super::report::{Dependency, Record};
 
 const GITHUB_API_REPOSITORIES: &str = "https://api.github.com/repos/";
 const GITHUB_LATEST_RELEASE: &str = "/releases/latest";
+const GITHUB_TAGS: &str = "/tags";
 const GITHUB_REGISTRY: &str = "https://github.com";
 const HTTP_FIELDS: &[&str] = &[
     "version",
@@ -14,7 +15,12 @@ const HTTP_FIELDS: &[&str] = &[
     "os",
     "version_list_url",
     "version_json_path",
+    "version_order",
+    "strip_components",
+    "bin_path",
+    "platforms",
 ];
+const DOWNLOAD_FIELDS: &[&str] = &["url", "checksum", "size", "strip_components", "bin_path"];
 
 pub(super) fn covers(found: Option<&Found>, record: &Record, verified: &Dependency) -> bool {
     let dependency = &record.dependency;
@@ -84,6 +90,22 @@ pub(super) fn source(found: Option<&Found>, file: &str) -> Option<String> {
 pub struct ReleasePin {
     version: String,
     package: String,
+    discovery: DiscoverySource,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DiscoverySource {
+    GitHubRelease,
+    GitHubTags,
+}
+
+impl DiscoverySource {
+    const fn datasource(self) -> &'static str {
+        match self {
+            Self::GitHubRelease => "github-releases",
+            Self::GitHubTags => "github-tags",
+        }
+    }
 }
 
 impl ReleasePin {
@@ -96,7 +118,7 @@ impl ReleasePin {
     }
 }
 
-/// Decodes a mise `http:` declaration with a GitHub release source.
+/// Decode a mise HTTP tool's GitHub version discovery.
 pub fn parse_http_release(source: &str, name: &str) -> Option<ReleasePin> {
     if name.strip_prefix("http:")?.is_empty() {
         return None;
@@ -106,14 +128,23 @@ pub fn parse_http_release(source: &str, name: &str) -> Option<ReleasePin> {
     if entry.keys().any(|key| !HTTP_FIELDS.contains(&key.as_str())) {
         return None;
     }
-    if entry.get("version_json_path")?.as_str()? != ".tag_name" {
+    let order = match entry.get("version_order") {
+        Some(value) => Some(value.as_str()?),
+        None => None,
+    };
+    if order.is_some_and(|value| value != "semver") {
         return None;
     }
+    let (endpoint, discovery) = match entry.get("version_json_path")?.as_str()? {
+        ".tag_name" => (GITHUB_LATEST_RELEASE, DiscoverySource::GitHubRelease),
+        ".[].name" if order == Some("semver") => (GITHUB_TAGS, DiscoverySource::GitHubTags),
+        _ => return None,
+    };
     let package = entry
         .get("version_list_url")?
         .as_str()?
         .strip_prefix(GITHUB_API_REPOSITORIES)?
-        .strip_suffix(GITHUB_LATEST_RELEASE)?;
+        .strip_suffix(endpoint)?;
     let (owner, repository) = package.split_once('/')?;
     if owner.is_empty()
         || !owner
@@ -130,10 +161,58 @@ pub fn parse_http_release(source: &str, name: &str) -> Option<ReleasePin> {
     if version.is_empty() {
         return None;
     }
+    let defaults = download_options(entry)?;
+    if let Some(platforms) = entry.get("platforms") {
+        let platforms = platforms.as_table()?;
+        if platforms.is_empty() && defaults.url.is_none() {
+            return None;
+        }
+        for (platform, options) in platforms {
+            let (os, architecture) = platform.split_once('-')?;
+            if !matches!(os, "linux" | "macos" | "windows")
+                || !matches!(architecture, "arm64" | "x64")
+            {
+                return None;
+            }
+            let options = options.as_table()?;
+            if options
+                .keys()
+                .any(|key| !DOWNLOAD_FIELDS.contains(&key.as_str()))
+            {
+                return None;
+            }
+            download_options(options)?.url.or(defaults.url)?;
+        }
+    } else {
+        defaults.url?;
+    }
     Some(ReleasePin {
         version: version.to_owned(),
         package: package.to_owned(),
+        discovery,
     })
+}
+
+struct DownloadOptions<'a> {
+    url: Option<&'a str>,
+}
+
+fn download_options(entry: &toml::Table) -> Option<DownloadOptions<'_>> {
+    for field in ["checksum", "bin_path"] {
+        if let Some(value) = entry.get(field) {
+            value.as_str()?;
+        }
+    }
+    for field in ["size", "strip_components"] {
+        if let Some(value) = entry.get(field) {
+            u64::try_from(value.as_integer()?).ok()?;
+        }
+    }
+    let url = match entry.get("url") {
+        Some(value) => Some(value.as_str().filter(|url| !url.is_empty())?),
+        None => None,
+    };
+    Some(DownloadOptions { url })
 }
 
 pub(super) fn http_covers(found: Option<&Found>, record: &Record, verified: &Dependency) -> bool {
@@ -143,7 +222,6 @@ pub(super) fn http_covers(found: Option<&Found>, record: &Record, verified: &Dep
         || dependency.current_value.is_some()
         || dependency.current_version.is_some()
         || dependency.current_digest.is_some()
-        || verified.datasource.as_deref() != Some("github-releases")
         || verified
             .registry_url
             .as_deref()
@@ -161,7 +239,8 @@ pub(super) fn http_covers(found: Option<&Found>, record: &Record, verified: &Dep
     let Some(pin) = parse_http_release(&source, &dependency.dep_name) else {
         return false;
     };
-    verified.current_value.as_deref() == Some(pin.version())
+    verified.datasource.as_deref() == Some(pin.discovery.datasource())
+        && verified.current_value.as_deref() == Some(pin.version())
         && verified.current_version.as_deref().is_some_and(|version| {
             version == pin.version() || version.strip_prefix('v') == Some(pin.version())
         })

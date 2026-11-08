@@ -150,3 +150,4 @@
 | [2026-11-07 Confirm verification with a short reason](confirm-verification-with-a-short-reason.md) | proposed |  |
 | [2026-11-07 Require applicable recommendations](require-applicable-recommendations.md) | proposed |  |
 | [2026-11-08 Sync stored credentials to protected GitHub environments](sync-stored-credentials-to-protected-github-environments.md) | proposed |  |
+| [2026-11-09 Bind tool lookups to discovery metadata](bind-http-tool-lookups-to-discovery-metadata.md) | proposed |  |

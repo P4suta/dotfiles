@@ -20,10 +20,12 @@ fuzz_target!(|source: &str| {
             assert!(!reader.reads(&format!("{source}\n[other]\nrust = \"1.96\"\n"), "1.97"));
         }
     }
-    if let Some(pin) = parse_http_release(source, "http:winappcli") {
-        assert!(!pin.version().is_empty());
-        let (owner, repository) = pin.package().split_once('/').unwrap();
-        assert!(!owner.is_empty() && !repository.is_empty() && !repository.contains('/'));
-        assert!(parse_http_release(source, "winappcli").is_none());
+    for name in ["http:winappcli", "http:libwebp"] {
+        if let Some(pin) = parse_http_release(source, name) {
+            assert!(!pin.version().is_empty());
+            let (owner, repository) = pin.package().split_once('/').unwrap();
+            assert!(!owner.is_empty() && !repository.is_empty() && !repository.contains('/'));
+            assert!(parse_http_release(source, name.strip_prefix("http:").unwrap()).is_none());
+        }
     }
 });
