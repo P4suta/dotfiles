@@ -1,12 +1,13 @@
 {
-  "revision": "bc9ed0fbfde96d4dfc23eb51f4cb06c7a312a95e2529662e87745ed930df5d1d",
+  "revision": "374218062fcf1c6670049aead3e93bee38245461f862f9307d26d96fbc2831ba",
   "outcome": "implemented",
-  "reason": "The owner asked that interface work consult authoritative sources such as W3C and the Digital Agency instead of memory. This skill requires reading and citing the relevant primary pages before deciding interface structure, form controls, accessibility behavior, or user-facing copy, lists verified W3C, WHATWG, Digital Agency, Web Accessibility Infrastructure Committee, Immigration Services Agency, Agency for Cultural Affairs, and Apple accessibility pages, and states how to reconcile conflicting sources and report gaps. The agent policy requires the skill, and monochrome-design points to it; whether a cited page supports a decision stays a review.",
+  "reason": "The skill reviews applicability across the affected journey, source conditions, observable requirements, and semantic judgments. A browser reference covers reading, controls, responsive behavior, and proposal boundaries without requiring a parallel evidence submission. Primary-source recommendations keep their normative status under the owner's stronger completion policy.",
   "evidence": [
     "home/dot_agents/skills/source-bound-interface-design/SKILL.md",
     "home/dot_claude/skills/symlink_source-bound-interface-design",
     "home/.chezmoitemplates/partials/agent_policy",
-    "docs/agent-instruction-audit.md"
+    "docs/agent-instruction-audit.md",
+    "home/dot_agents/skills/source-bound-interface-design/references/web-interface-evaluation.md"
   ],
-  "revisit": "Cite the Japanese Industrial Standards Committee page for JIS X 8341-3:2016 once that site resolves, and update the WCAG and JIS references when a JIS edition aligned with WCAG 2.2 is published."
+  "revisit": "Check the task's required JIS edition when a revised JIS X 8341-3 is published, and read its normative text before making a conformance claim."
 }

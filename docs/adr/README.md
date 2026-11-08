@@ -140,3 +140,4 @@
 | [2026-11-07 Attach figures without storage branches](attach-figures-without-storage-branches.md) | accepted |  |
 | [2026-11-07 Authorize verified figure retirement](authorize-verified-figure-retirement.md) | accepted |  |
 | [2026-11-07 Capture reusable knowledge as shared skills](capture-reusable-knowledge-as-shared-skills.md) | accepted |  |
+| [2026-11-07 Require applicable recommendations](require-applicable-recommendations.md) | proposed |  |
