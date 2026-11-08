@@ -11,7 +11,7 @@ Follow the selected Japanese orthography guide from the Japan Translation Federa
 Don't use Japanese demonstratives in authored explanations or replies.
 Name the actual object, operation, condition, or result.
 Run the existing prose checks and resolve their shared house findings before delivery.
-The answer-evidence check and persisted prose gates enforce the same shared policy.
+The reply and persisted prose gates enforce the same shared policy.
 
 Write prose one sentence per line in English and Japanese: break after `。`, `！`, `？`, `.`, `!`, and `?`.
 Never wrap a sentence across lines or put two sentences on one line.

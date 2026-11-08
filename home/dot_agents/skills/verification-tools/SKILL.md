@@ -28,14 +28,19 @@ Read [Rust verification](references/rust.md) for Rust-specific interpretation an
 
 Install and pin the chosen tools through the project's existing `mise` and locked package conventions.
 Run them over real production code and the applicable tests or harnesses.
-Record the command, covered files and features, supported targets, assumptions, expected nonempty work, and result.
+Use the command's actual result to check its coverage and report a short concrete reason for completion.
 Treat an unsupported target, skipped harness, missing input, empty scan, or tool failure as missing coverage to resolve.
 When one tool leaves a boundary uncovered, add a supported complementary check and keep the remaining obligation explicit.
 Never suppress the boundary or weaken the property to get a passing result.
+Resolve required missing coverage or ask the user for a concrete decision before claiming completion.
+Don't require a separate verification inventory, evidence file, or signed task declaration unless explicitly requested.
 
 ## Make adoption durable
 
-Wire fast checks into the project command, local hooks, and pull-request CI, and heavy checks into the release gate, where `ci-budget` places them.
+Wire fast checks into the project command, local hooks, and pull-request CI.
+Keep heavy checks at the project's required stage and the full inventory at its release gate, following `ci-budget`.
+Use the project's maintained verification commands and report their actual results.
+Installing a tool or adding a harness supplies no execution evidence.
 Use `executable-policy` to verify that the actual gate rejects a representative defect.
 Apply the bounded-tool rule in `formal-assurance` through the project's bounded container entrypoint or `dotfiles bounded run`, and keep GitHub Actions native.
 Use `resource-coordination` for expensive campaigns, because adopting a tool grants no unbounded fuzz run or paid service.

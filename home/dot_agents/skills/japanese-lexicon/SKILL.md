@@ -31,11 +31,9 @@ The [National Institute's conversion notes](https://chamame.ninjal.ac.jp/about_r
 Inspect automated morphological analysis in the context of the expression.
 Its selected reading can conflict with the intended sense.
 
-Use `dotfiles answer check` with the request's exact draft and lexical evidence before answering.
-Read [the evidence format](../checked-arguments/references/evidence-format.md) for the command and supported spelling conventions.
-The checker compares the declared kana with the retrieved record and checks the supported conversion or an attested spelling.
-It doesn't infer an undeclared Japanese origin from arbitrary Latin text or prove the semantic interpretation of a dictionary entry.
-For an unsupported convention, keep the result unresolved until an appropriate checker or an attested source covers it.
+Compare the reading with the retrieved entry and the spelling with its selected standard.
+Don't require a draft file, evidence JSON, or proof submission.
+If suitable sources don't establish the requested reading, ask the user how to proceed before claiming completion.
 
 Report the relevant source and spelling convention with a correction.
 Never report a missing source, an unsupported conversion, or an incomplete check as successful verification.

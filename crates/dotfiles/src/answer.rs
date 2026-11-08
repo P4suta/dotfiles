@@ -52,7 +52,7 @@ pub fn lean_version() -> Result<&'static str> {
 
 #[derive(Debug, Subcommand)]
 pub enum Action {
-    /// Start a new request from a `UserPromptSubmit` hook payload on standard input.
+    /// Start an explicitly requested evidence check from a hook payload on standard input.
     Begin,
     /// Check an answer draft, then bind its evidence to this request.
     #[command(after_help = EVIDENCE_FORMAT)]
@@ -157,7 +157,7 @@ impl TryFrom<UncheckedRequest> for Request {
 }
 
 impl Request {
-    fn identity(&self) -> Result<String> {
+    pub(crate) fn identity(&self) -> Result<String> {
         Ok(digest(&serde_json::to_vec(self)?))
     }
 
@@ -337,7 +337,7 @@ fn read_limit(path: &Path, limit: u64) -> Result<String> {
     Ok(text)
 }
 
-fn write_json(path: &Path, document: &impl Serialize) -> Result<()> {
+pub(crate) fn write_json(path: &Path, document: &impl Serialize) -> Result<()> {
     write_atomic(path, &serde_json::to_vec(document)?)
 }
 
@@ -356,7 +356,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-fn directory(home: &Path, session: &str) -> Result<PathBuf> {
+pub(crate) fn directory(home: &Path, session: &str) -> Result<PathBuf> {
     ensure!(
         !session.is_empty() && session.len() <= MAX_SESSION_BYTES,
         "missing or oversized answer session ID"
@@ -364,7 +364,7 @@ fn directory(home: &Path, session: &str) -> Result<PathBuf> {
     Ok(home.join(STATE).join(digest(session.as_bytes())))
 }
 
-fn request(directory: &Path) -> Result<Request> {
+pub(crate) fn request(directory: &Path) -> Result<Request> {
     inspect_request(
         &read(&directory.join("request.json"))
             .context("answer request is missing; run the managed UserPromptSubmit hook")?,
@@ -419,7 +419,7 @@ fn begin(home: &Path, input: &HookInput) -> Result<String> {
         write_json(&path, &state)?;
     }
     Ok(format!(
-        "Before completing this request, use japanese-lexicon for Japanese readings and checked-arguments for reasoning.\nPrepare an exact answer draft and evidence, then run dotfiles answer check --session {} --draft <file> --evidence <file>.\nThe Stop hook rejects absent or stale evidence.\nA proof checks the declared formal claim; it does not certify empirical premises or their natural-language interpretation.\n",
+        "Before completing this explicitly requested evidence check, use japanese-lexicon for Japanese readings and checked-arguments for reasoning.\nPrepare an exact answer draft and evidence, then run dotfiles answer check --session {} --draft <file> --evidence <file>.\nThe optional answer stop command checks the retained evidence; routine replies require no evidence submission.\nA proof checks the declared formal claim; it does not certify empirical premises or their natural-language interpretation.\n",
         platform::refusal::quote(&input.session_id)
     ))
 }
@@ -1264,6 +1264,39 @@ mod tests {
             "version":1,"atoms":[],"readings":[],
             "claims":[{"id":"question","text":"Can we test this?","formula":null,"basis":{"kind":"question"}}]
         })).unwrap()
+    }
+
+    #[test]
+    fn project_checks_keep_answer_evidence_independent_of_runner_state() {
+        let home = tempfile::tempdir().unwrap();
+        let hook = input("Plan a change");
+        begin(home.path(), &hook).unwrap();
+        let directory = directory(home.path(), "session").unwrap();
+        fs::write(
+            directory.join("verification.json"),
+            "not a verification plan",
+        )
+        .unwrap();
+        let lock = fs::File::create(directory.join("verification.lock")).unwrap();
+        lock.try_lock().unwrap();
+        let draft = home.path().join("draft.txt");
+        let evidence = home.path().join("evidence.json");
+        fs::write(&draft, "Can we test this?").unwrap();
+        fs::write(&evidence, serde_json::to_vec(&document()).unwrap()).unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        check_with_house(
+            home.path(),
+            "session",
+            &draft,
+            &evidence,
+            home.path(),
+            || prose::Bundle::source(&root),
+        )
+        .unwrap();
+        stop_at(home.path(), &hook, home.path()).unwrap();
+        let mut changed = hook;
+        changed.last_assistant_message = Some("An unsupported answer.".to_owned());
+        assert!(stop_at(home.path(), &changed, home.path()).is_err());
     }
 
     struct ContextFixture {

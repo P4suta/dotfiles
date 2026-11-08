@@ -7,6 +7,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
+#[command(version)]
 struct Cli {
     #[arg(long, default_value = ".")]
     root: PathBuf,
@@ -16,6 +17,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Record source-bound verification and refuse incomplete implementation contracts.
+    Verify {
+        #[command(subcommand)]
+        action: dotfiles::verification::Action,
+    },
     /// Check sources and formal arguments for the exact answer draft.
     Answer {
         #[command(subcommand)]
@@ -95,7 +101,7 @@ enum Commands {
         #[command(subcommand)]
         action: dotfiles::notifications::Action,
     },
-    /// The agent hooks of the verification gate: the session start report of a repository's gaps, and the stop decision over the files a turn changed.
+    /// Remind agents to verify work, check reply prose, or explicitly inspect repository verification gaps.
     Assure {
         point: dotfiles::assure::AgentPoint,
         /// Check Stop reply prose in this owner-selected language.
@@ -302,6 +308,7 @@ fn run(mut cli: Cli) -> Result<()> {
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
     match cli.command {
+        Commands::Verify { action } => dotfiles::verification::execute(action)?,
         Commands::Answer { action } => dotfiles::answer::execute(action)?,
         Commands::Bounded { action } => dotfiles::bounded::execute(action)?,
         Commands::MiseInstall { arguments } => {
@@ -450,7 +457,10 @@ fn assure(
     point: dotfiles::assure::AgentPoint,
     reply_language: Option<dotfiles::assure::ReplyLanguage>,
 ) -> Result<()> {
-    if point == dotfiles::assure::AgentPoint::Start {
+    if matches!(
+        point,
+        dotfiles::assure::AgentPoint::Start | dotfiles::assure::AgentPoint::Remind
+    ) {
         dotfiles::hook_failures::session_start();
         #[cfg(unix)]
         if let Some(home) = platform::home::home() {

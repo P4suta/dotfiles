@@ -55,7 +55,7 @@ fn language_stop(hooks: &Value) -> &Value {
         .filter(|hook| {
             hook["command"]
                 .as_str()
-                .is_some_and(|command| command.contains(" assure stop "))
+                .is_some_and(|command| command.contains(" assure reply "))
         })
         .collect();
     assert_eq!(handlers.len(), 1, "{hooks}");
@@ -73,6 +73,7 @@ fn reapplying_a_language_change_replaces_managed_hooks_and_keeps_other_handlers(
             let template = fs::read_to_string(root.join("home").join(path))?;
             let mut current = json!({"hooks": {"Stop": [{"hooks": [
                 {"type": "command", "command": "dotfiles assure stop"},
+                {"type": "command", "command": "dotfiles answer stop"},
                 {"type": "command", "command": "owner-hook"}
             ]}]}})
             .to_string();
@@ -95,7 +96,7 @@ fn reapplying_a_language_change_replaces_managed_hooks_and_keeps_other_handlers(
                             .as_str()
                             .is_some_and(|command| command.ends_with(" answer stop")))
                         .count(),
-                    1,
+                    0,
                     "{current}"
                 );
                 let verification = language_stop(&hooks);

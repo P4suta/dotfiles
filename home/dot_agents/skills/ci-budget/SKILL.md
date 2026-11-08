@@ -8,6 +8,10 @@ description: >-
 # Lean CI and local verification before pushing
 
 Design hosted workflows from [lean workflows](references/lean-workflows.md): a fast deterministic gate on every change, no schedules, and heavy checks at the release gate.
+Run affected verification at the stage the project defines, following `development-assurance`.
+Before release, require the full inventory on the exact candidate.
+Affected evidence can't replace full-scope evidence.
+Reuse current results instead of starting duplicate campaigns at commit, push, or PR transitions.
 Use `formal-assurance` for reproducible verdicts and run heavy checks in the project's pinned container or documented hosted runners.
 Required hosted checks and the current-head PR review stay the final gates of a pull request.
 An active owner-imposed push pause overrides any push authorization until the owner explicitly resumes pushes.
@@ -17,11 +21,17 @@ An active owner-imposed push pause overrides any push authorization until the ow
 Read the diff, workflow triggers, required jobs, and project check entry points.
 Map each affected CI job to its local command and its required OS, architecture, environment, or service.
 Run the fast gate on the current host before a push, and leave other OS families to hosted CI and the release gate.
+Before every push, answer whether every applicable local check required for that push passed, with a short reason naming the actual commands and results.
+Run missing checks and fix failures before answering yes.
+Repair missing tools or services, or use a justified equivalent check.
+If a required local check still can't run, ask the user for the decision needed before pushing.
+An unverified disclaimer grants no exemption.
 The owner's hosts may cache artifacts and exact-source evidence within the owner-side tooling boundary in `formal-assurance`.
-Report hosted-only prerequisites as unverified locally, such as GitHub event permissions, OIDC, environment approval, and publication.
+Keep hosted-only prerequisites at their proper workflow stage, such as GitHub event permissions, OIDC, environment approval, and publication.
 Local verification grants no signing, publication, paid service calls, or self-hosted runner registration.
 
-Reuse passing evidence for the same source and environment until a change or failure invalidates it.
+Reuse passing check results for the same source and environment until a change or failure invalidates them.
+Don't require manually authored verification receipts or detailed evidence submissions.
 Run cheap checks first, and use `resource-coordination` before an expensive campaign.
 Use `reliability` for intermittent failures instead of pushing until CI passes.
 

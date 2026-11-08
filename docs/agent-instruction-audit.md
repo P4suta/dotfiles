@@ -119,11 +119,13 @@ Whether a diff fits an issue's scope stays judgment.
 
 > - Use `adr` before consequential architecture choices and when reviewing or replacing a decision.
 
-Judgment: selecting a consequential decision requires understanding its effects.
+Judgment: identifying a consequential architecture choice requires interpreting the task.
+The `adr` skill supplies the decision and review criteria.
 
 >   Keep ADRs concise, run the shared gate, and leave a record proposed while material findings remain.
 
-Judgment: the shared `adr` skill supplies the gate, and determining whether findings remain needs review.
+Judgment: materiality and decision acceptance require reviewing the evidence.
+The shared checker at `crates/prose/src/adr.rs` enforces the size budget and nonempty required sections.
 
 > - In personal repositories, use stable descriptive document paths and name new ADRs after the decision with a front-matter date, as the shared `adr` skill describes.
 
@@ -156,53 +158,53 @@ The `source-bound-interface-design` skill lists the sources, and no gate checks 
 
 > - Before implementation edits, read development-assurance, formal-assurance, verification-tools, and the applicable testing skills.
 
-Judgment: selecting relevant skill instructions and checking their verification obligations requires a review of the implementation and its evidence.
+Judgment: the implementation's behavior determines which testing instructions apply.
 
->   Use the project's maintained commands, record the required tests before and after production changes, and complete affected verification before reporting implementation completion.
+>   Use the project's maintained commands, run required checks before and after production changes, and complete affected verification before reporting implementation completion.
 
-Judgment: selecting tests and interpreting their results requires the implementation and its intended behavior.
+Judgment: the agent must run the required checks and inspect their actual outcomes.
 
->   Require the full verification inventory before release.
+>   Run the project's required checks before release.
 
-Judgment: the `verification-tools` skill defines the inventory, and release scope determines applicability.
+Judgment: the project must identify its complete release inventory and wire its native gate into publication.
+The project's release check requires its full inventory and source coverage.
+Each project's native release gate remains authoritative.
 
 > - Treat applicable recommendations in shared skills and governing primary sources as required completion criteria.
 
-Judgment: the owner adopts applicable recommendations as completion policy.
+Judgment: the task and source conditions determine applicability.
 
 >   Determine applicability from the task, platform, source conditions, and explicit requirements.
 
-Judgment: source conditions and task scope need interpretation.
+Judgment: applicability needs the actual task and governing source.
 
 >   Apply each relevant rule and verify its result without a separate evidence submission.
 
-Judgment: source applicability and the agent's short confirmation need direct review of actual checks and behavior.
+Judgment: actual implementation and checks establish whether the agent has applied the rule.
 
 >   Preserve the source's normative status and identify stronger adoption as owner policy.
 
-Judgment: stronger owner policy doesn't change the external source's authority.
+Judgment: the source's language and the owner's policy determine normative status.
 
 >   Resolve conflicts and justify exclusions explicitly.
 
-Judgment: conflicts and exclusions depend on the governing instructions and task.
+Judgment: conflicting requirements need context and authority review.
 
 >   An unresolved applicable rule blocks a completion claim.
 
-Judgment: determining whether a rule remains unresolved needs review.
+Judgment: the agent must resolve the rule or ask the user for a concrete decision.
 
 >   Enforce observable requirements through maintained project gates with rejecting fixtures, and review semantic suitability directly.
 
-Judgment: a gate checks observable behavior, while semantic suitability needs source comparison.
+Judgment: tests and direct review cover different properties of the actual implementation.
 
 > - Use diagram-explanations proactively when a diagram can explain relationships, mechanisms, changes, or decisions.
 
-Judgment: the `diagram-explanations` skill guides representation and rendered review.
-Selecting a diagram and checking its explanation require the subject's evidence.
+Judgment: the explanation determines whether a diagram adds meaning.
 
 > - Proactively use knowledge-to-skills to preserve reusable knowledge from research, implementation, debugging, review, failures, and feedback without waiting for a request.
 
-Judgment: the `knowledge-to-skills` skill guides reuse, evidence, and applicability.
-Determining which lesson improves future work requires review.
+Judgment: the agent distinguishes reusable guidance from task-specific observations.
 
 > - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
 
@@ -231,10 +233,48 @@ The answer checker retrieves the declared source and checks supported conversion
 Judgment: interpreting natural language and selecting a formal model need argument review.
 The answer checker checks declared dependencies, Boolean entailment, comparison axes, and parallel roles in `crates/dotfiles/src/answer.rs`.
 
-> - Before completing a request, check the exact answer draft with `dotfiles answer check` using the request's managed session context.
+> - Before completion and every push, inspect the diff and affected CI jobs, run every applicable local check required for the action, fix failures, and rerun affected checks after changes.
 
-Judgment: client trust and reload determine whether managed hooks run.
-The managed Stop path in `crates/dotfiles/src/answer.rs` refuses an exact draft without completed evidence for its current request.
+Judgment: deciding which checks apply needs the actual diff and project requirements.
+
+>   Confirm completion with a short reason naming actual checks and successful outcomes.
+
+Judgment: the short reason needs the agent's interpretation of actual tool results.
+
+>   Never substitute an unsupported affirmation or an unverified disclaimer for required work.
+
+Judgment: an honest completion claim needs the agent to perform the required work.
+
+>   Repair a blocked environment or use a justified equivalent check.
+
+Judgment: environment repair and equivalent coverage depend on the blocked check.
+
+>   If a required check still can't run, ask the user for the concrete decision needed before claiming completion.
+
+Judgment: the remaining decision depends on the user's authority and the actual blocker.
+
+>   Checks assigned to later CI or release stages keep their own timing.
+
+Judgment: the agent must execute the applicable project checks, resolve failures, and supply a concrete short reason.
+The reminder in `crates/dotfiles/src/assure.rs` asks for confirmation without an evidence submission.
+Required blocked checks need a user decision rather than an unverified completion disclaimer.
+
+> - Don't require detailed agent evidence submissions, evidence JSON, signed declarations, claim ledgers, or per-answer proofs, including for releases, unless the user explicitly requests them.
+
+Judgment: explicit user requests determine whether a detailed submission belongs in the task.
+
+>   Base the short confirmation on actual tool results and source checks.
+
+Judgment: source meaning and the correspondence with tool results need semantic review.
+
+>   Project-owned checks and release artifacts remain required.
+
+Judgment: the project's requirements define the checks and artifacts for its current stage.
+
+>   This reporting policy takes precedence over shared skill instructions that require detailed task evidence.
+
+Judgment: the agent selects the actual checks and distinguishes task evidence from project-owned artifacts.
+Managed client templates remove automatic answer-evidence hooks while retaining project checks and reply prose checks.
 
 > - Keep premise truth, natural-language interpretation, formal entailment, and decision relevance separate, and report unsupported or incomplete checks without claiming verification.
 
@@ -293,9 +333,9 @@ Judgment: a named object's relevance and precision need semantic review.
 
 Judgment: check selection and candidate resolution require context.
 
-> The answer-evidence check and persisted prose gates enforce the same shared policy.
+> The reply and persisted prose gates enforce the same shared policy.
 
-Follow-up F1: `crates/dotfiles/src/answer.rs` and the prose entry points call `crates/prose/src/house.rs`.
+Follow-up F1: `crates/dotfiles/src/assure.rs` and the prose entry points apply the shared house policy.
 
 > Write prose one sentence per line in English and Japanese: break after `。`, `！`, `？`, `.`, `!`, and `?`.
 

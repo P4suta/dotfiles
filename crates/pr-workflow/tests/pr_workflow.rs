@@ -6697,7 +6697,7 @@ fn ready_requires_a_passing_note_for_every_os_family_in_the_ci_matrix() -> Resul
 }
 
 #[test]
-fn ready_refuses_a_pr_that_adds_an_unowned_parser_until_its_fuzz_target_exists() -> Result<()> {
+fn ready_uses_project_checks_without_requiring_owner_verification_metadata() -> Result<()> {
     let mut fixture = Fixture::new(BODY)?;
     let root = fixture.directory.path().to_path_buf();
     fs::create_dir_all(root.join("src"))?;
@@ -6718,34 +6718,39 @@ fn ready_refuses_a_pr_that_adds_an_unowned_parser_until_its_fuzz_target_exists()
     };
     fixture.head = git(&root, &["rev-parse", "HEAD"])?;
     let output = ready(&fixture)?;
-    let error = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success());
-    assert!(
-        error.contains("assure.added") && error.contains("src/lib.rs:1: parser has no owner"),
-        "{error}"
-    );
-    assert!(!fixture.log()?.contains("\nready\n"));
-    fs::create_dir_all(root.join("fuzz/fuzz_targets"))?;
-    fs::create_dir_all(root.join("fuzz/corpus/parse"))?;
-    fs::write(
-        root.join("fuzz/fuzz_targets/parse.rs"),
-        "#![no_main]\nlibfuzzer_sys::fuzz_target!(|data: &[u8]| {});\n",
-    )?;
-    fs::write(root.join("fuzz/corpus/parse/seed"), "")?;
-    fs::write(
-        root.join("assure.toml"),
-        "[[owner]]\nshape = \"parser\"\npath = \"src/lib.rs\"\nby = \"fuzz/fuzz_targets/parse.rs\"\n",
-    )?;
-    git(&root, &["add", "fuzz", "assure.toml"])?;
-    git(&root, &["commit", "--quiet", "-m", "own the parser"])?;
-    fixture.head = git(&root, &["rev-parse", "HEAD"])?;
-    let output = ready(&fixture)?;
     assert!(
         output.status.success(),
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(fixture.log()?.contains("\nready\n"));
+    Ok(())
+}
+
+#[test]
+fn ready_retains_adr_content_without_optional_verification_metadata() -> Result<()> {
+    let mut fixture = Fixture::new(BODY)?;
+    let root = fixture.directory.path();
+    git(root, &["config", "prose.standard", "true"])?;
+    fs::create_dir_all(root.join("docs/adr"))?;
+    fs::write(
+        root.join("docs/adr/bound-the-queue.md"),
+        "Detail.\n".repeat(201),
+    )?;
+    git(root, &["add", "docs/adr"])?;
+    git(root, &["commit", "--quiet", "-m", "change the decision"])?;
+    fixture.head = git(root, &["rev-parse", "HEAD"])?;
+    let view = serde_json::json!({"title":"fix: preserve edits","body":BODY,"state":"OPEN","isDraft":true});
+    let output = fixture
+        .command("ready")?
+        .args(["--pr", "17"])
+        .env("GH_FIXTURE_HEAD", &fixture.head)
+        .env("GH_FIXTURE_VIEW", view.to_string())
+        .output()?;
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{output:?}");
+    assert!(error.contains("ADR.WordBudget"), "{error}");
+    assert!(!fixture.log()?.contains("\nready\n"));
     Ok(())
 }
 

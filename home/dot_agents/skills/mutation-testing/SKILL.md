@@ -11,7 +11,9 @@ metadata:
 
 Read the project's mutation configuration and maintained tasks before selecting a run.
 Use the project's pinned mutation tool and documented platform runner.
-The full campaign gates a release, and a changed-contract run during development is on demand and gates no push or pull request.
+Run affected contracts at the project's required stage or when the user requests a campaign.
+The full campaign gates release under the project's release requirements.
+Record the native inventory, phase results, and checked source.
 Apply the bounded-tool rule in `formal-assurance` through the project's bounded container entrypoint or `dotfiles bounded run` on owner machines.
 Follow `formal-assurance` for reproducible verdicts and `resource-coordination` before an expensive campaign.
 Start with a dry run or changed-contract selection when it answers the question.

@@ -37,6 +37,7 @@ pub mod signing;
 pub mod source_sync;
 pub mod terminal;
 pub mod transaction;
+pub mod verification;
 pub use rules::{
     agent_memory_rules, body_rules, disk_scan_rules, env_expansion_rules, eol_rules, herdr_rules,
     hook_failure_rules, hook_rules, host_setup_rules, hosts_rules, issue_guard_rules, legacy_rules,

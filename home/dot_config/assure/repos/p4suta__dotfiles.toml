@@ -8,6 +8,36 @@ by = "fuzz/fuzz_targets/upstream.rs"
 
 [[owner]]
 shape = "parser"
+path = "crates/dotfiles/src/verification/mod.rs"
+by = "fuzz/fuzz_targets/verification_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/verification/plan.rs"
+by = "fuzz/fuzz_targets/verification_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/verification/reports.rs"
+by = "fuzz/fuzz_targets/verification_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/verification/mutation.rs"
+by = "fuzz/fuzz_targets/verification_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/verification/source.rs"
+by = "fuzz/fuzz_targets/verification_input.rs"
+
+[[owner]]
+shape = "parser"
+path = "crates/dotfiles/src/verification/proof.rs"
+by = "fuzz/fuzz_targets/verification_input.rs"
+
+[[owner]]
+shape = "parser"
 path = "crates/prose/src/house.rs"
 by = "fuzz/fuzz_targets/copyedit_input.rs"
 

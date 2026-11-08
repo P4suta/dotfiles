@@ -1,7 +1,7 @@
 {
-  "revision": "e10dacec5abec15bd9f9bfaeaac44822429142a6b152d585e8e2c422ada66c89",
+  "revision": "a6fb630cb92bfd004c3c009679c419e426c4f1f06e0b4f8ebf7f64956ba83f33",
   "outcome": "implemented",
-  "reason": "The skill tool inventory now pins chezmoi 2.73.3. The existing generation and verification workflow is unchanged, and this metadata update does not claim a current-source build or rollout verification.",
+  "reason": "Preserve scoped native rollout and add reviewed-checkout execution, recursive previews, and native export hash checks after stale policy and incomplete directory previews exposed gaps.",
   "evidence": [
     "home/dot_agents/skills/dotfiles/SKILL.md",
     "home/dot_agents/skills/dotfiles/tools.toml",

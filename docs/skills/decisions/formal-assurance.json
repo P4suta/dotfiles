@@ -1,21 +1,12 @@
 {
-  "revision": "e6baf9287e4b1f648e19a43c34914c926edfe679b3fc805da3b8a82b476260e7",
+  "revision": "1814086556b13a74e9758eeb6948f698d4e22af848ccfb884d98b71815354868",
   "outcome": "implemented",
-  "reason": "Separate writing harnesses, models, and fuzz targets with each change from running the full inventory, which the release gate does.\nDefine the bounded-tool rule once with policy limits, the shared container runner, native refusal through project tasks, inconclusive limit stops, and native GitHub Actions execution.",
+  "reason": "Use project-required proofs and suitable formal methods without per-task proof inventories or evidence dossiers.",
   "evidence": [
-    "home/dot_config/dotfiles/bounded-tools.toml",
-    "crates/dotfiles/src/bounded.rs",
-    "crates/dotfiles/tests/bounded.rs",
     "home/dot_agents/skills/formal-assurance/SKILL.md",
-    "docs/adr/run-heavy-verification-at-the-release-gate.md",
-    "docs/adr/verification-proportional-to-code-shape.md",
-    "home/dot_agents/skills/formal-assurance/references/scoping.md",
-    "home/dot_agents/skills/formal-assurance/references/verifiers.md",
-    "docs/skills/assurance-scope-evaluation.md",
-    "docs/adr/0012-windows-proofs-in-a-linux-container.md",
-    "xtask/tests/container_proofs.rs",
-    "home/dot_agents/skills/formal-assurance/tools.toml",
-    "xtask/tests/tool_inventory.rs"
+    "home/dot_agents/skills/development-assurance/references/verification-contract.md",
+    "crates/dotfiles/src/verification/mod.rs",
+    "docs/adr/require-verification-results-before-implementation-completion.md"
   ],
   "revisit": null
 }
