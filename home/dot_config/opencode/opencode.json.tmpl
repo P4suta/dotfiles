@@ -1,6 +1,5 @@
 {{- /*
   One OpenCode configuration for every profile.
-  Every host declares the same servers, and only executables and paths differ.
   Context7 loads only on a local workstation with the 1Password app, which a WSL session can't reach.
   The gcloud server loads only where the gcp skill installed it, which only the Mac does.
   The Mac keeps its own permission rules until the owner decides how to gate agents.
@@ -19,6 +18,7 @@
 {{- $npx := list "npx" -}}
 {{- if eq .profile "windows" }}{{ $npx = list "cmd" "/c" "npx" }}{{ end -}}
 {{- $domyjobMcp := includeTemplate "partials/domyjob_mcp" . -}}
+{{- $onePasswordMcp := includeTemplate "partials/onepassword_mcp_command" . -}}
 {
   "$schema": "https://opencode.ai/config.json",
   "autoupdate": false,
@@ -85,6 +85,11 @@
       },
       "enabled": true,
       "timeout": 30000
+    }{{ end }}{{ if $onePasswordMcp }},
+    "1password": {
+      "type": "local",
+      "command": [{{ $onePasswordMcp | toJson }}],
+      "enabled": true
     }{{ end }}{{ if $domyjobMcp }},
     "domyjob": {{ $domyjobMcp }}{{ end }}
   }{{ if $hasOnePassword }},
