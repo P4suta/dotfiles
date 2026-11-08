@@ -1,71 +1,78 @@
-import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
-import type { Hooks, Plugin } from "@opencode-ai/plugin";
+import type { Plugin as NativePlugin } from "@opencode/plugin";
+import type { Hooks, Plugin as LegacyPlugin } from "@opencode-ai/plugin";
+import { executable, runHook, toolName } from "../adapters/native-runtime";
 
-type AfterTool = NonNullable<Hooks["tool.execute.after"]>;
-
-const HOOK_TIMEOUT_MS = 120000;
-
-export const Lint: Plugin = async (
-	input: Parameters<Plugin>[0],
-	options: Parameters<Plugin>[1] = {},
-): Promise<Hooks> => {
-	const executable =
-		options.executable ??
-		join(
-			homedir(),
-			".local",
-			"bin",
-			`dotfiles${process.platform === "win32" ? ".exe" : ""}`,
-		);
-	if (typeof executable !== "string" || !isAbsolute(executable)) {
-		throw new Error("The dotfiles executable must be an absolute path");
+async function finding(
+	binary: string,
+	cwd: string,
+	tool: string,
+	args: unknown,
+): Promise<string | undefined> {
+	if (!["edit", "write", "apply_patch"].includes(tool)) return;
+	const response = await runHook(binary, cwd, ["lint-hook"], {
+		hook_event_name: "PostToolUse",
+		cwd,
+		tool_name: tool,
+		tool_input: args,
+	});
+	if (!response.trim()) return;
+	const result: unknown = JSON.parse(response);
+	if (
+		typeof result !== "object" ||
+		result === null ||
+		!("decision" in result)
+	) {
+		throw new Error("The lint hook returned an invalid decision");
 	}
+	if (
+		result.decision === "block" &&
+		"reason" in result &&
+		typeof result.reason === "string"
+	) {
+		return result.reason;
+	}
+	return undefined;
+}
+
+export const Lint: LegacyPlugin = async (
+	input: Parameters<LegacyPlugin>[0],
+	options: Parameters<LegacyPlugin>[1] = {},
+): Promise<Hooks> => {
+	const binary = executable(options);
 	return {
-		"tool.execute.after": async (
-			call: Parameters<AfterTool>[0],
-			output: Parameters<AfterTool>[1],
-		): Promise<void> => {
-			if (!["edit", "write", "apply_patch"].includes(call.tool)) return;
-			const args: unknown = call.args;
-			const child = Bun.spawn([executable, "lint-hook"], {
-				cwd: input.directory,
-				stdin: new Blob([
-					JSON.stringify({
-						hook_event_name: "PostToolUse",
-						cwd: input.directory,
-						tool_name: call.tool,
-						tool_input: args,
-					}),
-				]),
-				stdout: "pipe",
-				stderr: "pipe",
-				timeout: HOOK_TIMEOUT_MS,
-			});
-			const [code, response, diagnostics] = await Promise.all([
-				child.exited,
-				new Response(child.stdout).text(),
-				new Response(child.stderr).text(),
-			]);
-			if (code !== 0)
-				throw new Error(diagnostics || `Lint hook failed (${code})`);
-			if (!response.trim()) return;
-			const result: unknown = JSON.parse(response);
-			if (
-				typeof result !== "object" ||
-				result === null ||
-				!("decision" in result)
-			) {
-				throw new Error("The lint hook returned an invalid decision");
-			}
-			if (
-				result.decision === "block" &&
-				"reason" in result &&
-				typeof result.reason === "string"
-			) {
-				output.output = result.reason;
-				throw new Error(result.reason);
+		"tool.execute.after": async (call, output): Promise<void> => {
+			const reason = await finding(
+				binary,
+				input.directory,
+				call.tool,
+				call.args,
+			);
+			if (reason) {
+				output.output = reason;
+				throw new Error(reason);
 			}
 		},
 	};
 };
+
+const native: NativePlugin.Plugin = {
+	id: "dotfiles.lint",
+	async setup(ctx) {
+		const binary = executable(ctx.options);
+		await ctx.tool.hook("execute.after", async (event) => {
+			if (event.status !== "completed") return;
+			const tool = toolName(event.tool);
+			if (!["edit", "write", "apply_patch"].includes(tool)) return;
+			const session = await ctx.session.get({ sessionID: event.sessionID });
+			const reason = await finding(
+				binary,
+				session.location.directory,
+				tool,
+				event.input,
+			);
+			if (reason) throw new Error(reason);
+		});
+	},
+};
+
+export default { ...native, server: Lint };

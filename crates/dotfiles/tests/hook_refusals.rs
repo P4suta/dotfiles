@@ -4,8 +4,9 @@
 use anyhow::{Result, ensure};
 use dotfiles::refusal::Refusal;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
@@ -88,6 +89,31 @@ impl Host {
             .output()?)
     }
 
+    fn push(&self, head: &str, base: &str) -> Result<Output> {
+        let mut child = self
+            .command(env!("CARGO_BIN_EXE_dotfiles"))
+            .args([
+                "hook",
+                "pre-push",
+                "--",
+                "origin",
+                "https://example.invalid/r",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        child.stdin.take().unwrap().write_all(
+            format!(
+                "refs/heads/topic {} refs/heads/topic {}\n",
+                head.trim(),
+                base.trim()
+            )
+            .as_bytes(),
+        )?;
+        Ok(child.wait_with_output()?)
+    }
+
     fn bare_gate_failure(&self) -> Result<Output> {
         let status = platform::process::command("rustc")
             .args(["--edition", "2024"])
@@ -155,7 +181,7 @@ fn a_gate_that_changes_the_staged_tree_refuses_the_commit() -> Result<()> {
 }
 
 #[test]
-fn a_commit_that_adds_an_unowned_parser_is_refused_with_its_next_action() -> Result<()> {
+fn a_commit_reminds_the_agent_and_keeps_the_project_gate_without_owner_metadata() -> Result<()> {
     let host = Host::new()?;
     fs::create_dir_all(host.repository().join("src"))?;
     fs::write(
@@ -163,12 +189,127 @@ fn a_commit_that_adds_an_unowned_parser_is_refused_with_its_next_action() -> Res
         "pub fn parse(text: &str) -> bool {\n    text.is_empty()\n}\n",
     )?;
     host.run("git", &["add", "src/lib.rs"])?;
-    let refused = refusal(&host.hook(&["pre-commit"])?);
-    assert_eq!(refused.rule, "assure.added");
-    assert!(
-        refused.evidence[0].starts_with("src/lib.rs:1: parser has no owner")
-            && refused.evidence[0].contains("next: add fuzz/fuzz_targets/"),
-        "{refused:?}"
+    let output = host.hook(&["pre-commit"])?;
+    assert!(String::from_utf8_lossy(&output.stderr).contains("short reason"));
+    assert_eq!(refusal(&output).rule, "commit.staged-tree");
+    Ok(())
+}
+
+#[test]
+fn a_commit_retains_adr_content_without_optional_owner_metadata() -> Result<()> {
+    let host = Host::new()?;
+    host.run("git", &["config", "prose.standard", "true"])?;
+    fs::remove_dir_all(host.home().join(".config/assure"))?;
+    let path = host.repository().join("docs/adr/bound-the-queue.md");
+    fs::create_dir_all(path.parent().unwrap())?;
+    fs::write(&path, "Detail.\n".repeat(201))?;
+    host.run("git", &["add", "docs/adr/bound-the-queue.md"])?;
+    let output = host.hook(&["pre-commit"])?;
+    assert_eq!(refusal(&output).rule, "adr.content");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ADR.WordBudget"));
+    assert!(!host.home().join(".config/assure").exists());
+    Ok(())
+}
+
+#[test]
+fn a_push_retains_adr_content_in_the_offered_commit() -> Result<()> {
+    let host = Host::new()?;
+    host.run("git", &["config", "prose.standard", "true"])?;
+    fs::remove_dir_all(host.home().join(".config/assure"))?;
+    host.empty_commit()?;
+    let base = String::from_utf8(host.run("git", &["rev-parse", "HEAD"])?.stdout)?;
+    let path = host.repository().join("docs/adr/bound-the-queue.md");
+    fs::create_dir_all(path.parent().unwrap())?;
+    fs::write(&path, "Detail.\n".repeat(201))?;
+    host.run("git", &["add", "docs/adr/bound-the-queue.md"])?;
+    host.run("git", &["commit", "--quiet", "-m", "change the decision"])?;
+    let head = String::from_utf8(host.run("git", &["rev-parse", "HEAD"])?.stdout)?;
+    fs::write(&path, "A different working copy.\n")?;
+    let mut child = host
+        .command(env!("CARGO_BIN_EXE_dotfiles"))
+        .args([
+            "hook",
+            "pre-push",
+            "--",
+            "origin",
+            "https://example.invalid/r",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    child.stdin.take().unwrap().write_all(
+        format!(
+            "refs/heads/topic {} refs/heads/topic {}\n",
+            head.trim(),
+            base.trim()
+        )
+        .as_bytes(),
+    )?;
+    let output = child.wait_with_output()?;
+    assert_eq!(refusal(&output).rule, "adr.content");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ADR.WordBudget"));
+    Ok(())
+}
+
+#[test]
+fn an_external_push_needs_no_personal_adr_baseline() -> Result<()> {
+    let host = Host::new()?;
+    host.run("git", &["config", "prose.standard", "false"])?;
+    let path = host.repository().join("docs/adr/bound-the-queue.md");
+    fs::create_dir_all(path.parent().unwrap())?;
+    fs::write(path, "Detail.\n".repeat(201))?;
+    host.run("git", &["add", "docs/adr"])?;
+    host.empty_commit()?;
+    let head = String::from_utf8(host.run("git", &["rev-parse", "HEAD"])?.stdout)?;
+    let output = host.push(&head, &"0".repeat(40))?;
+    assert!(output.status.success(), "{output:?}");
+    Ok(())
+}
+
+#[test]
+fn a_new_branch_preserves_remote_adr_history_and_checks_new_records() -> Result<()> {
+    let host = Host::new()?;
+    host.run("git", &["config", "prose.standard", "true"])?;
+    let directory = host.repository().join("docs/adr");
+    fs::create_dir_all(&directory)?;
+    fs::write(
+        directory.join("historical.md"),
+        "Historical detail.\n".repeat(201),
+    )?;
+    host.run("git", &["add", "docs/adr"])?;
+    host.empty_commit()?;
+    let upstream = host.scope.path().join("upstream.git");
+    host.run(
+        "git",
+        &[
+            "clone",
+            "--bare",
+            "--quiet",
+            ".",
+            upstream.to_str().unwrap(),
+        ],
+    )?;
+    host.run(
+        "git",
+        &["remote", "add", "origin", upstream.to_str().unwrap()],
+    )?;
+    fs::write(host.repository().join("readme.txt"), "Local change.\n")?;
+    host.run("git", &["add", "readme.txt"])?;
+    host.run("git", &["commit", "--quiet", "-m", "change text"])?;
+    let head = String::from_utf8(host.run("git", &["rev-parse", "HEAD"])?.stdout)?;
+    let output = host.push(&head, &"0".repeat(40))?;
+    assert!(output.status.success(), "{output:?}");
+    fs::write(
+        directory.join("changed.md"),
+        "Changed detail.\n".repeat(201),
+    )?;
+    host.run("git", &["add", "docs/adr/changed.md"])?;
+    host.run("git", &["commit", "--quiet", "-m", "change the decision"])?;
+    let head = String::from_utf8(host.run("git", &["rev-parse", "HEAD"])?.stdout)?;
+    assert_eq!(
+        refusal(&host.push(&head, &"0".repeat(40))?).rule,
+        "adr.content"
     );
     Ok(())
 }

@@ -39,11 +39,12 @@ Three checks that already run on this machine refuse the labels and the foreign 
 
 - The prose checker's `Dotfiles.VersionLabel` rule refuses a bare `v2`-style label in English documents, comments, and commit messages.
 - The assurance catalog pattern `version-label` refuses an identifier segment such as `V2` or `v2` in Rust and TypeScript through the `version-label` and `typescript-version-label` rules.
-- The Stop hook and `dotfiles answer check` refuse any Han character outside the Japanese Industrial Standards (JIS) X 0208 and X 0213 repertoire in a Japanese reply.
-  The table in `crates/dotguard/src/jis_kanji_table.rs` derives from Unihan, so a simplified Chinese character never reaches the user.
+- The reply hook and optional `dotfiles answer check` refuse any Han character outside the Japanese Industrial Standards (JIS) X 0208 and X 0213 repertoire in a Japanese reply.
+  The table in `crates/dotguard/src/jis_kanji_table.rs` derives from Unihan.
+  A post-display hook reports a violation and requests a correction.
 
 The word rules `Dotfiles.VersionLabel`, `Dotfiles.FigurativeJargon`, and `Dotfiles.ForeignTerm` in `japanese.toml` declare refusals for Chinese compounds and metaphors made of Japanese characters.
-The Stop hook and `dotfiles answer check` apply every rule of that file to the Japanese lines of a reply, outside code.
+The reply hook and optional `dotfiles answer check` apply every rule of that file to the Japanese lines of a reply, outside code.
 
 ## Verification
 

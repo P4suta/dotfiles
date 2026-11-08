@@ -1,13 +1,12 @@
 {
-  "revision": "45030ecc79cfd32b4aeef5246fba88ac3a990f7dc9718be743ad4e9cfca142dc",
+  "revision": "f2d20f312ad483e0c29a93eef45f9b07577c6294f87bad359b733181477c7204",
   "outcome": "implemented",
-  "reason": "Run the fast deterministic gate on every change, and place proofs, Miri, fuzzing, mutation, stress repeats, and macOS and Windows runs at the release gate.\nPer-change selection still ran heavy campaigns on most product pushes and pull requests and stalled daily development.",
+  "reason": "Run applicable local checks and resolve blocked checks before pushing without a separate evidence submission, while preserving the project's CI and release timing.",
   "evidence": [
     "home/dot_agents/skills/ci-budget/SKILL.md",
-    "home/dot_agents/skills/ci-budget/references/lean-workflows.md",
-    "docs/adr/run-heavy-verification-at-the-release-gate.md",
-    "crates/dotfiles/src/hosts.rs",
-    "docs/adr/0020-os-family-push-evidence.md"
+    "home/dot_agents/skills/development-assurance/references/verification-contract.md",
+    "crates/dotfiles/src/verification/mod.rs",
+    "docs/adr/keep-project-checks-authoritative-in-agent-sessions.md"
   ],
   "revisit": null
 }

@@ -1,13 +1,14 @@
 {
-  "revision": "182547f5841446bbeead349b53aadf0413c65ad5ea50fd4d9164ab7dddd80554",
+  "revision": "76657f47edc348783ce204573e965e9c5fb8b1fc5bb7111ea3b530e94867a04a",
   "outcome": "implemented",
-  "reason": "Keep proof authoring with each implementation change and the fast gate on the current host before a push, and leave heavy campaigns and other platforms to the release gate.",
+  "reason": "Keep TDD and project verification authoritative, preserve stage-specific check timing, and provide an explicit execution runner without mandatory parallel plans or detailed task submissions.",
   "evidence": [
     "home/dot_agents/skills/development-assurance/SKILL.md",
-    "docs/adr/run-heavy-verification-at-the-release-gate.md",
-    "docs/adr/verification-proportional-to-code-shape.md",
-    "home/dot_agents/skills/formal-assurance/references/scoping.md",
-    "docs/skills/assurance-scope-evaluation.md"
+    "home/dot_agents/skills/development-assurance/references/verification-contract.md",
+    "crates/dotfiles/src/verification/mod.rs",
+    "docs/adr/keep-project-checks-authoritative-in-agent-sessions.md",
+    "crates/dotfiles/tests/verification.rs",
+    "crates/dotfiles/tests/agent_confirmation.rs"
   ],
   "revisit": null
 }

@@ -1,60 +1,62 @@
-import type { Hooks, Plugin } from "@opencode-ai/plugin";
-import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import type { Plugin as NativePlugin } from "@opencode/plugin";
+import type { Hooks, Plugin as LegacyPlugin } from "@opencode-ai/plugin";
+import { executable, runHook, toolName } from "../adapters/native-runtime";
 
-type BeforeTool = NonNullable<Hooks["tool.execute.before"]>;
+async function guard(
+	binary: string,
+	cwd: string,
+	tool: string,
+	args: unknown,
+	session?: string,
+): Promise<void> {
+	const mutation = ["edit", "write", "apply_patch"].includes(tool);
+	if (tool !== "bash" && !mutation) return;
+	await runHook(binary, cwd, [mutation ? "issue-guard" : "claude-bash"], {
+		session_id: session,
+		tool_name: tool,
+		cwd,
+		tool_input: args,
+	});
+}
 
-/** How long the pre-execution hook may run before the plugin stops waiting on it. */
-const HOOK_TIMEOUT_MS = 120000;
-
-/**
- * Refuses a malformed or file-writing shell command before it runs, through the same pure decision core every managed client shares.
- */
-export const ShellGuard: Plugin = async (
-  input: Parameters<Plugin>[0],
-  options: Parameters<Plugin>[1] = {},
+export const ShellGuard: LegacyPlugin = async (
+	input: Parameters<LegacyPlugin>[0],
+	options: Parameters<LegacyPlugin>[1] = {},
 ): Promise<Hooks> => {
-  const executable = options.executable ?? join(
-    homedir(),
-    ".local",
-    "bin",
-    `dotfiles${process.platform === "win32" ? ".exe" : ""}`,
-  );
-  if (typeof executable !== "string" || !isAbsolute(executable)) {
-    throw new Error("The dotfiles executable must be an absolute path");
-  }
-  return {
-    "tool.execute.before": async (
-      call: Parameters<BeforeTool>[0],
-      output: Parameters<BeforeTool>[1],
-    ): Promise<void> => {
-      const mutation = ["edit", "write", "apply_patch"].includes(call.tool);
-      if (call.tool !== "bash" && !mutation) {
-        return;
-      }
-      const args: unknown = output.args;
-      const child = Bun.spawn([executable, mutation ? "issue-guard" : "claude-bash"], {
-        cwd: input.directory,
-        stdin: new Blob([
-          JSON.stringify({
-            tool_name: call.tool,
-            cwd: input.directory,
-            tool_input: args,
-          }),
-        ]),
-        stdout: "ignore",
-        stderr: "pipe",
-        timeout: HOOK_TIMEOUT_MS,
-      });
-      const [code, diagnostics] = await Promise.all([
-        child.exited,
-        new Response(child.stderr).text(),
-      ]);
-      if (code !== 0) {
-        throw new Error(
-          diagnostics.trim() || `The shell guard refused this command (${code})`,
-        );
-      }
-    },
-  };
+	const binary = executable(options);
+	return {
+		"tool.execute.before": async (call, output): Promise<void> => {
+			await guard(
+				binary,
+				input.directory,
+				call.tool,
+				output.args,
+				call.sessionID,
+			);
+		},
+	};
 };
+
+const native: NativePlugin.Plugin = {
+	id: "dotfiles.shell-guard",
+	async setup(ctx) {
+		const binary = executable(ctx.options);
+		await ctx.tool.hook("execute.before", async (event) => {
+			const tool = toolName(event.tool);
+			if (!["bash", "edit", "write", "apply_patch"].includes(tool)) return;
+			const session = await ctx.session.get({ sessionID: event.sessionID });
+			await guard(
+				binary,
+				session.location.directory,
+				tool,
+				event.input,
+				event.sessionID,
+			);
+		});
+		await ctx.shell.hook("create.before", async (event) => {
+			await guard(binary, event.cwd, "bash", { command: event.command });
+		});
+	},
+};
+
+export default { ...native, server: ShellGuard };

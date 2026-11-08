@@ -1,10 +1,9 @@
 {{- /* chezmoi:modify-template */ -}}
 {{- /*
   Codex reads its hooks from this file, so each profile sets the verification hooks and keeps unrelated handlers.
-  A session starts with the verification report, which lists the repository's code shapes that nothing verifies with their next actions.
+  A session starts with the verification reminder and requires a short reason for the agent's confirmation.
   On Windows it first runs the process-start probe, as the Claude Code session does.
-  The stop hook refuses to end a turn while a file it changed holds such a shape.
-  It also checks the final reply's prose in the owner's language, with at most one continuation.
+  The stop hook checks the final reply's prose and changed personal ADR content, with at most one continuation.
   The pre-tool hook blocks a malformed or file-writing shell command before Codex runs it, through the decision core every managed client shares.
   The timing hook records the duration of each shell command and reports its measured duration to Codex, as it does for Claude Code.
   Codex takes a rewritten command only beside an approval of it, and these hooks approve nothing.
@@ -32,8 +31,8 @@
 {{- $edit := includeTemplate "partials/codex_runtime_hook" (dict "profile" .profile "tool" $runtime "arguments" "issue-guard" "trace" true) | fromJson -}}
 {{- $issue := dict "matcher" "apply_patch|Edit|Write|MultiEdit|edit|write" "hooks" (list $edit) -}}
 {{- $_ := set $hooks "PreToolUse" (concat (dig "PreToolUse" (list) $hooks) (list $issue)) -}}
-{{- range $event, $point := dict "SessionStart" "start" "Stop" "stop" -}}
-{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " health --session" (printf " assure %s" $point) " assure stop --reply-language Japanese" " assure stop --reply-language English")) | fromJson -}}
+{{- range $event, $point := dict "SessionStart" "remind" "Stop" "reply" -}}
+{{-   $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list " health --session" " assure start" " assure stop" " assure remind" " assure reply" " assure stop --reply-language Japanese" " assure stop --reply-language English" " assure reply --reply-language Japanese" " assure reply --reply-language English")) | fromJson -}}
 {{-   $own := list -}}
 {{-   if and (eq $event "SessionStart") (eq $.profile "windows") -}}
 {{-     $own = append $own (includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" "health --session" "trace" true) | fromJson) -}}
@@ -45,9 +44,7 @@
 {{- end -}}
 {{- range $event, $point := dict "UserPromptSubmit" "begin" "Stop" "stop" -}}
 {{- $groups := includeTemplate "partials/without_runtime_handlers" (dict "groups" (dig $event (list) $hooks) "suffixes" (list (printf " answer %s" $point))) | fromJson -}}
-{{- $answer := includeTemplate "partials/codex_runtime_hook" (dict "profile" $.profile "tool" $runtime "arguments" (printf "answer %s" $point) "trace" true) | fromJson -}}
-{{- $_ := set $answer "timeout" 10 -}}
-{{- $_ := set $hooks $event (concat $groups (list (dict "hooks" (list $answer)))) -}}
+{{- $_ := set $hooks $event $groups -}}
 {{- end -}}
 {{- if eq (includeTemplate "partials/skill_ops_experimental" .) "true" -}}
 {{- $observe := dict "type" "command" "command" "skill-ops observe --client codex" "timeout" 10 -}}

@@ -4,6 +4,7 @@ use anyhow::{Context, Result, ensure};
 use dotfiles::assure::{self, Catalog, Kind};
 use dotfiles::refusal::Refusal;
 use dotfiles::shape_rules::{Cause, Verdict};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write as _;
 use std::path::Path;
@@ -17,6 +18,9 @@ mod incident_fixture;
 
 #[path = "support/catalog.rs"]
 mod hook_catalog;
+
+#[path = "support/configuration.rs"]
+mod configuration;
 
 fn catalog() -> Result<Catalog> {
     assure::catalog(
@@ -108,6 +112,42 @@ fn adr_stop_hook_returns_a_block_and_external_repositories_keep_their_rules() ->
         serde_json::from_slice::<serde_json::Value>(&output.stdout)?,
         serde_json::json!({})
     );
+    Ok(())
+}
+
+#[test]
+fn managed_reply_retains_adr_content_without_an_optional_catalog_or_request() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let home = fixture.scope.path().join("home");
+    configuration::copy(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/prose"),
+        &home.join(".config/prose"),
+    )?;
+    let path = "docs/adr/bound-the-queue.md";
+    let valid = "# Bound the queue\n\n## Context\nRequests can exhaust memory.\n\n## Decision\nRetain one request.\n\n## Alternatives\nAn unlimited queue can exhaust memory.\n\n## Consequences\nOlder requests are lost.\n\n## Confirmation\nCheck the queue bound.\n";
+    for source in [
+        "Detail.\n".repeat(201),
+        valid.replace("Retain one request.", ""),
+    ] {
+        fixture.write(path, &source)?;
+        let output = fixture.agent(&home, &["assure", "reply"], &serde_json::json!({}))?;
+        ensure!(output.status.success(), "{output:?}");
+        let reply: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(reply["decision"], "block", "{reply}");
+        assert!(
+            reply["reason"].as_str().unwrap().contains("ADR."),
+            "{reply}"
+        );
+    }
+    fixture.write(path, valid)?;
+    let output = fixture.agent(&home, &["assure", "reply"], &serde_json::json!({}))?;
+    ensure!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout)?,
+        serde_json::json!({})
+    );
+    assert!(!home.join(".config/assure").exists());
+    assert!(!home.join(".local/state/dotfiles/answers").exists());
     Ok(())
 }
 
@@ -306,6 +346,7 @@ fn managed_requests_ignore_existing_work_and_still_refuse_changed_gaps() -> Resu
         assert_eq!(fs::read(&index_path)?, index_bytes);
         assert_eq!(assure::resolve(&fixture.root, "HEAD")?, head);
         assert_eq!(stop("確認しました。")?, serde_json::json!({}));
+        assert_eq!(stop("The work is complete.")?["decision"], "block");
         fixture.write("ignored/extra.rs", &PARSER.replace("parse", "parse_extra"))?;
         fixture.write("README.md", "changed during the request\n")?;
         assert_eq!(stop("確認しました。")?, serde_json::json!({}));
@@ -327,7 +368,6 @@ fn managed_requests_ignore_existing_work_and_still_refuse_changed_gaps() -> Resu
         );
         begin()?;
         assert_eq!(stop("確認しました。")?, serde_json::json!({}));
-        assert_eq!(stop("The work is complete.")?["decision"], "block");
     }
     Ok(())
 }
@@ -495,6 +535,42 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
 }
 
 const OWNERS_PATH: &str = "assure.toml";
+
+#[test]
+fn owner_inputs_bind_absent_and_local_maps_to_their_current_bytes() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let absent = BTreeSet::from(["owner map: no owner map; sha256=absent".to_owned()]);
+    assert_eq!(assure::stop(&fixture.root, &catalog)?.inputs.owners, absent);
+
+    let path = fixture.owners("")?;
+    for (text, sha256) in [
+        (
+            "",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        ),
+        (
+            "\n",
+            "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        ),
+        (
+            "",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        ),
+    ] {
+        fs::write(&path, text)?;
+        let outcome = assure::stop(&fixture.root, &catalog)?;
+        assert_eq!(outcome.verdict, Verdict::Admit);
+        assert_eq!(
+            outcome.inputs.owners,
+            BTreeSet::from([format!("owner map: {}; sha256={sha256}", path.display())])
+        );
+    }
+
+    fs::remove_file(&path)?;
+    assert_eq!(assure::stop(&fixture.root, &catalog)?.inputs.owners, absent);
+    Ok(())
+}
 
 #[test]
 fn an_owner_side_map_takes_precedence_over_every_project_revision() -> Result<()> {

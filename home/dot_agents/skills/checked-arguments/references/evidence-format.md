@@ -1,6 +1,9 @@
 # Answer evidence
 
-The managed UserPromptSubmit hook starts a request and supplies its session ID.
+This optional workflow applies only when the user explicitly requests detailed answer evidence.
+Routine answers need a short reason based on completed checks.
+They need no evidence files or proofs.
+Start a request with `dotfiles answer begin` and a hook payload containing its session ID, prompt, and working directory.
 Prepare a UTF-8 draft and a JSON evidence document in a private local workspace.
 Run the installed checker with those exact files.
 

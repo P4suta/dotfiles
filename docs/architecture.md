@@ -45,7 +45,7 @@ The plan runs, in order:
 2. For `pre-commit`, `commit-msg`, and `pre-push`, the process start health probe.
 3. For `pre-commit`, `commit-msg`, `pre-push`, and `post-commit`, the matching `dotguard` gate.
 4. For `pre-push`, the host family evidence gate, then the ready pull request gate.
-5. For `pre-commit` and `pre-push`, the verification gate, which refuses a change that adds code of a shape nothing in the repository verifies.
+5. For `pre-commit` and `pre-push`, the reminder to run applicable project checks and confirm success with a short concrete reason, and the independent ADR content check over the staged or offered source.
 6. For `commit-msg`, the prose checker on the message.
 7. For `pre-commit`, the global Lefthook configuration, then for every hook but `post-commit` and `reference-transaction`, the repository's own Lefthook configuration.
    A repository with its own Lefthook configuration first has its mise configuration trusted, because mise runs in paranoid mode and the hook runs that repository's commands anyway.
@@ -104,18 +104,18 @@ Git's attribute semantics remain an external assumption checked by native regres
 The attribute fuzz corpus uses line-separated fields that the target converts to NUL separators and checks through decoding and canonical marker encoding.
 The owner's configuration names each repository's owners and budgets under `~/.config/assure/repos/`, as [the owner-map decision](adr/keep-the-assure-owner-map-out-of-projects.md) describes.
 An exemption sits in the comment block that precedes the site it exempts.
-`dotfiles assure start` reports the gaps when an agent session starts, and the stop hook refuses to end a turn that leaves a gap in a file it changed.
-The managed request hook records a working tree snapshot, so Stop compares changes made during that request rather than all uncommitted work.
-[Request snapshots](adr/compare-agent-stops-with-request-snapshots.md) preserve the real index and keep the existing publication checks.
-Claude Code and Codex also pass the owner's `reply_language` to this hook to check final reply prose, with at most one continuation, as [the language decision](adr/check-owner-reply-language-at-stop.md) describes.
+Managed sessions run `dotfiles assure remind` and require a short reason based on completed project checks.
+Agents resolve required blocked checks or ask the user for a concrete decision before completion.
+The [confirmation decision](adr/confirm-verification-with-a-short-reason.md) removes automatic answer-evidence submissions and owner-side code-shape holds from completion and publication.
+Explicit `dotfiles assure start`, `dotfiles assure stop`, and answer-evidence commands keep their inspection contracts.
+Claude Code and Codex pass the owner's `reply_language` to `dotfiles assure reply` to check final reply prose, with at most one continuation, as [the language decision](adr/check-owner-reply-language-at-stop.md) describes.
 The hook and every prose channel share the sentence layout rules in `crates/rules/src/prose_rules.rs`.
 They refuse two sentences on one line and a sentence that wraps across adjacent prose lines.
 They report the first line and tell writers to split long sentences when a channel limits line length.
 Headings, labels ending in a colon, lists, tables, code, quotes, and front matter keep their structural line rules.
-The `pre-commit` and `pre-push` hooks refuse a change that adds a gap.
-`pr-workflow ready` also refuses a PR that weakens a budget.
-Existing gaps remain in the session report without requiring an unrelated repair in every PR.
-Merge checks account for inherited code, as [the change-provenance decision](adr/assurance-follows-change-provenance.md) describes.
+Project-owned hooks, required checks, reviews, signatures, and owner authorization remain effective.
+Reply, commit, push, and PR readiness gates check changed personal ADR content without an optional catalog or execution plan.
+The optional catalog checks account for inherited code, as [the change-provenance decision](adr/assurance-follows-change-provenance.md) describes.
 
 ## Gate map
 

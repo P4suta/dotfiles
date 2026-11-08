@@ -1,7 +1,7 @@
 {
-  "revision": "254fef764ac9a6ff9fd1a75a39475a95ae87307b62d4a433926f94562a90de03",
+  "revision": "e1f5d0ada3151495dddf6bf37c8fc1b47fc1f7e5cd7471d85e9ca3423980dc39",
   "outcome": "implemented",
-  "reason": "Maintain the shared editorial, terminology, representation, and executable-example standards. Add stable public resource identities grounded in URI persistence and search documentation, with source-scope validation through the maintained publisher and explicit limits on mechanical evidence.",
+  "reason": "Preserve source review and prose checks without mandatory claim ledgers or routine answer receipts.",
   "evidence": [
     "home/dot_agents/skills/editorial-assurance/SKILL.md",
     "home/dot_agents/skills/editorial-assurance/references/editorial-review.md",
