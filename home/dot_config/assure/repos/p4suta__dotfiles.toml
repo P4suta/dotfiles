@@ -3,6 +3,11 @@
 
 [[owner]]
 shape = "parser"
+path = "crates/platform/src/upstream.rs"
+by = "fuzz/fuzz_targets/upstream.rs"
+
+[[owner]]
+shape = "parser"
 path = "crates/prose/src/house.rs"
 by = "fuzz/fuzz_targets/copyedit_input.rs"
 

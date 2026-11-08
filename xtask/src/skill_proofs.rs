@@ -33,6 +33,25 @@ const KANI_SUBJECT_TESTS: [&str; 3] = [
 ];
 const MUTATION_CAMPAIGN_CASES: usize = 2;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KaniScope {
+    All,
+    Selected,
+}
+
+fn run_kani_checks(
+    scope: KaniScope,
+    driver: impl FnOnce() -> Result<()>,
+    regressions: impl FnOnce() -> Result<()>,
+    subjects: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    if scope == KaniScope::All {
+        driver()?;
+        regressions()?;
+    }
+    subjects()
+}
+
 /// Run native checks and the family's required campaign or measurement budgets.
 ///
 /// # Errors
@@ -1177,7 +1196,7 @@ pub fn verify_sources(root: &Path, sources: &[String]) -> Result<()> {
                     || verify_container_measured(root, ProofCampaign::Ci, sources),
                 )
             } else {
-                verify_kani(root, &manifest)
+                verify_selected_kani(root, &manifest)
             }
         })
     })
@@ -1356,6 +1375,23 @@ pub(crate) fn verify_kani(root: &Path, manifest: &obligations::Manifest) -> Resu
     })
 }
 
+fn verify_selected_kani(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
+    kani_environment_version(root)?;
+    crate::phase_evidence::run(
+        root,
+        "selected Kani subjects",
+        manifest.obligations.len(),
+        || {
+            run_kani_checks(
+                KaniScope::Selected,
+                || verify_kani_driver(root),
+                || verify_kani_subject_regressions(root),
+                || verify_kani_subjects(root, manifest),
+            )
+        },
+    )
+}
+
 /// Verify the answer gate's registered subjects under the installed or explicitly selected bounded policy.
 ///
 /// # Errors
@@ -1444,8 +1480,15 @@ fn verify_answer_container(root: &Path, policy: &dotfiles::bounded::Policy) -> R
 
 fn verify_kani_measured(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     kani_environment_version(root)?;
-    verify_kani_driver(root)?;
-    verify_kani_subject_regressions(root)?;
+    run_kani_checks(
+        KaniScope::All,
+        || verify_kani_driver(root),
+        || verify_kani_subject_regressions(root),
+        || verify_kani_subjects(root, manifest),
+    )
+}
+
+fn verify_kani_subjects(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     let verifier_hash = crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
     let engine_hash = crate::phase_evidence::engine_digest(root)?;
     let (verified, rejected) = run_rule_subjects(
@@ -3223,6 +3266,77 @@ fn execute_rules(prepared: PreparedRules) -> Result<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_proofs_run_their_subjects_without_unrelated_driver_experiments() {
+        use std::cell::Cell;
+        let subjects = Cell::new(false);
+        run_kani_checks(
+            KaniScope::Selected,
+            || anyhow::bail!("an unrelated driver experiment ran"),
+            || anyhow::bail!("an unrelated subject experiment ran"),
+            || {
+                subjects.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(subjects.get());
+        assert!(
+            run_kani_checks(
+                KaniScope::Selected,
+                || Ok(()),
+                || Ok(()),
+                || anyhow::bail!("selected subject failed")
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("selected subject failed")
+        );
+    }
+
+    #[test]
+    fn full_proofs_require_both_driver_controls_before_running_subjects() {
+        use std::cell::{Cell, RefCell};
+        let phases = RefCell::new(Vec::new());
+        run_kani_checks(
+            KaniScope::All,
+            || {
+                phases.borrow_mut().push("driver");
+                Ok(())
+            },
+            || {
+                phases.borrow_mut().push("regressions");
+                Ok(())
+            },
+            || {
+                phases.borrow_mut().push("subjects");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(*phases.borrow(), ["driver", "regressions", "subjects"]);
+        for driver_fails in [false, true] {
+            let entered = Cell::new(false);
+            assert!(
+                run_kani_checks(
+                    KaniScope::All,
+                    || if driver_fails {
+                        anyhow::bail!("driver failed")
+                    } else {
+                        Ok(())
+                    },
+                    || anyhow::bail!("regression failed"),
+                    || {
+                        entered.set(true);
+                        Ok(())
+                    },
+                )
+                .is_err()
+            );
+            assert!(!entered.get());
+        }
+    }
 
     #[test]
     fn an_incomplete_harness_preserves_every_individual_outcome() {

@@ -102,6 +102,11 @@ enum Commands {
         #[arg(long = "reply-language")]
         language: Option<dotfiles::assure::ReplyLanguage>,
     },
+    /// Preserve verified publisher sources while checking authored changes.
+    Upstream {
+        #[command(subcommand)]
+        request: UpstreamRequest,
+    },
     /// Refuses work on a host whose process creation stalls, as it does when the Defender scan engine stops responding.
     Health {
         /// Prints a refusal to standard output, which a session start hook adds to the agent's context, and exits successfully.
@@ -208,6 +213,78 @@ enum RepositoryRequest {
     },
 }
 
+#[derive(Subcommand)]
+enum UpstreamRequest {
+    RegisterArchive {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        archive: PathBuf,
+        #[arg(long)]
+        prefix: PathBuf,
+        #[arg(long)]
+        sha256: String,
+        #[arg(long)]
+        origin: String,
+    },
+    RegisterFiles {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        origin: String,
+    },
+    Tidy {
+        #[arg(long, required = true)]
+        staged: bool,
+        paths: Vec<PathBuf>,
+    },
+}
+
+fn upstream(request: UpstreamRequest) -> Result<()> {
+    match request {
+        UpstreamRequest::RegisterArchive {
+            root,
+            directory,
+            archive,
+            prefix,
+            sha256,
+            origin,
+        } => {
+            platform::upstream::register(
+                &root,
+                platform::upstream::Source {
+                    repository: platform::upstream::repository(&root)?,
+                    directory,
+                    archive,
+                    prefix,
+                    sha256,
+                    origin,
+                },
+            )?;
+            println!("Registered reviewed upstream archive");
+        }
+        UpstreamRequest::RegisterFiles {
+            root,
+            directory,
+            manifest,
+            origin,
+        } => {
+            platform::upstream::register_preserved(&root, directory, manifest, origin)?;
+            println!("Registered reviewed preserved files");
+        }
+        UpstreamRequest::Tidy { staged: _, paths } => {
+            dotfiles::assure::tidy_upstream(&std::env::current_dir()?, &paths)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 #[derive(Clone, Copy, Subcommand)]
 enum HerdrAction {
@@ -263,6 +340,7 @@ fn run(mut cli: Cli) -> Result<()> {
         Commands::CodexHooks { request } => std::process::exit(codex_hooks::run(request)?),
         Commands::Notifications { action } => dotfiles::notifications::run(action)?,
         Commands::Assure { point, language } => assure(point, language)?,
+        Commands::Upstream { request } => upstream(request)?,
         Commands::Health { session } => health(session)?,
         Commands::Hook { hook, arguments } => dotfiles::hooks::run(hook, &arguments)?,
         Commands::PostCommitWorker { producer } => {

@@ -152,6 +152,8 @@ enum Action {
     },
     /// Install the persisted prose checker and its pinned linters, and remove retired reply checks.
     InstallProse,
+    /// Refresh only the native runtime executable from the current source.
+    InstallRuntimeBinary,
     /// Refuse a lint baseline that admits more than it did at `--base`, or rewrite every baseline from the tracked files with `--write`.
     Baselines {
         #[arg(long, conflicts_with = "write")]
@@ -534,6 +536,7 @@ fn run() -> Result<()> {
             xtask::skill_proofs::verify_answer(&cli.root, policy.as_deref())?;
         }
         Action::InstallProse => install_prose(&cli.root)?,
+        Action::InstallRuntimeBinary => install_runtime_binary(&cli.root)?,
         Action::Proofs {
             scope,
             sources,
@@ -909,6 +912,20 @@ fn install_answer_prover(root: &Path) -> Result<()> {
             lean_version: dotfiles::answer::lean_version()?.to_owned(),
         })?,
     )?;
+    Ok(())
+}
+
+fn install_runtime_binary(root: &Path) -> Result<()> {
+    let binary = release_binary(root, "dotfiles", "dotfiles")?;
+    let target = user_directory()?
+        .join(".local/bin")
+        .join(format!("dotfiles{}", std::env::consts::EXE_SUFFIX));
+    platform::aside::install(&binary, &target)?;
+    let status = platform::tool::external(&target).arg("--help").status()?;
+    ensure!(
+        status.success(),
+        "installed runtime executable failed: {status}"
+    );
     Ok(())
 }
 

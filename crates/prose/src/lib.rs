@@ -924,10 +924,95 @@ pub(crate) fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>
     Ok(inputs)
 }
 
+fn authored_paragraphs(mut current: Input, baseline: &str) -> Input {
+    let mut remaining = BTreeMap::<&str, usize>::new();
+    for paragraph in baseline.split_inclusive("\n\n") {
+        *remaining.entry(paragraph).or_default() += 1;
+    }
+    let mut text = String::new();
+    let mut lines = Vec::new();
+    let mut offset = 0;
+    for paragraph in current.text.split_inclusive("\n\n") {
+        let count = paragraph.lines().count();
+        let inherited = remaining
+            .get_mut(paragraph)
+            .is_some_and(rules::third_party_rules::consume);
+        if !inherited {
+            text.push_str(paragraph);
+            lines.extend_from_slice(&current.lines[offset..offset + count]);
+        }
+        offset += count;
+    }
+    current.text = text;
+    current.lines = lines;
+    current
+}
+
+/// # Errors
+/// Rejects unavailable temporary storage or an unsuccessful comment scan.
+pub fn upstream_comment_inputs(
+    root: &Path,
+    path: &str,
+    original: &[u8],
+    current: &[u8],
+) -> Result<Vec<Input>> {
+    let temporary = tempfile::tempdir()?;
+    let name = Path::new(path)
+        .file_name()
+        .context("upstream source has no filename")?;
+    let before = temporary.path().join("before").join(name);
+    let after = temporary.path().join("after").join(name);
+    fs::create_dir_all(
+        before
+            .parent()
+            .context("upstream baseline has no directory")?,
+    )?;
+    fs::create_dir_all(
+        after
+            .parent()
+            .context("upstream candidate has no directory")?,
+    )?;
+    fs::write(&before, original)?;
+    fs::write(&after, current)?;
+    let baseline = comment_batch(root, &[before.to_string_lossy().into_owned()])?
+        .into_iter()
+        .map(|input| input.text)
+        .collect::<String>();
+    Ok(
+        comment_batch(root, &[after.to_string_lossy().into_owned()])?
+            .into_iter()
+            .map(|mut input| {
+                path.clone_into(&mut input.path);
+                authored_paragraphs(input, &baseline)
+            })
+            .filter(|input| !input.text.is_empty())
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod comment_tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn upstream_paragraphs_preserve_locations_and_cannot_hide_an_extra_copy() {
+        let baseline = "Publisher prose. More publisher prose.\n\n";
+        let current = Input::new(
+            "vendor.rs",
+            &format!("{baseline}Authored prose. Another sentence.\n\n{baseline}"),
+            false,
+        );
+        let authored = authored_paragraphs(current, baseline);
+        assert_eq!(
+            authored.text,
+            format!("Authored prose. Another sentence.\n\n{baseline}")
+        );
+        assert_eq!(authored.lines, [3, 4, 5, 6]);
+        let unchanged = authored_paragraphs(Input::new("vendor.rs", baseline, false), baseline);
+        assert_eq!(unchanged.text, "");
+        assert_eq!(unchanged.lines, [] as [usize; 0]);
+    }
 
     #[test]
     fn a_scan_longer_than_the_windows_command_line_reports_every_source() -> Result<()> {
@@ -1087,7 +1172,20 @@ fn house_findings(bundle: &Bundle, input: &Input) -> Result<Vec<Finding>> {
 /// Returns an error when the bundle fails verification, `OComment` can't start or scan the files, or Vale fails to run or report.
 pub fn check_comments(bundle: &Bundle, root: &Path, paths: &[String]) -> Result<Vec<Finding>> {
     bundle.verify()?;
-    check_inputs(bundle, &comment_inputs(root, paths)?)
+    let mut ordinary = Vec::new();
+    let mut inputs = Vec::new();
+    for path in paths {
+        if let Some(original) = platform::upstream::original(root, path)? {
+            let current = fs::read(root.join(path))?;
+            if original != current {
+                inputs.extend(upstream_comment_inputs(root, path, &original, &current)?);
+            }
+        } else {
+            ordinary.push(path.clone());
+        }
+    }
+    inputs.extend(comment_inputs(root, &ordinary)?);
+    check_inputs(bundle, &inputs)
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1207,6 +1305,11 @@ fn scan(
         if !in_scope
             || !fs::symlink_metadata(root.join(&path)).is_ok_and(|metadata| metadata.is_file())
         {
+            continue;
+        }
+        if platform::upstream::original(root, &path)?.is_some_and(|original| {
+            fs::read(root.join(&path)).is_ok_and(|current| current == original)
+        }) {
             continue;
         }
         let mut skipped = false;

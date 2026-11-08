@@ -416,6 +416,7 @@ dependencies = [
  "rules",
  "serde",
  "serde_json",
+ "sha2",
  "tar",
  "tempfile",
  "toml",
@@ -1208,13 +1209,16 @@ dependencies = [
  "anyhow",
  "clap",
  "find-msvc-tools",
+ "flate2",
  "model",
  "portable-pty",
  "rules",
  "serde",
  "serde_json",
  "sha2",
+ "tar",
  "tempfile",
+ "url",
 ]
 
 [[package]]

@@ -15,6 +15,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -24,6 +25,61 @@ pub const CATALOG: &str = ".config/assure/shapes.toml";
 
 /// The tracked repository file read only during migration to the owner's configuration.
 pub const OWNERS: &str = "assure.toml";
+
+/// # Errors
+/// Rejects missing staged evidence, changed publisher bytes, or authored prose findings.
+pub fn tidy_upstream(root: &Path, paths: &[PathBuf]) -> Result<()> {
+    let mut ordinary = Vec::new();
+    for path in paths {
+        let relative = path
+            .to_str()
+            .context("staged source path is not UTF-8")?
+            .replace('\\', "/");
+        let read = |path: &Path| -> Result<Vec<u8>> {
+            let relative = path
+                .to_str()
+                .context("staged evidence path is not UTF-8")?
+                .replace('\\', "/");
+            let output = Tool::Git
+                .command()
+                .current_dir(root)
+                .args(["show", &format!(":{relative}")])
+                .output()?;
+            ensure!(
+                output.status.success(),
+                "staged upstream evidence is missing: {relative}"
+            );
+            Ok(output.stdout)
+        };
+        let Some(original) = platform::upstream::original_with(root, &relative, read)? else {
+            ordinary.push(path);
+            continue;
+        };
+        let current = read(path)?;
+        if current != original {
+            let inputs = prose::upstream_comment_inputs(root, &relative, &original, &current)?;
+            if !inputs.is_empty() {
+                let findings = prose::check_inputs(&prose::Bundle::installed()?, &inputs)?;
+                ensure!(
+                    findings.is_empty(),
+                    "authored upstream comments need correction:\n{}",
+                    prose::render(&findings)
+                );
+            }
+        }
+        println!("Preserved publisher prose in {relative}");
+    }
+    if !ordinary.is_empty() {
+        let status = Tool::Ocomment
+            .command()
+            .current_dir(root)
+            .args(["fix", "--tidy", "--staged", "--"])
+            .args(ordinary)
+            .status()?;
+        ensure!(status.success(), "staged prose tidy failed: {status}");
+    }
+    Ok(())
+}
 const REPOS: &str = "repos";
 const INITIAL_CATALOG_VERSION: u32 = 1;
 const COMPARISON_NAME: &str = "Assure";
@@ -823,10 +879,126 @@ fn survey_with(
         }
     }
     let files = contents(root, tree, &wanted)?;
+    result.gaps = source_gaps(catalog, &owners, &candidates, &scanned, &files, &all)?;
+    let (originals, original_paths) = upstream_baselines(root, tree, &wanted, &files, &mut result)?;
+    if !original_paths.is_empty() {
+        let original_candidates = candidates
+            .iter()
+            .filter(|path| original_paths.contains(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        let original_scanned = scanned
+            .iter()
+            .filter(|path| original_paths.contains(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut prior = source_gaps(
+            catalog,
+            &owners,
+            &original_candidates,
+            &original_scanned,
+            &originals,
+            &all,
+        )?;
+        prior.retain(|gap| {
+            !matches!(gap.kind, Kind::Shape(_)) || files.get(&gap.path) == originals.get(&gap.path)
+        });
+        let changed = platform::upstream::changed_findings(
+            prior.iter().map(|gap| gap.key.as_slice()),
+            result.gaps.iter().map(|gap| gap.key.as_slice()),
+        )
+        .into_iter()
+        .map(<[u8]>::to_vec)
+        .collect::<BTreeSet<_>>();
+        result.gaps.retain(|gap| changed.contains(&gap.key));
+    }
+    Ok(result)
+}
+
+type SourceFiles = BTreeMap<String, Vec<u8>>;
+fn upstream_baselines(
+    root: &Path,
+    tree: &Tree,
+    wanted: &[String],
+    files: &SourceFiles,
+    result: &mut Survey,
+) -> Result<(SourceFiles, BTreeSet<String>)> {
+    let mut originals = files.clone();
+    let mut original_paths = BTreeSet::new();
+    for source in platform::upstream::sources(root)? {
+        if !wanted
+            .iter()
+            .any(|path| Path::new(path).starts_with(&source.directory))
+        {
+            continue;
+        }
+        let archive = source
+            .archive
+            .to_str()
+            .context("upstream archive path is not UTF-8")?
+            .replace('\\', "/");
+        result.owning.insert(archive.clone());
+        write!(
+            result.owner_input,
+            "; upstream {} sha256={}",
+            source.directory.display(),
+            source.sha256
+        )?;
+        let bytes = contents(root, tree, std::slice::from_ref(&archive))?
+            .remove(&archive)
+            .context("upstream archive is absent from the surveyed snapshot")?;
+        for (path, bytes) in source.originals(&bytes)? {
+            if files.contains_key(&path) {
+                original_paths.insert(path.clone());
+                originals.insert(path, bytes);
+            }
+        }
+    }
+    for source in platform::upstream::preserved_sources(root)? {
+        if !wanted.iter().any(|path| source.files.contains_key(path)) {
+            continue;
+        }
+        let manifest = source
+            .manifest
+            .to_str()
+            .context("preserved manifest path is not UTF-8")?
+            .replace('\\', "/");
+        result.owning.insert(manifest.clone());
+        write!(
+            result.owner_input,
+            "; preserved {} sha256={}",
+            source.directory.display(),
+            source.sha256
+        )?;
+        let bytes = contents(root, tree, std::slice::from_ref(&manifest))?
+            .remove(&manifest)
+            .context("preserved manifest is absent from the surveyed snapshot")?;
+        source.verify_manifest(&bytes)?;
+        for (path, expected) in source.files {
+            if files
+                .get(&path)
+                .is_some_and(|bytes| digest(bytes) == expected)
+            {
+                original_paths.insert(path);
+            }
+        }
+    }
+    Ok((originals, original_paths))
+}
+
+fn source_gaps(
+    catalog: &Catalog,
+    owners: &Owners,
+    candidates: &[String],
+    scanned: &[String],
+    files: &BTreeMap<String, Vec<u8>>,
+    all: &[String],
+) -> Result<Vec<Gap>> {
+    let mut gaps = Vec::new();
     let corpus_present = |target: &str| {
         corpus_of(target).is_some_and(|corpus| all.iter().any(|path| path.starts_with(&corpus)))
     };
-    for path in &candidates {
+    for path in candidates {
         let Some(bytes) = files.get(path) else {
             continue;
         };
@@ -837,7 +1009,7 @@ fn survey_with(
         let mut seen: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
         for shape in &catalog.shapes {
             let marker = contains(bytes, shape.marker.as_bytes());
-            let owner = owner_of(&owners, shape, path, |by| {
+            let owner = owner_of(owners, shape, path, |by| {
                 files
                     .get(by)
                     .is_some_and(|text| contains(text, shape.marker.as_bytes()))
@@ -862,7 +1034,7 @@ fn survey_with(
                     let occurrence = seen.entry(key.clone()).or_default();
                     *occurrence += 1;
                     key.extend_from_slice(format!("\0{occurrence}").as_bytes());
-                    result.gaps.push(Gap {
+                    gaps.push(Gap {
                         shape: shape.id.clone(),
                         path: path.clone(),
                         line: index + 1,
@@ -876,13 +1048,13 @@ fn survey_with(
     if let Some(anti) = &catalog.anti_patterns
         && !scanned.is_empty()
     {
-        result.gaps.extend(anti_patterns(
+        gaps.extend(anti_patterns(
             &catalog.directory.join(&anti.config),
-            &scanned,
-            &files,
+            scanned,
+            files,
         )?);
     }
-    Ok(result)
+    Ok(gaps)
 }
 
 /// One finding of `ast-grep scan --json=stream`.
