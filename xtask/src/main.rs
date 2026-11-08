@@ -365,6 +365,13 @@ fn check_prose(root: &Path, reference: &str, checks: &mut Checks) {
         xtask::lint::check(root, &xtask::lint::source_files(root)?, true, reference)
     });
     checks.run("prose.adr", || xtask::adr::generate(root, true));
+    checks.run("prose.adr-content", || {
+        dotfiles::assure::check_adrs(
+            root,
+            &dotfiles::assure::Tree::Commit(dotfiles::assure::resolve(root, reference)?),
+            &dotfiles::assure::Tree::WorkingTree,
+        )
+    });
     checks.run("prose.editorconfig", || xtask::quality::editorconfig(root));
     checks.run("prose.comments", || xtask::quality::comment_scopes(root));
     checks.run("prose.comment-style", || {

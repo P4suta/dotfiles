@@ -933,8 +933,19 @@ fn portability(path: &Path, text: &str, interpreter: Option<&str>) -> Result<Vec
 /// # Errors
 /// Returns an error when reading the file or a linter's output fails.
 pub fn file(path: &Path, interpreter: Option<&str>) -> Result<Report> {
+    let adr_path =
+        prose::adr::is_record(&path.to_string_lossy()).then(|| path.to_string_lossy().into_owned());
     let path = crate::canonical(path)?;
     let path = path.as_path();
+    let root = repository(path)?;
+    let check_adr = adr_path.is_some()
+        && match root.as_deref().map(prose::standard).transpose()? {
+            Some(prose::prose_rules::Standard::Skips) => false,
+            Some(prose::prose_rules::Standard::Undetermined) => anyhow::bail!(
+                "ADR ownership is undetermined; declare the repository's prose.standard setting"
+            ),
+            Some(prose::prose_rules::Standard::Applies) | None => true,
+        };
     let mut prefix = Vec::new();
     fs::File::open(path)?
         .take(FIRST_LINE_BYTES)
@@ -950,7 +961,10 @@ pub fn file(path: &Path, interpreter: Option<&str>) -> Result<Report> {
         };
     }
     let metadata = fs::metadata(path)?;
-    if kind == FileType::Other && !(metadata.is_file() && metadata.len() <= MAX_FILE_BYTES) {
+    if kind == FileType::Other
+        && !check_adr
+        && !(metadata.is_file() && metadata.len() <= MAX_FILE_BYTES)
+    {
         return Ok(Report::default());
     }
     ensure!(
@@ -963,9 +977,15 @@ pub fn file(path: &Path, interpreter: Option<&str>) -> Result<Report> {
     } else {
         String::new()
     };
-    let root = repository(path)?;
     let mut report = Report::default();
     let mut outcomes = Vec::new();
+    if check_adr && let Some(adr_path) = adr_path {
+        let findings = prose::adr::check(&adr_path, &fs::read_to_string(path)?);
+        if !findings.is_empty() {
+            outcomes.push(Outcome::Findings);
+            report.findings.push(prose::render(&findings));
+        }
+    }
     for &linter in rules::linters(kind) {
         match lint(path, linter, root.as_deref()) {
             Ok((outcome, finding)) => {

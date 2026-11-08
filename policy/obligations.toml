@@ -882,6 +882,18 @@ fn reject_an_accepted_record_that_later_records_changed() {
 fn reject_a_new_record_that_takes_the_next_number() {
     assert!(identity(Some(production::LAST_NUMBERED + 1), false) == Identity::Numbered);
 }
+#[kani::proof]
+fn reject_an_adr_over_its_word_budget() {
+    assert!(production::content_verdict(production::Content { words: production::RECORD_WORD_LIMIT + 1, characters: 0, complete: true }) == production::ContentVerdict::Admit);
+}
+#[kani::proof]
+fn reject_an_adr_over_its_character_budget() {
+    assert!(production::content_verdict(production::Content { words: 0, characters: production::RECORD_CHARACTER_LIMIT + 1, complete: true }) == production::ContentVerdict::Admit);
+}
+#[kani::proof]
+fn reject_an_incomplete_adr() {
+    assert!(production::content_verdict(production::Content { words: 0, characters: 0, complete: false }) == production::ContentVerdict::Admit);
+}
 '''
 
 [[obligation]]

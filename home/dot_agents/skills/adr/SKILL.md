@@ -1,33 +1,38 @@
 ---
 name: adr
 description: >-
-  Record consequential architectural decisions and maintain their history with ADRs.
-  Use when choosing or changing a durable design, not for routine edits, task notes, or duplicate system documentation.
+  Require concise architecture decisions with evidence, fair alternatives, and confirmation.
+  Use before consequential design choices and when reviewing or replacing ADRs, not for routine edits or progress logs.
 ---
 
 # Architecture decision records
 
-Read the project's existing decisions before proposing a design.
-Preserve existing filenames, references, collection locations, and status vocabulary.
-In personal repositories, name new records `<decision>.md` and add `date: YYYY-MM-DD` to their front matter.
-Use `docs/adr/` for a new collection.
-Follow the contribution rules of another owner's repository.
+Read existing decisions and governing primary sources before choosing a design.
+Record one consequential choice before implementation relies on it.
+Routine implementation details need no architecture decision record (ADR).
 
-Where an index generator exists, derive a deterministic order from record metadata.
-After merging concurrent additions, keep every source record and regenerate a conflicted index.
-Resolve competing edits to the same record explicitly.
+Use short paragraphs under Context, Decision, Alternatives, Consequences, and Confirmation.
+Preserve an existing project's equivalent headings, paths, and status vocabulary.
+State the problem and decisive constraint, chosen behavior and evidence, strongest possible alternative including the status quo, accepted cost, and observable confirmation.
+Give a concrete trigger for reconsideration.
+Use `checked-arguments` to challenge the decisive premise and strongest objection.
+Keep facts, assumptions, proposals, and implemented behavior distinct.
 
-Write an ADR when a choice affects a public contract, dependency direction, state model, trust boundary, persistence, compatibility, or a major operational constraint.
-Routine refactors and implementation details need none.
+Stay within the enforced size budget.
+Link evidence and implementation details without moving the rationale into an appendix.
+Remove repetition, generic benefits, progress logs, and ceremonial sections.
+A material evidence gap keeps the record proposed.
+Only the owner's acceptance of the reviewed choice permits accepted status.
+Reuse explicit acceptance already given.
 
-State the problem, constraints, decision, rejected alternatives with reasons, and costs and benefits, under `Status`, `Context`, `Decision`, and `Consequences`.
-Name the decision, not the work behind it.
-Link to code, invariants, tests, or specifications instead of copying them.
-Separate measured evidence, assumptions, proposals, and implemented behavior.
+In personal repositories, name a new record `docs/adr/<decision>.md` with a front-matter date.
+Preserve historical filenames.
+Record changed decisions in linked successors and supersede the original only after acceptance.
+Regenerate an existing index from its records.
 
-Land a new decision with the change that relies on it.
-Mark it accepted only when the user accepts it.
-Correct factual errors in place.
-Record a changed decision in a new linked ADR, and mark the old one superseded or partly superseded.
-Never rewrite an old ADR to claim the current design as the original decision.
-Never write summaries, handoffs, progress logs, or verification narratives that repeat an ADR or the code.
+Run the shared ADR checker and the project's checks.
+Agent write and completion gates must reject oversize or incomplete changed records.
+A structural pass proves neither sound reasoning nor factual truth.
+
+[Nygard](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions), [Markdown Architectural Decision Records](https://github.com/adr/madr/blob/4.0.0/template/adr-template.md), and the [Amazon Web Services lifecycle](https://docs.aws.amazon.com/prescriptive-guidance/latest/architectural-decision-records/adr-process.html) supply the record and review foundations.
+The enforced size budget is owner policy.

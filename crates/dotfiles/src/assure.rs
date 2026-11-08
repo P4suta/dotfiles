@@ -1036,6 +1036,47 @@ pub fn changed(root: &Path, before: &Tree, after: &Tree) -> Result<BTreeSet<Stri
     Ok(listed.into_iter().collect())
 }
 
+fn check_adr_paths(root: &Path, after: &Tree, paths: &BTreeSet<String>) -> Result<()> {
+    let paths: Vec<_> = paths
+        .iter()
+        .filter(|path| prose::adr::is_record(path))
+        .cloned()
+        .collect();
+    if paths.is_empty() {
+        return Ok(());
+    }
+    match prose::standard(root)? {
+        prose::prose_rules::Standard::Skips => return Ok(()),
+        prose::prose_rules::Standard::Applies => {}
+        prose::prose_rules::Standard::Undetermined => {
+            bail!("ADR ownership is undetermined; declare the repository's prose.standard setting")
+        }
+    }
+    let mut findings = Vec::new();
+    for (path, bytes) in contents(root, after, &paths)? {
+        let text = String::from_utf8(bytes).with_context(|| format!("read ADR {path} as UTF-8"))?;
+        findings.extend(prose::adr::check(&path, &text));
+    }
+    if findings.is_empty() {
+        return Ok(());
+    }
+    Err(Refusal::new(
+        "adr.content",
+        "a changed architecture decision record violates the concise record contract",
+        "shorten the record and fill its required content, then rerun the check",
+    )
+    .evidence(prose::render(&findings))
+    .into())
+}
+
+/// Check changed ADRs in their exact index, commit, or working-tree state.
+///
+/// # Errors
+/// Returns an error when Git, ownership, text decoding, or the ADR check fails.
+pub fn check_adrs(root: &Path, before: &Tree, after: &Tree) -> Result<()> {
+    check_adr_paths(root, after, &changed(root, before, after)?)
+}
+
 fn renames_from_diff(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
     const MAX_SIMILARITY: u8 = 100;
     if bytes.is_empty() {
@@ -1717,6 +1758,7 @@ fn decide_with(
             changed.retain(|path| inherited_files.get(path) != current_files.get(path));
         }
     }
+    check_adr_paths(root, after, &changed)?;
     let old_keys: Vec<_> = old
         .keys()
         .into_iter()
@@ -2221,10 +2263,17 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                     })
                     .transpose()?
                     .flatten();
-                let outcome = request_stop(&root, &catalog, baseline.as_ref())?;
-                report_inputs(&outcome);
-                if let Some(refusal) = outcome.refusal(&catalog) {
-                    reasons.push(refusal.text());
+                match request_stop(&root, &catalog, baseline.as_ref()) {
+                    Ok(outcome) => {
+                        report_inputs(&outcome);
+                        if let Some(refusal) = outcome.refusal(&catalog) {
+                            reasons.push(refusal.text());
+                        }
+                    }
+                    Err(error) => {
+                        let refusal = error.downcast::<Refusal>()?;
+                        reasons.push(refusal.text());
+                    }
                 }
             }
             let reason = (!reasons.is_empty()).then(|| reasons.join("\n\n"));

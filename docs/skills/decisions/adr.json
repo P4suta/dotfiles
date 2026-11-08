@@ -1,12 +1,16 @@
 {
-  "revision": "e3c6c1926bcb1a3438f8a3048b57a487caa94c2df7d99e0a6eb6db1dfb8471a9",
+  "revision": "116ef8c7532ffed1560da5a345d5c5b03e749a7ee3bfcbb20705b149190227eb",
   "outcome": "implemented",
-  "reason": "Use descriptive, dated records for concurrent work across personal repositories, preserve historical references, and expose the rule through shared policy while recording the remaining enforcement gap.",
+  "reason": "The shared checker rejects oversized or incomplete changed records at write, completion, and publication boundaries. The skill keeps architecture rationale, alternatives, confirmation, and owner acceptance distinct from structural admission, while untouched historical records and external repository conventions remain intact.",
   "evidence": [
     "home/dot_agents/skills/adr/SKILL.md",
     "home/.chezmoitemplates/partials/agent_policy",
     "docs/agent-instruction-audit.md",
-    "xtask/src/adr.rs"
+    "xtask/src/adr.rs",
+    "crates/prose/src/adr.rs",
+    "crates/rules/src/adr_rules.rs",
+    "crates/dotfiles/tests/assure.rs",
+    "crates/dotfiles/tests/lint_hook.rs"
   ],
   "revisit": null
 }

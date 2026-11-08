@@ -4,7 +4,7 @@
     {"mode":"0755","path":".agents","sha256":null,"type":"dir"},
     {"mode":"0755","path":".agents/skills","sha256":null,"type":"dir"},
     {"mode":"0755","path":".agents/skills/adr","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/adr/SKILL.md","sha256":"29fa57d18d1145bb30a80139487f7175c05bd50e28ff23cb78255dc5404ab4fc","type":"file"},
+    {"mode":"0644","path":".agents/skills/adr/SKILL.md","sha256":"f8c1a74be431c030b86b49c96be73d724b2f3065260f6a14c6de2f0e80f83a1d","type":"file"},
     {"mode":"0755","path":".agents/skills/android-platform-guidelines","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/android-platform-guidelines/SKILL.md","sha256":"310bfe3a6fd2f027c6d05e8009ddfc3e88ac7e521e1c88a96d4d73d15a6b7732","type":"file"},
     {"mode":"0755","path":".agents/skills/apple-notarization","sha256":null,"type":"dir"},

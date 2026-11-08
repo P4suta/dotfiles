@@ -137,6 +137,7 @@
 | [2026-11-04 Preserve active tools behind managed guards](preserve-active-tools-behind-managed-guards.md) | proposed |  |
 | [2026-11-04 Require no CLI review for high PRs](require-no-cli-review-for-high-prs.md) | accepted |  |
 | [2026-11-05 Route desktop decisions through macOS guidance](route-desktop-decisions-through-macos-guidance.md) | accepted |  |
+| [2026-11-06 Enforce concise architecture decision records](require-evidence-before-accepting-architecture-decisions.md) | proposed |  |
 | [2026-11-07 Attach figures without storage branches](attach-figures-without-storage-branches.md) | accepted |  |
 | [2026-11-07 Authorize verified figure retirement](authorize-verified-figure-retirement.md) | accepted |  |
 | [2026-11-07 Capture reusable knowledge as shared skills](capture-reusable-knowledge-as-shared-skills.md) | accepted |  |

@@ -53,6 +53,54 @@ fn init_repository(root: &Path) {
     assert!(output.status.success(), "{output:?}");
 }
 
+const CONCISE_ADR: &str = "---\nstatus: proposed\ndate: 2026-11-06\n---\n# Bound the retry queue\n\n## Context\nAn unavailable server can exhaust memory.\n\n## Decision\nKeep only the latest pending request.\n\n## Alternatives\nAn unlimited queue retains every request but can exhaust memory.\n\n## Consequences\nOlder pending requests are lost.\n\n## Confirmation\nDisconnect the server and verify that only one request remains queued.\n";
+
+#[test]
+fn an_adr_write_blocks_excess_length_and_admits_a_concise_record() {
+    let root = tempfile::tempdir().unwrap();
+    let relative = "docs/adr/bound-the-retry-queue.md";
+    let path = root.path().join(relative);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        format!("{CONCISE_ADR}{}", "More detail.\n".repeat(200)),
+    )
+    .unwrap();
+    let (_, blocked) = hook(
+        root.path(),
+        "lint-hook",
+        &write_event(root.path(), relative),
+    );
+    assert!(blocked.contains("ADR.WordBudget"), "{blocked}");
+    assert!(blocked.contains("\"decision\":\"block\""), "{blocked}");
+    std::fs::write(&path, CONCISE_ADR).unwrap();
+    let (success, clean) = hook(
+        root.path(),
+        "lint-hook",
+        &write_event(root.path(), relative),
+    );
+    assert!(success && !clean.contains("block"), "{clean}");
+}
+
+#[test]
+fn an_adr_write_blocks_empty_required_content() {
+    let root = tempfile::tempdir().unwrap();
+    let relative = "docs/adr/bound-the-retry-queue.md";
+    let path = root.path().join(relative);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        CONCISE_ADR.replace("Keep only the latest pending request.", ""),
+    )
+    .unwrap();
+    let (_, blocked) = hook(
+        root.path(),
+        "lint-hook",
+        &write_event(root.path(), relative),
+    );
+    assert!(blocked.contains("ADR.RequiredContent"), "{blocked}");
+}
+
 #[test]
 fn a_shell_finding_blocks_and_the_fixed_file_is_admitted() {
     let root = tempfile::tempdir().unwrap();

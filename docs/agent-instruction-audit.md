@@ -127,13 +127,14 @@ Judgment: the shared `adr` skill supplies the gate, and determining whether find
 
 > - In personal repositories, use stable descriptive document paths and name new ADRs after the decision with a front-matter date, as the shared `adr` skill describes.
 
-Follow-up F8: the shared `adr` skill states the convention, and `xtask/src/adr.rs` checks the dotfiles collection.
-Other personal repositories have no shared ADR gate.
-Choosing a descriptive name still requires reading the decision.
+Follow-up F8: `xtask/src/adr.rs` checks record identities and the dotfiles index.
+The shared `prose::adr` module checks size and required content in changed personal records through write, completion, and publication gates.
+Choosing a descriptive name and assessing the rationale still require direct review.
 
 >   Preserve existing filenames and references, and regenerate shared indexes from source records when the repository has a generator.
 
-Follow-up F8: the dotfiles index has a generator, but no shared gate checks index drift and historical reference preservation across personal repositories.
+Follow-up F8: the dotfiles generator rejects index drift, and other personal repositories keep their own index commands.
+Historical reference preservation remains a review obligation.
 
 > - Use decision-naming before labeling a plan, design, diagram, branch, API, schema, or file, so names carry the decision or property instead of v1, v2, new, old, final, or next.
 

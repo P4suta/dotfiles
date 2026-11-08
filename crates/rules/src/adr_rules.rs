@@ -42,6 +42,37 @@ pub enum Verdict {
     HiddenSuccessor,
 }
 
+pub const RECORD_WORD_LIMIT: usize = 200;
+pub const RECORD_CHARACTER_LIMIT: usize = 2_000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Content {
+    pub words: usize,
+    pub characters: usize,
+    pub complete: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContentVerdict {
+    Admit,
+    WordBudget,
+    CharacterBudget,
+    Incomplete,
+}
+
+#[must_use]
+pub const fn content_verdict(content: Content) -> ContentVerdict {
+    if content.words > RECORD_WORD_LIMIT {
+        ContentVerdict::WordBudget
+    } else if content.characters > RECORD_CHARACTER_LIMIT {
+        ContentVerdict::CharacterBudget
+    } else if !content.complete {
+        ContentVerdict::Incomplete
+    } else {
+        ContentVerdict::Admit
+    }
+}
+
 /// An amended or superseded record names the records that changed it, and no other status names any.
 #[must_use]
 pub const fn verdict(status: Status, successors: usize) -> Verdict {
@@ -112,6 +143,28 @@ pub const fn identity(number: Option<u16>, dated: bool) -> Identity {
 mod proofs {
     use super::*;
 
+    pub fn spec_content(content: Content) {
+        assert_eq!(
+            content_verdict(content) == ContentVerdict::Admit,
+            content.words <= RECORD_WORD_LIMIT
+                && content.characters <= RECORD_CHARACTER_LIMIT
+                && content.complete
+        );
+    }
+
+    #[cfg(kani)]
+    #[kani::proof]
+    fn only_complete_records_within_both_budgets_are_admitted() {
+        let content = Content {
+            words: kani::any(),
+            characters: kani::any(),
+            complete: kani::any(),
+        };
+        spec_content(content);
+        kani::cover!(content_verdict(content) == ContentVerdict::Admit);
+        kani::cover!(content_verdict(content) == ContentVerdict::WordBudget);
+    }
+
     pub fn spec_identity(number: Option<u16>, dated: bool) {
         let result = identity(number, dated);
         assert_eq!(
@@ -180,6 +233,26 @@ mod proofs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn record_admission_checks_both_budgets_and_completeness() {
+        for words in [0, RECORD_WORD_LIMIT, RECORD_WORD_LIMIT + 1, usize::MAX] {
+            for characters in [
+                0,
+                RECORD_CHARACTER_LIMIT,
+                RECORD_CHARACTER_LIMIT + 1,
+                usize::MAX,
+            ] {
+                for complete in [false, true] {
+                    proofs::spec_content(Content {
+                        words,
+                        characters,
+                        complete,
+                    });
+                }
+            }
+        }
+    }
 
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes minutes over every number")]
