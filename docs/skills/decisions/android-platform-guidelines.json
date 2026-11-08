@@ -1,0 +1,10 @@
+{
+  "revision": "e3dc487c76217533a433874c904276d945a45cb8a595f82d69c8c7232b29f3bb",
+  "outcome": "implemented",
+  "reason": "Android development needs its own source-bound guidance for Compose accessibility, roles, caller identification deadlines, WorkManager constraints, private storage, signing, and Google Play disclosures. Reciprocal comparison transfers questions about failure handling and verification evidence only after checking each platform's primary source. Deterministic rules require formal assurance, while lifecycle claims require actual device evidence. The Agent Skills specification at https://agentskills.io/specification requires a lowercase name. Vale's scope support at https://docs.vale.sh/keys/ignoredscopes lets the prose configuration exclude the canonical name field while continuing to check descriptions and body text.",
+  "evidence": [
+    "home/dot_agents/skills/android-platform-guidelines/SKILL.md",
+    "home/dot_config/prose/vale.ini"
+  ],
+  "revisit": null
+}
