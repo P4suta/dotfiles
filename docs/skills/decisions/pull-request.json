@@ -1,8 +1,9 @@
 {
-  "revision": "3eecaac00ea1cadd4a44aa0b2bf053fcc4b7b11bf475f8346ecf7f6612ba3dc6",
+  "revision": "68dda8ec9eddf2b89a1bfa3f64b6a80e12532ef4b882a83ad4ff5fbf3629625d",
   "outcome": "implemented",
-  "reason": "Checked publication attaches images and retains source without storage branches. Diagrams explain applicable relationships proactively. Migration preserves files and history before guarded retirement. Scoped installation retains unrelated content and review records without experimental maintenance. The guard and policy companion deploy together, and installed dispatch verifies their source match.",
+  "reason": "Use automatic CodeRabbit PR review at every importance level and keep review controls out of published descriptions.\nKeep source-bound assessments private, retain supported findings, and block paused operations without inserting suppression commands.\nReadiness can start its automatic review after the required project checks pass.\nDescribe missing review evidence as a refusal, and document removal of legacy suppression during migration.",
   "evidence": [
+    "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",
     "docs/adr/require-no-cli-review-for-high-prs.md",
     "crates/pr-workflow/src/figure.rs",
@@ -82,7 +83,7 @@
   "revisit": null,
   "size": {
     "outcome": "keep",
-    "reason": "Attachment and migration details live in a focused reference, and diagram design lives in its own reusable skill.",
+    "reason": "Keep the authoring entry point and load source assessment, attachments, and stack commands from focused references.\nThe checked workflow owns publication enforcement and realistic regression tests.",
     "revisit": null
   }
 }

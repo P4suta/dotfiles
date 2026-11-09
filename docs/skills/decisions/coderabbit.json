@@ -1,8 +1,11 @@
 {
-  "revision": "daf87162a821b27bfea3d117453260506e31bc1831b71137434182d261b2dd11",
+  "revision": "adb53d024eef68355f939e591b75d48055603708a054b977e93f8575fc0836eb",
   "outcome": "implemented",
-  "reason": "Use signed importance with an optional owner-local repository policy that selects PR review for every level.\nKeep service setup separate from findings and preserve separate pool capacity, adaptive thresholds, billing controls, and owner-controlled pauses.\nThe local policy selects a review route without claiming effective service configuration or allowance.\nThe CodeRabbit CLI has no review allowance, so the guard enforces its local limits and refuses paid reviews without a usage query.",
+  "reason": "Enable ordinary automatic PR review and incremental updates without importance or positive-label filters.\nKeep service configuration separate from review findings and preserve the subscription's billing controls and separate review pools.",
   "evidence": [
+    "docs/adr/use-coderabbit-without-importance-opt-outs.md",
+    "docs/coderabbit/organization.yaml",
+    "docs/coderabbit/global-overrides.yaml",
     "home/dot_agents/skills/coderabbit/SKILL.md",
     "home/dot_agents/skills/pull-request/references/importance.md",
     "docs/adr/route-coderabbit-by-current-pr-importance.md",

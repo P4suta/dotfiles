@@ -1,8 +1,9 @@
 {
-  "revision": "195a71464995b26c8e3a751b7c71e48e8d5e2563dd9e6a96f8717518c6cd5d36",
+  "revision": "07f894f7ab7ec71c87e43390f3fb0ad2872e7daf1b9ea8356d2ec487f264a62e",
   "outcome": "implemented",
-  "reason": "Per-PR CLI reviews cost more time than they returned, so high assessments now select no review and a guarded CLI review runs on an explicit request. The guard restores its pinned runtime when the CLI replaces it.",
+  "reason": "Require current-head CodeRabbit PR review before completion and merge at every importance level.\nPermit readiness to start its review, preserve supported findings, and leave paused operations pending without changing descriptions.\nKeep explicitly requested CLI analysis within the existing guard and separate capacity pool.",
   "evidence": [
+    "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",
     "docs/adr/require-no-cli-review-for-high-prs.md",
     "crates/coderabbit-guard/src/lib.rs",

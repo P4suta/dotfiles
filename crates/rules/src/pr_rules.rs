@@ -290,40 +290,6 @@ pub fn exclusion(ignore: bool, pause_marker: bool) -> Exclusion {
     }
 }
 
-/// Whether an operation asks `CodeRabbit` for a PR review or generation.
-/// An edit requests a review when it removes the exclusion of a ready PR.
-#[must_use]
-pub fn requests_review(
-    operation: Operation,
-    generation: Generation,
-    draft: bool,
-    was_excluded: bool,
-    excluded: bool,
-) -> bool {
-    generation == Generation::Coderabbit
-        || match operation {
-            Operation::Create => false,
-            Operation::Edit => !draft && was_excluded && !excluded,
-            Operation::Ready => !excluded,
-        }
-}
-
-/// Whether an operation during a PR pause keeps the review owed after resumption.
-/// A PR becomes ready, or stays ready, only with the exclusion made for the pause.
-#[must_use]
-pub fn keeps_pause_exclusion(
-    operation: Operation,
-    draft: bool,
-    was: Exclusion,
-    now: Exclusion,
-) -> bool {
-    match operation {
-        Operation::Create => true,
-        Operation::Edit => draft || was != Exclusion::Pause || now == Exclusion::Pause,
-        Operation::Ready => now == Exclusion::Pause,
-    }
-}
-
 /// Refuse every review request while the owner pauses `CodeRabbit` PR reviews.
 #[must_use]
 pub fn review_request_allowed(paused: bool, request: bool) -> bool {
@@ -995,34 +961,8 @@ mod proofs {
         kani::cover!(skip.is_none());
     }
 
-    /// No operation requests a paused PR review, and an edit requests one only by removing the exclusion of a ready PR.
-    pub fn spec_review(operation: Operation, generation: Generation, flags: [bool; 4]) {
-        let [draft, was_excluded, excluded, paused] = flags;
-        let request = requests_review(operation, generation, draft, was_excluded, excluded);
-        let expected = generation == Generation::Coderabbit
-            || (operation == Operation::Edit && !draft && was_excluded && !excluded)
-            || (operation == Operation::Ready && !excluded);
-        assert_eq!(request, expected);
-        let accepted = review_request_allowed(paused, request);
-        assert!(!paused || generation == Generation::Local || !accepted);
-        assert!(paused || accepted);
-    }
-
-    /// A PR ready during the pause keeps its pause exclusion, and a review comes back once the pause ends.
-    pub fn spec_pause(
-        operation: Operation,
-        draft: bool,
-        was: Exclusion,
-        now: Exclusion,
-        paused: bool,
-    ) {
-        let kept = keeps_pause_exclusion(operation, draft, was, now);
-        let expected = match operation {
-            Operation::Create => true,
-            Operation::Edit => draft || was != Exclusion::Pause || now == Exclusion::Pause,
-            Operation::Ready => now == Exclusion::Pause,
-        };
-        assert_eq!(kept, expected);
+    /// Pausing and resuming preserve the meaning of each recorded exclusion.
+    pub fn spec_pause(now: Exclusion, paused: bool) {
         let requirement = review_requirement(paused, now);
         assert_eq!(requirement == ReviewRequirement::Paused, paused);
         assert_eq!(
@@ -1107,17 +1047,13 @@ mod proofs {
     #[cfg(kani)]
     #[kani::proof]
     fn paused_reviews_are_never_requested_and_return_after_resumption() {
-        let operation = OPERATIONS[usize::from(kani::any::<u8>() % 3)];
-        let generation = Generation::ALL[usize::from(kani::any::<u8>() % 2)];
-        let flags: [bool; 4] = [kani::any(), kani::any(), kani::any(), kani::any()];
-        spec_review(operation, generation, flags);
-        let was = EXCLUSIONS[usize::from(kani::any::<u8>() % 3)];
+        let paused: bool = kani::any();
+        assert_eq!(review_request_allowed(paused, true), !paused);
+        kani::cover!(paused && !review_request_allowed(paused, true));
+        kani::cover!(!paused && review_request_allowed(paused, true));
         let now = EXCLUSIONS[usize::from(kani::any::<u8>() % 3)];
-        spec_pause(operation, flags[0], was, now, flags[3]);
-        kani::cover!(
-            !keeps_pause_exclusion(operation, flags[0], was, now) && operation == Operation::Edit
-        );
-        kani::cover!(review_requirement(flags[3], now) == ReviewRequirement::Resumed);
+        spec_pause(now, paused);
+        kani::cover!(review_requirement(paused, now) == ReviewRequirement::Resumed);
     }
 
     #[cfg(kani)]
@@ -1300,16 +1236,11 @@ mod tests {
                         }
                     }
                 }
-                for review in flags() {
-                    proofs::spec_review(operation, generation, review);
-                }
             }
-            for was in proofs::EXCLUSIONS {
-                for now in proofs::EXCLUSIONS {
-                    for [draft, paused] in flags() {
-                        proofs::spec_pause(operation, draft, was, now, paused);
-                    }
-                }
+        }
+        for now in proofs::EXCLUSIONS {
+            for paused in [false, true] {
+                proofs::spec_pause(now, paused);
             }
         }
         for [first, second, third] in flags() {

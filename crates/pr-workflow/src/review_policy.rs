@@ -26,7 +26,6 @@ const MAX_ASSESSMENT_BYTES: usize = 16 * 1024;
 const MAX_REVIEW_POLICY_BYTES: u64 = 16 * 1024;
 const REVIEW_POLICIES: &str = "review-policies";
 const REVIEW_POLICY_FILE: &str = "policy.json";
-const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
 const PAGE_SIZE: usize = 100;
 const MAX_PAGES: usize = 20;
 const REVIEW_BOT: &str = "coderabbitai[bot]";
@@ -35,7 +34,6 @@ const REVIEW_CONTEXT: &str = "CodeRabbit";
 const RUN_ID_LENGTH: usize = 36;
 const RUN_ID_SEPARATORS: [usize; 4] = [8, 13, 18, 23];
 const REVIEW_RANGE: &str = "Reviewing files that changed from the base of the PR and between ";
-pub(super) const CRITICAL_LABEL: &str = "review:critical";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -642,17 +640,6 @@ fn check_at(
     let statement = authenticate(&current, &packet, signers.path(), signer)?;
     let repository_policy = repository_policy(&evidence::home()?, &target.repo)?;
     let route = policy::repository_route(statement.assessment.level.into(), repository_policy);
-    let ignore_count = body
-        .lines()
-        .filter(|line| line.trim() == REVIEW_EXCLUSION)
-        .count();
-    ensure!(ignore_count <= 1, "duplicate CodeRabbit suppression lines");
-    if route != ReviewRoute::Pr {
-        ensure!(
-            ignore_count == 1 && target.generation == rules::pr_rules::Generation::Local,
-            "low, medium, and high use a standing CodeRabbit PR suppression and local document generation"
-        );
-    }
     Ok(Checked {
         route,
         repository_policy,
@@ -753,17 +740,11 @@ pub(super) fn paused(checked: &Checked) -> Result<bool> {
     })
 }
 
-pub(super) fn admit_publication(checked: &Checked, body: &str) -> Result<()> {
-    if checked.repository_policy == ReviewPolicy::AlwaysPr {
-        ensure!(
-            !paused(checked)?,
-            "repository PR review route is paused by the owner; keep this operation pending until the owner resumes PR reviews"
-        );
-        ensure!(
-            !body.lines().any(|line| line.trim() == REVIEW_EXCLUSION),
-            "repository PR review policy requires removing the standing CodeRabbit suppression"
-        );
-    }
+pub(super) fn admit_publication(checked: &Checked) -> Result<()> {
+    ensure!(
+        rules::pr_rules::review_request_allowed(paused(checked)?, true),
+        "CodeRabbit PR reviews are paused by the owner; wait for the owner to resume reviews"
+    );
     Ok(())
 }
 
@@ -908,15 +889,11 @@ fn validate_findings(
     Ok(())
 }
 
-pub(super) fn labels(checked: &Checked, labels: &[super::ReviewLabel]) -> Result<()> {
+pub(super) fn labels(labels: &[super::ReviewLabel]) -> Result<()> {
     let mut seen = BTreeSet::new();
     for label in labels {
         ensure!(seen.insert(&label.name), "duplicate PR label");
     }
-    ensure!(
-        checked.route == ReviewRoute::Pr || !seen.contains(&CRITICAL_LABEL.to_owned()),
-        "the selected review route cannot opt into automatic CodeRabbit PR review"
-    );
     Ok(())
 }
 
@@ -1651,7 +1628,7 @@ pub(super) fn live_binding_at(
         signer,
     )?;
     validate_live_source(&checked, &live.source, None)?;
-    labels(&checked, &live.labels)?;
+    labels(&live.labels)?;
     Ok(checked)
 }
 
@@ -1836,23 +1813,10 @@ pub(super) fn admit_ready(
     target: &Target,
     github: &Github,
     pr: u64,
-    body: &str,
 ) -> Result<()> {
-    if checked.route == ReviewRoute::Pr && checked.repository_policy == ReviewPolicy::Importance {
-        ensure!(
-            !paused(checked)?,
-            "critical PR review is paused; keep this PR draft until its required route resumes"
-        );
-        ensure!(
-            !body.lines().any(|line| line.trim() == REVIEW_EXCLUSION),
-            "critical PR must remove review suppression before requesting review"
-        );
-        require_history(checked, target, github)?;
-        require_resolved_threads(github, target, pr, &checked.binding.head)
-    } else {
-        admit_publication(checked, body)?;
-        completion(checked, target, github, pr)
-    }
+    admit_publication(checked)?;
+    require_history(checked, target, github)?;
+    require_resolved_threads(github, target, pr, &checked.binding.head)
 }
 
 /// The assessment that `pr` last verified on this machine.

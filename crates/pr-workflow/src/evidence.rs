@@ -1,4 +1,4 @@
-//! Owner-local workflow evidence: signed importance assessments, the assessment each PR last verified, and pause exclusions.
+//! Owner-local signed assessments and the assessment each PR last verified.
 //! No published document or tracked file carries any of it.
 
 use anyhow::{Context, Result, ensure};
@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 const STATE: &str = ".local/state/pr-workflow";
 const ASSESSMENTS: &str = "assessments";
 const OBJECTS: &str = "objects";
-const PAUSES: &str = "pauses";
 const MAX_PACKET_BYTES: u64 = 48 * 1024;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -184,26 +183,6 @@ pub(crate) fn remembered(repository: &str, pr: u64) -> Result<Option<(String, bo
     )))
 }
 
-fn pause_path(home: &Path, repository: &str, pr: u64) -> Result<PathBuf> {
-    Ok(directory(home, PAUSES, repository)?.join(format!("pr-{pr}")))
-}
-
-/// Whether the owner's pause, rather than a standing choice, excludes the review of `pr`.
-pub(crate) fn paused(repository: &str, pr: u64) -> Result<bool> {
-    Ok(pause_path(&home()?, repository, pr)?.try_exists()?)
-}
-
-/// Records that the owner's pause excludes the review of `pr`, which stays owed after resumption.
-pub(crate) fn record_pause(repository: &str, pr: u64) -> Result<()> {
-    write(&pause_path(&home()?, repository, pr)?, b"")
-}
-
-/// Forgets the pause exclusion of `pr`.
-pub(crate) fn clear_pause(repository: &str, pr: u64) -> Result<()> {
-    platform::cleanup::remove_file(&pause_path(&home()?, repository, pr)?);
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,20 +253,6 @@ mod tests {
             "next",
         )?;
         assert_eq!(read_packet(&path)?.raw, "next");
-        Ok(())
-    }
-
-    #[test]
-    fn a_pause_record_belongs_to_one_pr_and_clears() -> Result<()> {
-        let home = tempfile::tempdir()?;
-        let first = pause_path(home.path(), "P4suta/dotfiles", 17)?;
-        let other = pause_path(home.path(), "P4suta/dotfiles", 18)?;
-        assert!(!first.try_exists()?);
-        write(&first, b"")?;
-        assert!(first.try_exists()? && !other.try_exists()?);
-        platform::cleanup::remove_file(&first);
-        platform::cleanup::remove_file(&first);
-        assert!(!first.try_exists()?);
         Ok(())
     }
 }

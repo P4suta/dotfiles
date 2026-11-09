@@ -2,10 +2,10 @@
 language: en-US
 reviews:
   auto_review:
-    enabled: false
-    labels: ["review:critical"]
+    enabled: true
+    labels: []
     description_keyword: ""
-    auto_incremental_review: false
+    auto_incremental_review: true
     drafts: false
   auto_title_placeholder: "@coderabbitai"
   auto_title_instructions: >-

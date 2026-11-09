@@ -2232,11 +2232,11 @@ fn reject_marking_a_partial_report_ready() {
 }
 #[kani::proof]
 fn reject_a_report_that_lacks_a_required_check_as_complete() {
-    assert!(report(3, 0, 0, 1) == Report::Complete);
+    assert!(report(0, 0, 1) == Report::Complete);
 }
 #[kani::proof]
 fn reject_a_report_with_an_unfinished_check_as_complete() {
-    assert!(report(3, 1, 0, 0) == Report::Complete);
+    assert!(report(1, 0, 0) == Report::Complete);
 }
 #[kani::proof]
 fn reject_keeping_a_moved_head_ready() {
@@ -2397,19 +2397,11 @@ fn reject_blaming_checks_for_a_published_pr() {
 }
 #[kani::proof]
 fn reject_paused_review_request() {
-    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Ready, production::Generation::Local, true, false, false)));
-}
-#[kani::proof]
-fn reject_paused_exclusion_removal() {
-    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Edit, production::Generation::Local, false, true, false)));
+    assert!(production::review_request_allowed(true, true));
 }
 #[kani::proof]
 fn reject_pause_exclusion_as_standing() {
     assert_eq!(production::review_requirement(false, production::exclusion(true, true)), production::ReviewRequirement::Excluded);
-}
-#[kani::proof]
-fn reject_standing_exclusion_when_ready_during_the_pause() {
-    assert!(production::keeps_pause_exclusion(production::Operation::Ready, true, production::Exclusion::None, production::exclusion(true, false)));
 }
 fn state(lifecycle: production::Lifecycle, behind: bool, checks: production::HeadChecks, exclusion: production::Exclusion) -> production::MergeState {
     production::MergeState { lifecycle, conflict: false, behind, checks, clean: true, exclusion }
@@ -2843,8 +2835,8 @@ fn reject_substituting_a_cli_review_for_a_critical_change() {
     assert_eq!(production::route(production::ReviewLevel::Critical), production::ReviewRoute::Cli);
 }
 #[kani::proof]
-fn reject_a_high_change_spending_the_pr_review_pool() {
-    assert_eq!(production::route(production::ReviewLevel::High), production::ReviewRoute::Pr);
+fn reject_skipping_review_for_a_high_change() {
+    assert_eq!(production::route(production::ReviewLevel::High), production::ReviewRoute::None);
 }
 #[kani::proof]
 fn reject_suppressing_review_under_the_repository_pr_policy() {
