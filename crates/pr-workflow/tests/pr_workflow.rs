@@ -5144,6 +5144,102 @@ fn stack_link_retires_independent_records_only_after_exact_readback() -> Result<
 }
 
 #[test]
+fn already_linked_subsets_retire_only_after_exact_readback_without_provider_updates() -> Result<()>
+{
+    for fault in ["none", "head", "base", "draft", "title", "body"] {
+        let (fixture, checkout) = work_unit_fixture()?;
+        let parent = git(&checkout, &["rev-parse", "a"])?;
+        let child = git(&checkout, &["rev-parse", "feature"])?;
+        let descendant = git(&checkout, &["rev-parse", "member"])?;
+        let assessments = fixture.assessment_records(
+            &checkout,
+            "P4suta/project",
+            &[("feature", "a"), ("member", "feature")],
+        )?;
+        let separate = serde_json::json!([
+            owned_work(4, "a", "main", &parent, "P4suta/project"),
+            owned_work(5, "feature", "main", &child, "P4suta/project")
+        ]);
+        scoped_git(
+            &checkout,
+            fixture.directory.path(),
+            &["checkout", "-q", "feature"],
+        );
+        let started = work_command(&fixture, &checkout, "start", &separate)?
+            .args([
+                "--issue",
+                "23",
+                "--independent",
+                "Temporarily separate work",
+            ])
+            .env("GH_FIXTURE_HEAD", &child)
+            .output()?;
+        assert!(
+            started.status.success(),
+            "{}",
+            String::from_utf8_lossy(&started.stderr)
+        );
+        let directory = fixture
+            .context_home
+            .path()
+            .join(".local/state/pr-workflow/independent/p4suta__project");
+        assert_eq!(fs::read_dir(&directory)?.count(), 1);
+        let pulls = serde_json::json!([
+            owned_work(4, "a", "main", &parent, "P4suta/project"),
+            owned_work(5, "feature", "a", &child, "P4suta/project"),
+            owned_work(6, "member", "feature", &descendant, "P4suta/project")
+        ]);
+        let body = fixture.assessed_body(&fs::read_to_string(&fixture.body)?);
+        let view = |head: &str, base: &str| {
+            serde_json::json!({
+                "title":"fix: preserve edits", "body":body, "state":"OPEN", "isDraft":true,
+                "headRefOid":head, "baseRefName":base
+            })
+        };
+        let mut after = view(&descendant, "feature");
+        match fault {
+            "head" => after["headRefOid"] = serde_json::json!(child),
+            "base" => after["baseRefName"] = serde_json::json!("a"),
+            "draft" => after["isDraft"] = serde_json::json!(false),
+            "title" => after["title"] = serde_json::json!("fix: changed title"),
+            "body" => after["body"] = serde_json::json!("Changed document."),
+            _ => {}
+        }
+        let views = format!(
+            "5={}\n5={}\n6={}\n6={}",
+            view(&child, "a"),
+            view(&child, "a"),
+            view(&descendant, "feature"),
+            after
+        );
+        let branches = format!(
+            "repos/P4suta/project/branches/a={}\nrepos/P4suta/project/branches/feature={}",
+            serde_json::json!({"name":"a","commit":{"sha":parent}}),
+            serde_json::json!({"name":"feature","commit":{"sha":child}})
+        );
+        let output = work_command(&fixture, &checkout, "stack link", &pulls)?
+            .args(["--base", "a", "5", "6"])
+            .env("GH_FIXTURE_VIEWS", views)
+            .env("GH_FIXTURE_BRANCHES", branches)
+            .env("GH_FIXTURE_ASSESSMENTS", assessments)
+            .env("GH_STACK_FIXTURE_EXIT", "42")
+            .output()?;
+        assert_eq!(
+            output.status.success(),
+            fault == "none",
+            "{fault}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read_dir(&directory)?.count(),
+            usize::from(fault != "none")
+        );
+        assert!(!fixture.stack_log().contains("gh-stack link"));
+    }
+    Ok(())
+}
+
+#[test]
 fn a_stack_counts_once_and_independent_units_obey_the_limit() -> Result<()> {
     let (fixture, checkout) = work_unit_fixture()?;
     let scope = fixture.directory.path();

@@ -3773,13 +3773,19 @@ fn link_stack(target: &Target, numbers: &[u64], base: &str) -> Result<()> {
         before.push(live);
     }
     plan.require_current()?;
-    let mut args = vec!["link".to_owned(), "--base".to_owned(), base.to_owned()];
-    args.extend(numbers.iter().map(u64::to_string));
-    gh_stack(
-        target,
-        None,
-        &args.iter().map(String::as_str).collect::<Vec<_>>(),
-    )?;
+    if before
+        .iter()
+        .zip(&plan.members)
+        .any(|(live, member)| live.base_ref_name.as_deref() != Some(&member.base))
+    {
+        let mut args = vec!["link".to_owned(), "--base".to_owned(), base.to_owned()];
+        args.extend(numbers.iter().map(u64::to_string));
+        gh_stack(
+            target,
+            None,
+            &args.iter().map(String::as_str).collect::<Vec<_>>(),
+        )?;
+    }
     for (member, original) in plan.members.iter().zip(before) {
         let live = live_document(&github, target, member.number)?;
         ensure!(

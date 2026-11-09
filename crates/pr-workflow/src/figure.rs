@@ -277,31 +277,40 @@ mod tests {
     }
 
     #[test]
-    fn publication_comparison_preserves_text_and_alternative_text() {
-        let local = "Before.\n\n![Failure](</cache/image.svg>)\n\nAfter.\n";
+    fn publication_comparison_preserves_text_and_alternative_text() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let image = image_line(&directory.path().join("image.svg"), "Failure")?;
+        let local = format!("Before.\n\n{image}\n\nAfter.\n");
         let uploaded =
             "Before.\n\n![Failure](https://github.com/user-attachments/assets/fixture)\n\nAfter.\n";
-        assert_eq!(publication_shape(local), publication_shape(uploaded));
+        assert_eq!(publication_shape(&local), publication_shape(uploaded));
         assert_ne!(
-            publication_shape(local),
+            publication_shape(&local),
             publication_shape(&uploaded.replace("Failure", "Success"))
         );
         assert_ne!(
-            publication_shape(local),
+            publication_shape(&local),
             publication_shape(&uploaded.replace("Before.", "Changed."))
         );
+        Ok(())
     }
 
     #[test]
-    fn publication_comparison_preserves_image_titles() {
-        let local = "![Failure](</cache/image.svg> \"Retry state\")";
+    fn publication_comparison_preserves_image_titles() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let local = image_with_title(
+            &directory.path().join("image.svg"),
+            "Failure",
+            "Retry state",
+        )?;
         let uploaded =
             "![Failure](https://github.com/user-attachments/assets/fixture \"Retry state\")";
-        assert_eq!(publication_shape(local), publication_shape(uploaded));
+        assert_eq!(publication_shape(&local), publication_shape(uploaded));
         assert_ne!(
-            publication_shape(local),
+            publication_shape(&local),
             publication_shape(&uploaded.replace("Retry state", "Success state"))
         );
+        Ok(())
     }
 
     #[test]
