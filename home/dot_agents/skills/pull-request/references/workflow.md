@@ -1,4 +1,4 @@
-# Commands and generation
+# PR workflow commands
 
 The dotfiles Rust xtask provides the installed `pr-workflow` executable.
 Install it with `just install-pr-workflow`.
@@ -55,13 +55,14 @@ pr-workflow check --repo OWNER/REPO --title "fix: preserve edits" --body-file bo
 pr-workflow create --repo OWNER/REPO --head feature --base main --title "fix: preserve edits" --body-file body.md
 pr-workflow edit --repo OWNER/REPO --pr 17 --title "fix: preserve edits" --body-file body.md
 pr-workflow ready --repo OWNER/REPO --pr 17
-pr-workflow check --repo OWNER/REPO --pr 17 --final
+pr-workflow check --repo OWNER/REPO --pr 17
 ```
 
 Creation always starts as a draft with an authored title and description.
 `ready` requires an open draft with an accepted document and only passing head checks.
 `edit` replaces title and body together and leaves draft state unchanged.
 Local-file `check` never contacts GitHub and leaves the live issue prerequisite unmet, and `check --pr` only reads.
+Adding `--final` enforces the helper's current-head CodeRabbit admission as well.
 
 ## Existing PR issue references
 
@@ -138,6 +139,25 @@ The structured result reports `merged`, `ejected`, `timed_out`, `head_changed`, 
 The head bound to the merge request must match the verified head.
 Both stop on a failed check, conflict, timeout, or missing CodeRabbit review.
 
+## Owner-authorized merges
+
+The owner can explicitly request a merge despite an unavailable optional CodeRabbit review.
+That instruction grants no completed-review claim and changes no repository-required review, check, approval, merge queue, or publication hold.
+Inspect the exact head, required checks, all supported unresolved findings, and the actual review state with `gh`.
+Resolve supported findings and pass the applicable project checks before merging.
+Keep issue scope, source assessment, and document validation through `pr-workflow check --pr`.
+The helper's `--final` and merge commands also require fresh service evidence.
+For the owner's explicit optional-review decision, use normal GitHub admission and a permitted merge strategy:
+
+```console
+gh pr merge NUMBER --repo OWNER/REPO --squash --match-head-commit VERIFIED_HEAD
+```
+
+The [GitHub CLI merge options](https://cli.github.com/manual/gh_pr_merge) define the head match and queue behavior.
+Never use `--admin`, change required protections, bypass hooks, or turn off reviews to make a merge succeed.
+Wait for an admitted queue entry to reach `MERGED` before reporting completion.
+Report unavailable review accurately without demanding a manual command, CLI fallback, Resume operation, or account setting change.
+
 ## Source assessment
 
 Use the [risk criteria](importance.md) to describe the actual changed behavior.
@@ -170,24 +190,27 @@ Every importance level uses CodeRabbit PR review.
 Enable automatic reviews for ready PRs and updates targeting every base branch, without positive label filters.
 Leave draft review off unless the repository needs early feedback.
 Set `auto_pause_after_reviewed_commits: 0` to keep automatic updates enabled.
-Read back the effective service configuration because local instructions don't configure the provider.
+During explicitly requested configuration work, read back the effective service configuration because local instructions don't configure the provider.
 Keep automatic summaries off to preserve authored descriptions.
 Use CodeRabbit commit statuses for the workflow's current-head review admission.
 Accept ordinary incremental reviews ending at the current head.
+An incremental run need not repeat the full PR range or every preceding run's selected file.
 Wait for automatic review after readiness or updates without posting manual review commands.
 
 Ready admission waits for unfinished, failed, or missing required checks.
 A repository that reports and requires no checks can accept a ready PR.
 The review that readiness starts can finish afterward.
-Final validation and merge still require the review of the current head and resolved supported findings.
+Inspect the current head's actual review state and resolve supported findings before completing the authorized PR task.
+Apply [owner-authorized merges](#owner-authorized-merges) when optional analysis is unavailable and the owner explicitly chooses to merge.
 
-An owner pause keeps the affected operation pending without inserting a command into the PR description.
+An owner review pause prohibits starting another review and remains separate from an owner publication hold.
 Keep subscription limits, separate PR and CLI pools, and existing billing controls.
 Use a guarded CLI review for an explicit local review request.
 
 Use the prepared [configuration](../assets/coderabbit.yaml) for authorized configuration work.
 The [automatic review controls](https://docs.coderabbit.ai/configuration/auto-review) define eligibility, labels, and updates.
-Check the current [rate limits](https://docs.coderabbit.ai/management/rate-limits) for the actual developer, organization, and pool.
+For an explicitly requested review or service diagnosis, check the current [rate limits](https://docs.coderabbit.ai/management/rate-limits) for the actual developer, organization, and pool.
+Ordinary automatic PR work needs no service administration or billing-screen preflight.
 Never start a review merely to discover capacity or enable paid usage to continue.
 
 ## Destination title exception

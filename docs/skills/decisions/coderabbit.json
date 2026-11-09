@@ -1,8 +1,9 @@
 {
-  "revision": "77038c49f9e60f8e7e2fccc0b6700e5eb900929188fdd71d02788f151d67f1b7",
+  "revision": "e76d68571e57da129367af73b72723bb0fd8d4b352808569aa54268e4e7168d1",
   "outcome": "implemented",
-  "reason": "Use automatic PR reviews and updates without manual review commands or commit-count auto-pause.\nKeep service configuration separate from review findings and preserve subscription limits and separate review pools.",
+  "reason": "Use automatic incremental PR reviews without a full-review prerequisite.\nKeep account, billing, configuration, and capacity work scoped to explicit service tasks.\nHonor explicit merges during unavailable optional review and preserve subscription limits.",
   "evidence": [
+    "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
     "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "docs/coderabbit/organization.yaml",

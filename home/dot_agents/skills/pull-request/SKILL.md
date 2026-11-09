@@ -37,13 +37,14 @@ The checked workflow authenticates the current diff and uses CodeRabbit PR revie
 Importance never skips a review or selects a review opt-in label.
 The workflow keeps its assessments and issue contexts in owner-local state, and published documents and tracked files never carry them.
 Keep severe levels exceptional and explain concrete consequences rather than escalating by filename or diff size.
-`coderabbit --guard-status --json` reports the separate PR and CLI pause scopes.
-A paused review remains pending without changing the PR description.
+Apply service capacity and pause checks when the owner explicitly requests a review or service operation.
+An unavailable optional review supplies no completed-review claim and doesn't override an explicit instruction to merge despite its absence.
 Use `coderabbit-review` for current-head review and existing supported findings.
 Keep PR descriptions about the change without suppression commands or local workflow instructions.
 Read [workflow commands](references/workflow.md) for automatic reviews, the PR review budget, and the optional configuration example.
 Write complete PR documents locally.
-Use automatic reviews after readiness and updates without posting service commands.
+Use automatic incremental reviews after readiness and updates without requiring a full review or posting service commands.
+Keep ordinary PR inspection in `gh` without opening service administration or billing screens.
 Local creation always starts as a draft, and moving it to review needs separate authorization.
 The workflow policy caps work units at three per person and repository by default.
 One open stack counts as one unit, and each declared independent PR counts as one unit.
@@ -65,6 +66,7 @@ Restack with `pr-workflow stack sync` or `stack rebase`.
 Never use a manual rebase or force push.
 Merge with `pr-workflow merge` or `stack merge`.
 The section [stacks and merging](references/workflow.md#stacks-and-merging) describes both.
+Use [owner-authorized merges](references/workflow.md#owner-authorized-merges) when the owner explicitly chooses to merge despite unavailable optional review.
 
 Use `pr-workflow link-issue --repo OWNER/REPO --pr NUMBER --issue NUMBER` to add a closing reference to an existing PR as the authenticated numeric repository owner.
 The operation checks the open issue, PR source network, head, base, and current document.
@@ -101,7 +103,7 @@ An external project's custom title format requires a repository-scoped title pol
 Confirm validation claims from real command results, and distinguish passing, failing, unavailable, and unrun checks.
 The checker proves neither the claims nor that the issue preceded implementation, so verify those from the work.
 
-Read back the published document and draft state with `gh`, and run the final live-document check.
+Read back the published document and draft state with `gh`, and run the live-document check.
 Its CodeRabbit line reports the selected route and outstanding evidence for the current diff.
 Load `ci-budget` before an authorized push or PR update.
 When `gh` fails, keep its diagnostic and inspect the remote state before retrying an uncertain mutation.

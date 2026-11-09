@@ -210,14 +210,22 @@ Judgment: the agent distinguishes reusable guidance from task-specific observati
 
 Judgment: the owner controls each machine's opt-in, and verification duties still apply without skill maintenance.
 
-> - Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.
+> - Keep the CodeRabbit CLI and PR review pools separate, and apply capacity checks to explicitly requested reviews.
 
-Follow-up F7: the CodeRabbit CLI has no review allowance, so the guard enforces its local hourly and daily limits for a CLI review in `crates/coderabbit-guard/src/lib.rs`.
-No gate represents the PR review pool or its thresholds, or holds a push on its capacity.
+Judgment: the requested review determines its pool and capacity requirements.
+The CLI guard enforces its local limits in `crates/coderabbit-guard/src/lib.rs`.
 
-> - Never declare a PR complete while supported review findings, required checks, or a review of its current head remain outstanding.
+>   Use automatic incremental PR reviews without requiring manual commands or a full review.
 
-Judgment: whether a finding has support requires checking the code.
+Judgment: automatic review eligibility and completion depend on the provider's actual state.
+
+> - Resolve supported review findings and pass required checks before declaring a PR complete.
+
+Judgment: finding support and applicable checks require review of the current change.
+
+>   Honor an explicit instruction to merge despite an unavailable optional CodeRabbit review, while preserving repository-required reviews and publication holds.
+
+Judgment: the owner's instruction grants merge authority, and repository requirements and publication holds keep their scope.
 
 > - Commit, push, reply to or resolve PR threads, request reviews, and merge only when the owner asks.
 
@@ -663,7 +671,7 @@ Experimental skill maintenance stays off until the machine's explicit opt-in.
 | Load `ci-budget` before an authorized push or PR update. | Gate and skill | The pre-push dispatcher refuses while `~/.config/git/push-paused` exists in `crates/dotfiles/src/hooks.rs`, and `ci-budget` states the local checks. |
 | Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within its local limits in `crates/coderabbit-guard/src/lib.rs`, and `coderabbit-review` states the trigger. |
 | Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The floored budget in `crates/rules/src/review_rules.rs` applies where a review pool has an allowance, and the CLI pool has none. |
-| Elapsed time alone gives no permission to push. | Merged | Merged into `while review capacity stays unverified`. |
+| Elapsed time alone gives no permission to push. | Merged | Merged into `Commit, push, reply to or resolve PR threads`. |
 | Honor an owner-imposed CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `crates/rules/src/review_rules.rs`, with a Kani proof. |
 | Use `reliability` for intermittent failures. | Skill | `reliability` states the trigger in its description and the rule in its body. |
 | Load `dotfiles` for dotfiles changes. | Skill | `dotfiles` states the trigger and the rule in its description. |
@@ -673,7 +681,7 @@ Experimental skill maintenance stays off until the machine's explicit opt-in.
 | Load `coderabbit-review` on an existing PR or an authorized PR update. | Skill | `coderabbit-review` states the trigger in its description and the inspection in its body. |
 | Wait for the automatic review of the final pushed head. | Skill | `coderabbit-review` states it once. |
 | Explain unsupported findings with concrete evidence. | Skill | `coderabbit-review` states it once. |
-| The PR completion line, before the current wording. | Merged | Reworded as `Never declare a PR complete`. |
+| The PR completion line, before the current wording. | Merged | Reworded as `Resolve supported review findings and pass required checks`. |
 | A passing CodeRabbit check alone doesn't establish a completed review. | Skill | `coderabbit-review` states it once. |
 | Use the existing PR review before requesting a CLI review of the same diff. | Gate and skill | `coderabbit-review` states the order, and the guard enforces the local CLI limits in `crates/coderabbit-guard/src/lib.rs`. |
 | Commit, push, PR replies, thread resolution, manual review triggers, and merge still require authorization. | Merged | Merged into `only when the owner asks`. |
@@ -717,12 +725,6 @@ A repository opts out with `git config guard.commits off` when its own instructi
 ### F4:
 
 The managed agent permission profiles deny `gh pr create`, `gh pr edit`, and `gh pr ready`, and the denial names the matching `pr-workflow` command.
-
-### F7:
-
-The pre-push dispatcher asks the CodeRabbit guard for the PR review pool's capacity before pushing a branch with an open PR.
-It keeps that capacity apart from the CLI pool, with the applicable adaptive threshold.
-It refuses the push when the capacity stays unverified or runs out, and it names the pool and the capacity it found.
 
 ### F8:
 

@@ -153,3 +153,4 @@
 | [2026-11-09 Bind tool lookups to discovery metadata](bind-http-tool-lookups-to-discovery-metadata.md) | proposed |  |
 | [2026-11-09 Use automatic CodeRabbit reviews without command generation](use-automatic-coderabbit-reviews-without-command-generation.md) | accepted |  |
 | [2026-11-09 Use CodeRabbit without importance opt-outs](use-coderabbit-without-importance-opt-outs.md) | accepted |  |
+| [2026-11-10 Honor explicit merges during optional review pauses](honor-explicit-merges-during-optional-review-pauses.md) | accepted |  |

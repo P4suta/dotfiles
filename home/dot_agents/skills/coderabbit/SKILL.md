@@ -11,6 +11,8 @@ metadata:
 
 Use `gh` for GitHub, and the signed-in CodeRabbit UI when no connector or CLI offers the operation.
 Use `coderabbit-review` for local analysis and PR findings.
+Ordinary PR work uses `gh` and automatic reviews.
+Account screens, billing checks, and configuration changes need an explicit service task.
 Leave implementation to the user's existing agent.
 Read `coderabbit --guard-status --json` before a service operation and honor its pause scope, including for settings changes, until the owner resumes.
 
@@ -47,13 +49,15 @@ Batch related commits into one push, and let the current review finish before an
 Check review freshness after the final update, because automatic reviews can pause or hit rate limits.
 Use CodeRabbit PR review for ordinary changes, without importance thresholds or opt-in labels.
 Enable automatic reviews for ready PRs and their updates, and leave draft review off unless the repository needs earlier feedback.
-Set `auto_pause_after_reviewed_commits: 0` and wait for automatic reviews without posting manual review commands.
+During authorized configuration work, set `auto_pause_after_reviewed_commits: 0` to preserve automatic updates.
+Accept automatic incremental reviews without demanding a full review or posting manual review commands.
 Use `coderabbit-review` to inspect current-head reviews and supported findings.
 Keep suppression commands and personal workflow instructions out of PR descriptions.
-Verify the effective service configuration, because local instructions can't configure the service or establish capacity.
+For explicitly requested service setup or diagnosis, verify the effective configuration because local instructions can't configure the service or establish capacity.
 Keep PR and CLI pools and their adaptive thresholds separate, and never substitute CLI capacity for PR capacity.
 Inspect the effective configuration after adoption because inherited positive labels can remain active.
 Read existing findings before publishing an update.
+Use `pull-request` for an explicit merge instruction during unavailable optional review, without demanding service administration.
 
 ## Triage and PR security
 
