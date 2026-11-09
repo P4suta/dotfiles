@@ -1261,9 +1261,12 @@ fn valid_review_id(value: &str) -> bool {
 fn complete_review_body(body: &str) -> Result<&str> {
     const GENERATED: &str = "<!-- coderabbit-ai-generated:v1 -->\n\n";
     const PUBLICATION: &str = "\n\n<!-- coderabbit-review-publication v1 publication=";
+    const COMMENTS: &str = "**Actionable comments posted: ";
     const FOOTER: &str =
         "<!-- This is an auto-generated comment by CodeRabbit for review status -->";
-    let body = body.strip_prefix(GENERATED).unwrap_or(body);
+    let generated = body.strip_prefix(GENERATED);
+    let body = generated.unwrap_or(body);
+    let published = generated.is_some() && body.contains(PUBLICATION);
     ensure!(
         body.matches(PUBLICATION).count() <= 1,
         "CodeRabbit publication metadata is ambiguous"
@@ -1287,24 +1290,27 @@ fn complete_review_body(body: &str) -> Result<&str> {
         body.lines().last() == Some(FOOTER) && body.matches(FOOTER).count() == 1,
         "CodeRabbit submitted review has no recognized complete-review body"
     );
+    if let Some(comments) = body
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix(COMMENTS))
+    {
+        comments
+            .strip_suffix("**")
+            .context("CodeRabbit actionable inventory malformed")?
+            .parse::<usize>()
+            .context("CodeRabbit actionable inventory malformed")?;
+    } else {
+        ensure!(published, "CodeRabbit actionable inventory missing");
+    }
     Ok(body)
 }
 
 fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTreeSet<String>> {
-    const COMMENTS: &str = "**Actionable comments posted: ";
     const RUN: &str = "- **Run ID**: `";
     const FILES: &str = "<summary>📒 Files selected for processing (";
     const DECORATED_FILES: &str = " Files selected for processing: ";
     let body = complete_review_body(body)?;
-    let comments = body
-        .lines()
-        .next()
-        .and_then(|line| line.strip_prefix(COMMENTS))
-        .and_then(|line| line.strip_suffix("**"))
-        .context("CodeRabbit actionable inventory missing")?;
-    comments
-        .parse::<usize>()
-        .context("CodeRabbit actionable inventory malformed")?;
     let unique = |prefix: &str| -> Result<&str> {
         let mut found = body.lines().filter_map(|line| line.strip_prefix(prefix));
         let value = found
@@ -2265,6 +2271,8 @@ mod tests {
         );
         review.body = body.clone();
         validate_submitted_review(&review, &binding, &assessment)?;
+        review.body = body.replace("**Actionable comments posted: 0**", "\n\n---");
+        validate_submitted_review(&review, &binding, &assessment)?;
         for invalid in [
             body.replace("batch=1/1", "batch=1/2"),
             body.replace("publication=4f08a048", "publication=invalid"),
@@ -2589,6 +2597,7 @@ mod tests {
         validate_submitted_review(&review, &binding, &assessment)?;
         let original = review.body.clone();
         for body in [
+            original.replace("**Actionable comments posted: 0**\n", ""),
             original.replace(&binding.base, &"d".repeat(40)),
             original.replace(&binding.head, &"e".repeat(40)),
             original.replace("README.md", "other.md"),
