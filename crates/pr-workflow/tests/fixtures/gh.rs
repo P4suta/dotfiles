@@ -348,7 +348,7 @@ fn completed_review(
         .collect::<String>();
     let count = files.lines().count();
     let body = format!(
-        "**Actionable comments posted: 0**\n- **Run ID**: `00000000-0000-0000-0000-000000000001`\nReviewing files that changed from the base of the PR and between {base} and {head}.\n<summary>📒 Files selected for processing ({count})</summary>\n{selected}</details>\n<!-- This is an auto-generated comment by CodeRabbit for review status -->"
+        "<!-- coderabbit-ai-generated:v1 -->\n\n**Actionable comments posted: 0**\n- **Run ID**: `00000000-0000-0000-0000-000000000001`\nReviewing files that changed from the base of the PR and between {base} and {head}.\n<summary><picture><img src=\"icon.svg\"></picture> Files selected for processing: {count}</summary>\n{selected}</details>\n<!-- This is an auto-generated comment by CodeRabbit for review status -->\n\n<!-- coderabbit-review-publication v1 publication=00000000-0000-0000-0000-000000000001 attempt=00000000-0000-0000-0000-000000000002 batch=1/1 -->"
     );
     Ok(format!(
         r#"[{{"id":1,"user":{{"login":"coderabbitai[bot]"}},"commit_id":"{head}","state":"COMMENTED","submitted_at":"2026-10-26T00:00:00Z","body":{body:?}}}]"#

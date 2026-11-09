@@ -168,9 +168,12 @@ A changed diff needs a current assessment, and supported earlier findings remain
 ## Automatic CodeRabbit reviews
 
 Every importance level uses CodeRabbit PR review.
-Enable automatic reviews for ready PRs and updates without positive label filters.
+Enable automatic reviews for ready PRs and updates targeting every base branch, without positive label filters.
 Leave draft review off unless the repository needs early feedback.
 Read back the effective service configuration because local instructions don't configure the provider.
+Keep automatic summaries off to preserve authored descriptions.
+An explicit summary placeholder still requests generation.
+Use CodeRabbit commit statuses for the workflow's current-head review admission.
 
 Ready admission waits for unfinished, failed, or missing required checks.
 A repository that reports and requires no checks can accept a ready PR.

@@ -1247,16 +1247,55 @@ fn validate_submitted_review(
     Ok(())
 }
 
-fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTreeSet<String>> {
+fn valid_review_id(value: &str) -> bool {
+    value.len() == RUN_ID_LENGTH
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if RUN_ID_SEPARATORS.contains(&index) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+fn complete_review_body(body: &str) -> Result<&str> {
+    const GENERATED: &str = "<!-- coderabbit-ai-generated:v1 -->\n\n";
+    const PUBLICATION: &str = "\n\n<!-- coderabbit-review-publication v1 publication=";
     const FOOTER: &str =
         "<!-- This is an auto-generated comment by CodeRabbit for review status -->";
-    const COMMENTS: &str = "**Actionable comments posted: ";
-    const RUN: &str = "- **Run ID**: `";
-    const FILES: &str = "<summary>📒 Files selected for processing (";
+    let body = body.strip_prefix(GENERATED).unwrap_or(body);
+    ensure!(
+        body.matches(PUBLICATION).count() <= 1,
+        "CodeRabbit publication metadata is ambiguous"
+    );
+    let body = if let Some((body, publication)) = body.rsplit_once(PUBLICATION) {
+        let (publication, attempt) = publication
+            .split_once(" attempt=")
+            .context("CodeRabbit publication identity missing")?;
+        let (attempt, batch) = attempt
+            .split_once(" batch=")
+            .context("CodeRabbit publication batch missing")?;
+        ensure!(
+            valid_review_id(publication) && valid_review_id(attempt) && batch == "1/1 -->",
+            "CodeRabbit publication is malformed or incomplete"
+        );
+        body
+    } else {
+        body
+    };
     ensure!(
         body.lines().last() == Some(FOOTER) && body.matches(FOOTER).count() == 1,
         "CodeRabbit submitted review has no recognized complete-review body"
     );
+    Ok(body)
+}
+
+fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTreeSet<String>> {
+    const COMMENTS: &str = "**Actionable comments posted: ";
+    const RUN: &str = "- **Run ID**: `";
+    const FILES: &str = "<summary>📒 Files selected for processing (";
+    const DECORATED_FILES: &str = " Files selected for processing: ";
+    let body = complete_review_body(body)?;
     let comments = body
         .lines()
         .next()
@@ -1280,30 +1319,36 @@ fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTree
     let run = unique(RUN)?
         .strip_suffix('`')
         .context("CodeRabbit run identity malformed")?;
-    ensure!(
-        run.len() == RUN_ID_LENGTH
-            && run
-                .bytes()
-                .enumerate()
-                .all(|(index, byte)| if RUN_ID_SEPARATORS.contains(&index) {
-                    byte == b'-'
-                } else {
-                    byte.is_ascii_hexdigit()
-                }),
-        "CodeRabbit run identity malformed"
-    );
+    ensure!(valid_review_id(run), "CodeRabbit run identity malformed");
     let (base, reviewed) = review_range(body)?;
     ensure!(
         base == expected_base && reviewed == head,
         "PR review must cover the full canonical PR base-to-head range"
     );
-    let count = unique(FILES)?
-        .strip_suffix(")</summary>")
+    let mut inventories = body.lines().filter(|line| {
+        line.starts_with(FILES) || (line.starts_with("<summary>") && line.contains(DECORATED_FILES))
+    });
+    let inventory = inventories
+        .next()
+        .context("CodeRabbit selected files missing")?;
+    ensure!(
+        inventories.next().is_none(),
+        "CodeRabbit selected file inventory is ambiguous"
+    );
+    let count = inventory
+        .strip_prefix(FILES)
+        .and_then(|count| count.strip_suffix(")</summary>"))
+        .or_else(|| {
+            inventory
+                .strip_suffix("</summary>")?
+                .rsplit_once(DECORATED_FILES)
+                .map(|(_, count)| count)
+        })
         .context("CodeRabbit selected file inventory malformed")?
         .parse::<usize>()?;
     ensure!(count > 0, "CodeRabbit selected no files for the PR review");
     let selected = body
-        .split_once(FILES)
+        .split_once(inventory)
         .context("CodeRabbit selected files missing")?
         .1
         .split_once("</details>")
@@ -2209,6 +2254,40 @@ mod tests {
             body,
         };
         Ok((binding, assessment, review))
+    }
+
+    #[test]
+    fn published_review_layout_preserves_source_and_complete_inventory() -> Result<()> {
+        let (binding, assessment, mut review) = review_fixture()?;
+        let body = format!(
+            "<!-- coderabbit-ai-generated:v1 -->\n\n**Actionable comments posted: 0**\n\n- **Run ID**: `189f0351-3902-4d47-bb7a-8f8f79c45069`\nReviewing files that changed from the base of the PR and between {} and {}.\n<details>\n<summary><picture><img src=\"icon.svg\"></picture> Files selected for processing: 1</summary>\n<dl>\n<dd>\n<br>\n\n* `README.md`\n\n</dd>\n</dl>\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit for review status -->\n\n<!-- coderabbit-review-publication v1 publication=4f08a048-9572-48c4-bc51-9fd7a20efccd attempt=8083a761-44ec-4a55-a9d4-a9bef65ae746 batch=1/1 -->",
+            binding.base, binding.head
+        );
+        review.body = body.clone();
+        validate_submitted_review(&review, &binding, &assessment)?;
+        for invalid in [
+            body.replace("batch=1/1", "batch=1/2"),
+            body.replace("publication=4f08a048", "publication=invalid"),
+            body.replace("attempt=8083a761", "attempt=invalid"),
+            body.replace(
+                "Files selected for processing: 1",
+                "Files selected for processing: 2",
+            ),
+            body.replace("* `README.md`", "* `README.md`\n* `README.md`"),
+            body.replace(&binding.head, &"d".repeat(40)),
+            body.replace("for review status", "review in progress"),
+            body.replace("</details>", ""),
+            body.replace(
+                "<summary>",
+                "<summary> Files selected for processing: 1</summary>\n<summary>",
+            ),
+            body.replace("<!-- coderabbit-ai-generated:v1 -->", "Review skipped."),
+            format!("{body}\nUnexpected trailing content."),
+        ] {
+            review.body = invalid;
+            assert!(validate_submitted_review(&review, &binding, &assessment).is_err());
+        }
+        Ok(())
     }
 
     fn status(id: u64, state: &str, description: &str) -> CommitStatus {

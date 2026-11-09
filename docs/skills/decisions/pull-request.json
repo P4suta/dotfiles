@@ -1,7 +1,7 @@
 {
-  "revision": "68dda8ec9eddf2b89a1bfa3f64b6a80e12532ef4b882a83ad4ff5fbf3629625d",
+  "revision": "427c2473dd72c5c003e69237c12a1f5923c0ab008489da899d5d846f0caa3461",
   "outcome": "implemented",
-  "reason": "Use automatic CodeRabbit PR review at every importance level and keep review controls out of published descriptions.\nKeep source-bound assessments private, retain supported findings, and block paused operations without inserting suppression commands.\nReadiness can start its automatic review after the required project checks pass.\nDescribe missing review evidence as a refusal, and document removal of legacy suppression during migration.",
+  "reason": "Use current-head CodeRabbit PR review at every importance level and for every target branch.\nPreserve authored descriptions by disabling automatic summaries while retaining explicit generation placeholders.\nKeep commit statuses as the checked workflow's terminal signal and accept the provider's published review envelope without relaxing source or inventory validation.",
   "evidence": [
     "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",
@@ -83,7 +83,7 @@
   "revisit": null,
   "size": {
     "outcome": "keep",
-    "reason": "Keep the authoring entry point and load source assessment, attachments, and stack commands from focused references.\nThe checked workflow owns publication enforcement and realistic regression tests.",
+    "reason": "Keep service configuration and source assessment details in focused references.\nThe executable workflow owns metadata parsing and realistic regression fixtures.",
     "revisit": null
   }
 }
