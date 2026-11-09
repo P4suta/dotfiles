@@ -34,6 +34,8 @@ const REVIEW_CONTEXT: &str = "CodeRabbit";
 const RUN_ID_LENGTH: usize = 36;
 const RUN_ID_SEPARATORS: [usize; 4] = [8, 13, 18, 23];
 const REVIEW_RANGE: &str = "Reviewing files that changed from the base of the PR and between ";
+const RECENT_REVIEW: &str = "<!-- recent_review_start -->";
+const SUMMARY_PREFIX: &str = "<!-- coderabbit-ai-generated:v1 -->\n\n<!-- This is an auto-generated comment: summarize by coderabbit.ai -->";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -922,6 +924,14 @@ struct SubmittedReview {
 }
 
 #[derive(Deserialize)]
+struct ReviewSummary {
+    id: u64,
+    user: Option<Bot>,
+    updated_at: Option<String>,
+    body: String,
+}
+
+#[derive(Deserialize)]
 struct CommitStatus {
     id: u64,
     creator: Bot,
@@ -1063,15 +1073,160 @@ fn require_pr_review(
         github,
         &format!("repos/{}/commits/{head}/statuses", target.repo),
     )?;
-    validate_pr_evidence(&reviews, &statuses, binding, assessment, pr, |review| {
-        compare_reviewed_head(github, target, binding, review)
-    })?;
+    let summaries: Vec<ReviewSummary> = pages(
+        github,
+        &format!("repos/{}/issues/{pr}/comments", target.repo),
+    )?;
+    validate_pr_evidence_with_summaries(
+        &reviews,
+        &statuses,
+        &summaries,
+        binding,
+        assessment,
+        pr,
+        |review| compare_reviewed_head(github, target, binding, review),
+    )?;
     let live = super::live_document(github, target, pr)?;
     ensure!(
         live.head_ref_oid.as_deref() == Some(head.as_str()),
         "PR head changed while review evidence was inspected"
     );
     Ok(())
+}
+
+fn validate_pr_evidence_with_summaries(
+    reviews: &[SubmittedReview],
+    statuses: &[CommitStatus],
+    summaries: &[ReviewSummary],
+    binding: &Binding,
+    assessment: &Assessment,
+    pr: u64,
+    compare: impl FnMut(&SubmittedReview) -> Result<ComparedReview>,
+) -> Result<()> {
+    let summary = summaries
+        .iter()
+        .filter(|summary| {
+            summary
+                .user
+                .as_ref()
+                .is_some_and(|user| user.login == REVIEW_BOT)
+                && summary.body.starts_with(SUMMARY_PREFIX)
+                && summary.body.contains(RECENT_REVIEW)
+        })
+        .max_by_key(|summary| summary.id);
+    let Some(summary) = summary else {
+        return validate_pr_evidence(reviews, statuses, binding, assessment, pr, compare);
+    };
+    match validate_clean_summary(summary, reviews, statuses, binding, assessment, pr) {
+        Ok(()) => Ok(()),
+        Err(error) => validate_pr_evidence(reviews, statuses, binding, assessment, pr, compare)
+            .with_context(|| format!("CodeRabbit clean review summary was rejected: {error:#}")),
+    }
+}
+
+fn summary_section<'a>(body: &'a str, start: &str, end: &str) -> Result<&'a str> {
+    ensure!(
+        body.matches(start).count() == 1 && body.matches(end).count() == 1,
+        "CodeRabbit summary section is missing or ambiguous"
+    );
+    body.split_once(start)
+        .and_then(|(_, body)| body.split_once(end))
+        .map(|(section, _)| section)
+        .context("CodeRabbit summary section is incomplete")
+}
+
+fn validate_clean_summary(
+    summary: &ReviewSummary,
+    reviews: &[SubmittedReview],
+    statuses: &[CommitStatus],
+    binding: &Binding,
+    assessment: &Assessment,
+    pr: u64,
+) -> Result<()> {
+    ensure!(
+        summary.id != 0
+            && summary
+                .user
+                .as_ref()
+                .is_some_and(|user| user.login == REVIEW_BOT)
+            && summary.body.starts_with(SUMMARY_PREFIX),
+        "CodeRabbit summary has no recognized provider identity"
+    );
+    let clean = summary_section(
+        &summary.body,
+        "<!-- recent_review_status_start -->",
+        "<!-- recent_review_status_end -->",
+    )?;
+    ensure!(
+        clean.trim() == "No actionable comments were generated in the recent review.",
+        "CodeRabbit summary does not report a clean completed review"
+    );
+    let updated: jiff::Timestamp = summary
+        .updated_at
+        .as_deref()
+        .context("CodeRabbit summary update time is missing")?
+        .parse()
+        .context("CodeRabbit summary update time is malformed")?;
+    let status = completed_pr_status(statuses, binding, pr)?;
+    let completed: jiff::Timestamp = status
+        .created_at
+        .as_deref()
+        .context("CodeRabbit completion time is missing")?
+        .parse()
+        .context("CodeRabbit completion time is malformed")?;
+    ensure!(
+        updated < completed,
+        "CodeRabbit summary has no later completion status"
+    );
+    if let Some(review) = reviews
+        .iter()
+        .filter(|review| review.user.login == REVIEW_BOT)
+        .max_by_key(|review| review.id)
+    {
+        let submitted: jiff::Timestamp = review
+            .submitted_at
+            .as_deref()
+            .context("latest CodeRabbit review submission time is missing")?
+            .parse()
+            .context("latest CodeRabbit review submission time is malformed")?;
+        ensure!(
+            submitted <= updated,
+            "CodeRabbit summary precedes the latest submitted review"
+        );
+    }
+    let metadata = summary_section(&summary.body, RECENT_REVIEW, "<!-- recent_review_end -->")?;
+    let files = full_review_metadata(metadata, &binding.base, &binding.head)?;
+    ensure!(
+        assessment
+            .evidence
+            .iter()
+            .all(|evidence| files.contains(&evidence.path)),
+        "assessment evidence paths were not selected by the completed summary review"
+    );
+    Ok(())
+}
+
+fn completed_pr_status<'a>(
+    statuses: &'a [CommitStatus],
+    binding: &Binding,
+    pr: u64,
+) -> Result<&'a CommitStatus> {
+    let status = statuses
+        .iter()
+        .filter(|status| status.creator.login == REVIEW_BOT && status.context == REVIEW_CONTEXT)
+        .max_by_key(|status| status.id)
+        .ok_or_else(|| {
+            missing_pr_review(
+                binding,
+                pr,
+                "current-head CodeRabbit terminal status is unavailable",
+            )
+        })?;
+    ensure!(
+        status.state == "success" && status.description == "Review completed",
+        "current-head CodeRabbit terminal is skipped, partial, pending, failed, or unknown"
+    );
+    Ok(status)
 }
 
 fn validate_pr_evidence(
@@ -1093,21 +1248,7 @@ fn validate_pr_evidence(
                 "PR has no submitted CodeRabbit review of its current head",
             )
         })?;
-    let status = statuses
-        .iter()
-        .filter(|status| status.creator.login == REVIEW_BOT && status.context == REVIEW_CONTEXT)
-        .max_by_key(|status| status.id)
-        .ok_or_else(|| {
-            missing_pr_review(
-                binding,
-                pr,
-                "current-head CodeRabbit terminal status is unavailable",
-            )
-        })?;
-    ensure!(
-        status.state == "success" && status.description == "Review completed",
-        "current-head CodeRabbit terminal is skipped, partial, pending, failed, or unknown"
-    );
+    let status = completed_pr_status(statuses, binding, pr)?;
     if review.commit_id == binding.head && !review.body.trim().is_empty() {
         return validate_submitted_review(review, binding, assessment);
     }
@@ -1309,10 +1450,13 @@ fn complete_review_body(body: &str) -> Result<&str> {
 }
 
 fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTreeSet<String>> {
+    full_review_metadata(complete_review_body(body)?, expected_base, head)
+}
+
+fn full_review_metadata(body: &str, expected_base: &str, head: &str) -> Result<BTreeSet<String>> {
     const RUN: &str = "- **Run ID**: `";
     const FILES: &str = "<summary>📒 Files selected for processing (";
     const DECORATED_FILES: &str = " Files selected for processing: ";
-    let body = complete_review_body(body)?;
     let unique = |prefix: &str| -> Result<&str> {
         let mut found = body.lines().filter_map(|line| line.strip_prefix(prefix));
         let value = found
@@ -1347,10 +1491,14 @@ fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTree
         .strip_prefix(FILES)
         .and_then(|count| count.strip_suffix(")</summary>"))
         .or_else(|| {
-            inventory
+            let (_, count) = inventory
                 .strip_suffix("</summary>")?
-                .rsplit_once(DECORATED_FILES)
-                .map(|(_, count)| count)
+                .rsplit_once(DECORATED_FILES)?;
+            if inventory.starts_with("<summary><strong>") {
+                count.strip_suffix("</strong>")
+            } else {
+                Some(count)
+            }
         })
         .context("CodeRabbit selected file inventory malformed")?
         .parse::<usize>()?;
@@ -2262,6 +2410,115 @@ mod tests {
             body,
         };
         Ok((binding, assessment, review))
+    }
+
+    fn summary_fixture() -> Result<(Binding, Assessment, ReviewSummary)> {
+        let (binding, assessment, review) = review_fixture()?;
+        let metadata = review
+            .body
+            .replace("**Actionable comments posted: 0**\n", "")
+            .replace(
+                "<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+                "",
+            )
+            .replace(
+                "<summary>📒 Files selected for processing (1)</summary>",
+                "<summary><strong> Files selected for processing: 1</strong></summary>",
+            );
+        let summary = ReviewSummary {
+            id: 1,
+            user: Some(Bot {
+                login: REVIEW_BOT.into(),
+            }),
+            updated_at: Some("2026-10-14T00:00:30Z".into()),
+            body: format!(
+                "<!-- coderabbit-ai-generated:v1 -->\n\n<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- recent_review_status_start -->\nNo actionable comments were generated in the recent review.\n<!-- recent_review_status_end -->\n{RECENT_REVIEW}\n{metadata}\n<!-- recent_review_end -->"
+            ),
+        };
+        Ok((binding, assessment, summary))
+    }
+
+    #[test]
+    fn clean_summaries_require_complete_current_source_metadata() -> Result<()> {
+        let (binding, assessment, mut summary) = summary_fixture()?;
+        let statuses = [status(1, "success", "Review completed")];
+        validate_clean_summary(&summary, &[], &statuses, &binding, &assessment, 17)?;
+        let body = summary.body.clone();
+        for invalid in [
+            body.replace("coderabbit-ai-generated:v1", "unrecognized"),
+            body.replace(
+                "No actionable comments were generated in the recent review.",
+                "Review skipped.",
+            ),
+            body.replace("<!-- recent_review_status_end -->", ""),
+            body.replace(RECENT_REVIEW, &format!("{RECENT_REVIEW}\n{RECENT_REVIEW}")),
+            body.replace("<!-- recent_review_end -->", ""),
+            body.replace("00000000-0000-0000-0000-000000000001", "invalid-run"),
+            body.replace(&binding.base, &"d".repeat(40)),
+            body.replace(&binding.head, &"e".repeat(40)),
+            body.replace(
+                "Files selected for processing: 1",
+                "Files selected for processing: 2",
+            ),
+            body.replace("* `README.md`", "* `README.md`\n* `README.md`"),
+            body.replace("README.md", "unselected.md"),
+            body.replace("</details>", ""),
+        ] {
+            summary.body = invalid;
+            assert!(
+                validate_clean_summary(&summary, &[], &statuses, &binding, &assessment, 17)
+                    .is_err()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn clean_summaries_require_provider_identity_and_fresh_completion() -> Result<()> {
+        let (binding, assessment, _) = summary_fixture()?;
+        let statuses = [status(1, "success", "Review completed")];
+        for (id, author, updated) in [
+            (0, Some(REVIEW_BOT), Some("2026-10-14T00:00:30Z")),
+            (1, None, Some("2026-10-14T00:00:30Z")),
+            (1, Some("untrusted-user"), Some("2026-10-14T00:00:30Z")),
+            (1, Some(REVIEW_BOT), None),
+            (1, Some(REVIEW_BOT), Some("invalid-time")),
+            (1, Some(REVIEW_BOT), Some("2026-10-14T00:01:00Z")),
+            (1, Some(REVIEW_BOT), Some("2026-10-14T00:02:00Z")),
+        ] {
+            let (_, _, mut summary) = summary_fixture()?;
+            summary.id = id;
+            summary.user = author.map(|login| Bot {
+                login: login.into(),
+            });
+            summary.updated_at = updated.map(String::from);
+            assert!(
+                validate_clean_summary(&summary, &[], &statuses, &binding, &assessment, 17)
+                    .is_err()
+            );
+        }
+        let (_, _, summary) = summary_fixture()?;
+        for statuses in [
+            vec![],
+            vec![status(1, "pending", "Review in progress")],
+            vec![status(1, "success", "Review skipped")],
+            vec![
+                status(1, "success", "Review completed"),
+                status(2, "failure", "Review failed"),
+            ],
+        ] {
+            assert!(
+                validate_clean_summary(&summary, &[], &statuses, &binding, &assessment, 17)
+                    .is_err()
+            );
+        }
+        let (_, _, mut later) = review_fixture()?;
+        later.submitted_at = Some("2026-10-14T00:00:40Z".into());
+        assert!(
+            validate_clean_summary(&summary, &[later], &statuses, &binding, &assessment, 17)
+                .is_err()
+        );
+        Ok(())
     }
 
     #[test]

@@ -5883,6 +5883,57 @@ fn reviewed_head_fixture(rebase: bool) -> Result<(Fixture, String, serde_json::V
 }
 
 #[test]
+fn clean_full_review_summaries_accept_completion_and_preserve_open_findings() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let body = format!(
+        "<!-- coderabbit-ai-generated:v1 -->\n\n<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- recent_review_status_start -->\n\nNo actionable comments were generated in the recent review.\n\n<!-- recent_review_status_end -->\n<!-- recent_review_start -->\n- **Run ID**: `00000000-0000-0000-0000-000000000001`\nReviewing files that changed from the base of the PR and between {} and {}.\n<summary><strong><picture><img src=\"icon.svg\"></picture> Files selected for processing: 1</strong></summary>\n* `body.md`\n</details>\n<!-- recent_review_end -->",
+        fixture.base, fixture.head
+    );
+    let summaries = serde_json::json!([{
+        "id":1,"user":{"login":"coderabbitai[bot]"},
+        "updated_at":"2026-10-26T00:00:30Z","body":body
+    }]);
+    for case in ["no-submitted-review", "incremental-review", "open-finding"] {
+        let mut command = fixture.command("check")?;
+        command
+            .args(["--pr", "17", "--final"])
+            .env("GH_FIXTURE_REVIEWS", "[]")
+            .env("GH_FIXTURE_REVIEW_SUMMARIES", summaries.to_string());
+        if case == "incremental-review" {
+            let incremental = format!(
+                "**Actionable comments posted: 0**\n- **Run ID**: `00000000-0000-0000-0000-000000000002`\nReviewing files that changed from the base of the PR and between {0} and {0}.\n<summary>📒 Files selected for processing (1)</summary>\n* `body.md`\n</details>\n<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+                fixture.head
+            );
+            command.env(
+                "GH_FIXTURE_REVIEWS",
+                serde_json::json!([{
+                    "id":1,"user":{"login":"coderabbitai[bot]"},"commit_id":fixture.head,
+                    "state":"COMMENTED","submitted_at":"2026-10-26T00:00:00Z","body":incremental
+                }])
+                .to_string(),
+            );
+        }
+        if case == "open-finding" {
+            command.env("GH_FIXTURE_GRAPHQL", serde_json::json!({"data":{"repository":{"pullRequest":{
+                "headRefOid":fixture.head,
+                "reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{
+                    "id":"unresolved-thread","isResolved":false,
+                    "comments":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"author":{"login":"coderabbitai"},"body":"A finding remains open."}]}
+                }]}
+            }}}}).to_string());
+        }
+        let output = command.output()?;
+        assert_eq!(
+            output.status.success(),
+            case != "open-finding",
+            "{case}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn repository_pr_policy_accepts_carried_current_head_completion() -> Result<()> {
     for level in ["low", "medium", "high", "critical"] {
         for approval in [false, true] {

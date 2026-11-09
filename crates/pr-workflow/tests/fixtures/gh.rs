@@ -88,6 +88,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GH_FIXTURE_SIGNING_KEYS"
         } else if endpoint.contains("/rules/branches/") {
             "GH_FIXTURE_RULES"
+        } else if endpoint.contains("/issues/") && endpoint.contains("/comments?") {
+            "GH_FIXTURE_REVIEW_SUMMARIES"
         } else if endpoint.contains("/issues/") {
             "GH_FIXTURE_ISSUE"
         } else if endpoint.contains("/compare/") {
@@ -238,6 +240,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GH_FIXTURE_RULES",
             "GH_FIXTURE_REVIEWS",
             "GH_FIXTURE_STATUSES",
+            "GH_FIXTURE_REVIEW_SUMMARIES",
         ]
         .contains(&variable)
         {
