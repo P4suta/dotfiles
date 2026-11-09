@@ -1266,7 +1266,6 @@ fn complete_review_body(body: &str) -> Result<&str> {
         "<!-- This is an auto-generated comment by CodeRabbit for review status -->";
     let generated = body.strip_prefix(GENERATED);
     let body = generated.unwrap_or(body);
-    let published = generated.is_some() && body.contains(PUBLICATION);
     ensure!(
         body.matches(PUBLICATION).count() <= 1,
         "CodeRabbit publication metadata is ambiguous"
@@ -1301,7 +1300,10 @@ fn complete_review_body(body: &str) -> Result<&str> {
             .parse::<usize>()
             .context("CodeRabbit actionable inventory malformed")?;
     } else {
-        ensure!(published, "CodeRabbit actionable inventory missing");
+        ensure!(
+            generated.is_some(),
+            "CodeRabbit actionable inventory missing"
+        );
     }
     Ok(body)
 }
@@ -2272,6 +2274,11 @@ mod tests {
         review.body = body.clone();
         validate_submitted_review(&review, &binding, &assessment)?;
         review.body = body.replace("**Actionable comments posted: 0**", "\n\n---");
+        validate_submitted_review(&review, &binding, &assessment)?;
+        let (without_publication, _) = body
+            .rsplit_once("\n\n<!-- coderabbit-review-publication ")
+            .context("fixture publication metadata missing")?;
+        review.body = without_publication.replace("**Actionable comments posted: 0**", "");
         validate_submitted_review(&review, &binding, &assessment)?;
         for invalid in [
             body.replace("batch=1/1", "batch=1/2"),
