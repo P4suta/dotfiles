@@ -1,8 +1,9 @@
 {
-  "revision": "e6fafd27b50e7c699c5d273abcafd1540abcebd2de517bf420a81979a79043c7",
+  "revision": "cb15cf787fb042125671cf0cea59566fd3029ddb0048c10ab5ecec3be04f5c30",
   "outcome": "implemented",
-  "reason": "Use automatic CodeRabbit reviews after readiness and updates without command generation, insertion, or directive validation.\nDisable commit-count auto-pause and admit authenticated incremental reviews ending at the current head.\nPreserve authored descriptions, source binding, completed status, and supported findings.",
+  "reason": "Use automatic incremental reviews without manual commands or a full-review prerequisite.\nHonor an explicit merge instruction during unavailable optional review through normal GitHub admission.\nPreserve source checks, required reviews, supported findings, and truthful review status.",
   "evidence": [
+    "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
     "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",

@@ -1,8 +1,9 @@
 {
-  "revision": "914db4d7f0466d7637b13cbaec2bb59605efc5b66b6ea4f1c159dcca52f5a09e",
+  "revision": "f9153dc506e5997b5307be6a1365b36fe3c44ac7ccbb7359f10ed8f71e703b39",
   "outcome": "implemented",
-  "reason": "Wait for automatic current-head CodeRabbit reviews after readiness and substantive updates without manual review commands.\nAccept incremental scope and preserve supported findings, completed status, owner pauses, and separate CLI capacity.",
+  "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, owner holds, and guarded explicit reviews.",
   "evidence": [
+    "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
     "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",

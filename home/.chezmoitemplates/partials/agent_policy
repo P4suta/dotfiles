@@ -58,6 +58,8 @@ A project's own instructions take precedence when they conflict.
 - Proactively use knowledge-to-skills to preserve reusable knowledge from research, implementation, debugging, review, failures, and feedback without waiting for a request.
 - Keep premise truth, natural-language interpretation, formal entailment, and decision relevance separate, and report unsupported or incomplete checks without claiming verification.
 - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
-- Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.
-- Never declare a PR complete while supported review findings, required checks, or a review of its current head remain outstanding.
+- Keep the CodeRabbit CLI and PR review pools separate, and apply capacity checks to explicitly requested reviews.
+  Use automatic incremental PR reviews without requiring manual commands or a full review.
+- Resolve supported review findings and pass required checks before declaring a PR complete.
+  Honor an explicit instruction to merge despite an unavailable optional CodeRabbit review, while preserving repository-required reviews and publication holds.
 - Commit, push, reply to or resolve PR threads, request reviews, and merge only when the owner asks.

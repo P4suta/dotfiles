@@ -38,4 +38,6 @@ Read REST `repos/<owner>/<repo>/pulls/<number>/reviews` and `repos/<owner>/<repo
 Compare the current head with completed review metadata and the newest bot summary, because an incremental review may report completion only in the summary.
 An incremental review covers updates since the preceding run and need not repeat the full PR range or the preceding run's selected files.
 Never describe an approval, a skipped review, `Review rate limited`, a superseded run, or missing commit evidence as a fresh completed review.
+Review completion and owner-authorized merge admission are separate decisions.
+Use `pull-request` for merge commands when the owner explicitly chooses to merge without optional review.
 Read the head again before acting when the branch moves.

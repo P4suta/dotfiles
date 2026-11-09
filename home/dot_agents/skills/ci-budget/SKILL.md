@@ -13,7 +13,8 @@ Before release, require the full inventory on the exact candidate.
 Affected evidence can't replace full-scope evidence.
 Reuse current results instead of starting duplicate campaigns at commit, push, or PR transitions.
 Use `formal-assurance` for reproducible verdicts and run heavy checks in the project's pinned container or documented hosted runners.
-Required hosted checks and the current-head PR review stay the final gates of a pull request.
+Required hosted checks and repository-required reviews remain merge gates.
+Use automatic incremental CodeRabbit reviews and follow `pull-request` for an explicit merge instruction during unavailable optional review.
 An active owner-imposed push pause overrides any push authorization until the owner explicitly resumes pushes.
 
 ## Prepare locally
@@ -48,6 +49,7 @@ A local commit implies no push.
 Fetch before publishing, then publish one complete reviewable update and follow its run instead of launching duplicates.
 Inspect push, `pull_request`, tag, and merge triggers for the hosted effects of one publication.
 
-Wait for the automatic reviews of the final pushed head.
+Inspect the final pushed head's automatic review state without demanding a manual command or full review.
+Wait for active automatic review unless the owner's explicit optional-review merge instruction applies.
 Report an unresolved hold or hosted gate as pending with the local result and the blocked step.
 [Skipped required workflows stay pending](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs).
