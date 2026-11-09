@@ -29,7 +29,8 @@ Manual opt-in requires repeated commands.
 ## Consequences
 
 Retire suppression rules and probes; retain billing limits.
-Remove legacy `@coderabbitai ignore` and `<!-- coderabbit-pause -->` markers from open PR descriptions.
+Remove suppression text from open PR descriptions and use automatic reviews after readiness or updates.
+The [automatic review workflow](use-automatic-coderabbit-reviews-without-command-generation.md) removes command generation and admits incremental reviews.
 Reconsider scope if included capacity blocks completed changes.
 
 ## Confirmation

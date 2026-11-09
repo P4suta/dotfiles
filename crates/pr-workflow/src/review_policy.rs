@@ -348,7 +348,6 @@ fn capture_source(
                 .as_ref()
                 .map_or(repository, platform::source_identity::Binding::source)
                 .into(),
-            generation: rules::pr_rules::Generation::Local,
             title_policy: None,
             issue: None,
             cli_receipt: None,
@@ -1117,7 +1116,7 @@ fn validate_pr_evidence_with_summaries(
     let Some(summary) = summary else {
         return validate_pr_evidence(reviews, statuses, binding, assessment, pr, compare);
     };
-    match validate_clean_summary(summary, reviews, statuses, binding, assessment, pr) {
+    match validate_clean_summary(summary, reviews, statuses, binding, pr) {
         Ok(()) => Ok(()),
         Err(error) => validate_pr_evidence(reviews, statuses, binding, assessment, pr, compare)
             .with_context(|| format!("CodeRabbit clean review summary was rejected: {error:#}")),
@@ -1140,7 +1139,6 @@ fn validate_clean_summary(
     reviews: &[SubmittedReview],
     statuses: &[CommitStatus],
     binding: &Binding,
-    assessment: &Assessment,
     pr: u64,
 ) -> Result<()> {
     ensure!(
@@ -1167,17 +1165,7 @@ fn validate_clean_summary(
         .context("CodeRabbit summary update time is missing")?
         .parse()
         .context("CodeRabbit summary update time is malformed")?;
-    let status = completed_pr_status(statuses, binding, pr)?;
-    let completed: jiff::Timestamp = status
-        .created_at
-        .as_deref()
-        .context("CodeRabbit completion time is missing")?
-        .parse()
-        .context("CodeRabbit completion time is malformed")?;
-    ensure!(
-        updated < completed,
-        "CodeRabbit summary has no later completion status"
-    );
+    completed_pr_status(statuses, binding, pr)?;
     if let Some(review) = reviews
         .iter()
         .filter(|review| review.user.login == REVIEW_BOT)
@@ -1195,14 +1183,7 @@ fn validate_clean_summary(
         );
     }
     let metadata = summary_section(&summary.body, RECENT_REVIEW, "<!-- recent_review_end -->")?;
-    let files = full_review_metadata(metadata, &binding.base, &binding.head)?;
-    ensure!(
-        assessment
-            .evidence
-            .iter()
-            .all(|evidence| files.contains(&evidence.path)),
-        "assessment evidence paths were not selected by the completed summary review"
-    );
+    review_metadata(metadata, &binding.head)?;
     Ok(())
 }
 
@@ -1250,7 +1231,7 @@ fn validate_pr_evidence(
         })?;
     let status = completed_pr_status(statuses, binding, pr)?;
     if review.commit_id == binding.head && !review.body.trim().is_empty() {
-        return validate_submitted_review(review, binding, assessment);
+        return validate_submitted_review(review, binding);
     }
     if review.commit_id == binding.head {
         ensure!(
@@ -1356,16 +1337,12 @@ fn missing_pr_review(binding: &Binding, pr: u64, cause: &str) -> platform::refus
         ]),
     )
     .evidence(format!(
-        "{}#{pr}: full review {}..{}; diff SHA256 {}",
+        "{}#{pr}: source {}..{}; diff SHA256 {}",
         binding.repository, binding.base, binding.head, binding.diff_sha256
     ))
 }
 
-fn validate_submitted_review(
-    review: &SubmittedReview,
-    binding: &Binding,
-    assessment: &Assessment,
-) -> Result<()> {
+fn validate_submitted_review(review: &SubmittedReview, binding: &Binding) -> Result<()> {
     ensure!(
         review.id != 0
             && review.commit_id == binding.head
@@ -1377,14 +1354,7 @@ fn validate_submitted_review(
             && !review.body.trim().is_empty(),
         "current-head CodeRabbit review is pending, dismissed, empty, or requests changes"
     );
-    let files = full_review_body(&review.body, &binding.base, &binding.head)?;
-    ensure!(
-        assessment
-            .evidence
-            .iter()
-            .all(|evidence| files.contains(&evidence.path)),
-        "assessment evidence paths were not selected by the completed full PR review"
-    );
+    review_metadata(complete_review_body(&review.body)?, &binding.head)?;
     Ok(())
 }
 
@@ -1450,10 +1420,16 @@ fn complete_review_body(body: &str) -> Result<&str> {
 }
 
 fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTreeSet<String>> {
-    full_review_metadata(complete_review_body(body)?, expected_base, head)
+    let metadata = complete_review_body(body)?;
+    let (base, _) = review_range(metadata)?;
+    ensure!(
+        base == expected_base,
+        "prior PR review must cover its canonical PR base-to-head range"
+    );
+    review_metadata(metadata, head)
 }
 
-fn full_review_metadata(body: &str, expected_base: &str, head: &str) -> Result<BTreeSet<String>> {
+fn review_metadata(body: &str, head: &str) -> Result<BTreeSet<String>> {
     const RUN: &str = "- **Run ID**: `";
     const FILES: &str = "<summary>📒 Files selected for processing (";
     const DECORATED_FILES: &str = " Files selected for processing: ";
@@ -1472,11 +1448,8 @@ fn full_review_metadata(body: &str, expected_base: &str, head: &str) -> Result<B
         .strip_suffix('`')
         .context("CodeRabbit run identity malformed")?;
     ensure!(valid_review_id(run), "CodeRabbit run identity malformed");
-    let (base, reviewed) = review_range(body)?;
-    ensure!(
-        base == expected_base && reviewed == head,
-        "PR review must cover the full canonical PR base-to-head range"
-    );
+    let (_, reviewed) = review_range(body)?;
+    ensure!(reviewed == head, "PR review must end at the current head");
     let mut inventories = body.lines().filter(|line| {
         line.starts_with(FILES) || (line.starts_with("<summary>") && line.contains(DECORATED_FILES))
     });
@@ -2370,12 +2343,9 @@ mod tests {
     #[test]
     fn a_published_document_refuses_local_workflow_evidence() {
         let recheck = || "pr-workflow check".to_owned();
-        crate::refuse_local_evidence("## Why\n\nA reason.\n\n@coderabbitai ignore\n", recheck)
-            .expect("the standing ignore line stays allowed");
         for body in [
             format!("Text.\n{PACKET_PREFIX} {{\"object\":\"o\",\"raw\":\"r\"}} -->\n"),
             format!("  {PACKET_PREFIX}{{}} -->"),
-            format!("Text.\n{}\n", crate::PAUSE_EXCLUSION),
         ] {
             let error = crate::refuse_local_evidence(&body, recheck).unwrap_err();
             assert!(
@@ -2439,10 +2409,46 @@ mod tests {
     }
 
     #[test]
-    fn clean_summaries_require_complete_current_source_metadata() -> Result<()> {
+    fn automatic_incremental_reviews_accept_current_head_and_selected_changes() -> Result<()> {
+        let (binding, assessment, mut review) = review_fixture()?;
+        review.body = review
+            .body
+            .replace(&binding.base, &"d".repeat(40))
+            .replace("README.md", "changed.rs");
+        validate_pr_evidence(
+            &[review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            no_comparison,
+        )
+    }
+
+    #[test]
+    fn automatic_incremental_clean_summaries_accept_provider_postprocessing() -> Result<()> {
         let (binding, assessment, mut summary) = summary_fixture()?;
+        summary.body = summary
+            .body
+            .replace(&binding.base, &"d".repeat(40))
+            .replace("README.md", "changed.rs");
+        summary.updated_at = Some("2026-10-14T00:02:00Z".into());
+        validate_pr_evidence_with_summaries(
+            &[],
+            &[status(1, "success", "Review completed")],
+            &[summary],
+            &binding,
+            &assessment,
+            17,
+            no_comparison,
+        )
+    }
+
+    #[test]
+    fn clean_summaries_require_complete_current_source_metadata() -> Result<()> {
+        let (binding, _, mut summary) = summary_fixture()?;
         let statuses = [status(1, "success", "Review completed")];
-        validate_clean_summary(&summary, &[], &statuses, &binding, &assessment, 17)?;
+        validate_clean_summary(&summary, &[], &statuses, &binding, 17)?;
         let body = summary.body.clone();
         for invalid in [
             body.replace("coderabbit-ai-generated:v1", "unrecognized"),
@@ -2454,28 +2460,23 @@ mod tests {
             body.replace(RECENT_REVIEW, &format!("{RECENT_REVIEW}\n{RECENT_REVIEW}")),
             body.replace("<!-- recent_review_end -->", ""),
             body.replace("00000000-0000-0000-0000-000000000001", "invalid-run"),
-            body.replace(&binding.base, &"d".repeat(40)),
             body.replace(&binding.head, &"e".repeat(40)),
             body.replace(
                 "Files selected for processing: 1",
                 "Files selected for processing: 2",
             ),
             body.replace("* `README.md`", "* `README.md`\n* `README.md`"),
-            body.replace("README.md", "unselected.md"),
             body.replace("</details>", ""),
         ] {
             summary.body = invalid;
-            assert!(
-                validate_clean_summary(&summary, &[], &statuses, &binding, &assessment, 17)
-                    .is_err()
-            );
+            assert!(validate_clean_summary(&summary, &[], &statuses, &binding, 17).is_err());
         }
         Ok(())
     }
 
     #[test]
     fn clean_summaries_require_provider_identity_and_fresh_completion() -> Result<()> {
-        let (binding, assessment, _) = summary_fixture()?;
+        let (binding, _, _) = summary_fixture()?;
         let statuses = [status(1, "success", "Review completed")];
         for (id, author, updated) in [
             (0, Some(REVIEW_BOT), Some("2026-10-14T00:00:30Z")),
@@ -2483,8 +2484,6 @@ mod tests {
             (1, Some("untrusted-user"), Some("2026-10-14T00:00:30Z")),
             (1, Some(REVIEW_BOT), None),
             (1, Some(REVIEW_BOT), Some("invalid-time")),
-            (1, Some(REVIEW_BOT), Some("2026-10-14T00:01:00Z")),
-            (1, Some(REVIEW_BOT), Some("2026-10-14T00:02:00Z")),
         ] {
             let (_, _, mut summary) = summary_fixture()?;
             summary.id = id;
@@ -2492,10 +2491,7 @@ mod tests {
                 login: login.into(),
             });
             summary.updated_at = updated.map(String::from);
-            assert!(
-                validate_clean_summary(&summary, &[], &statuses, &binding, &assessment, 17)
-                    .is_err()
-            );
+            assert!(validate_clean_summary(&summary, &[], &statuses, &binding, 17).is_err());
         }
         let (_, _, summary) = summary_fixture()?;
         for statuses in [
@@ -2507,36 +2503,30 @@ mod tests {
                 status(2, "failure", "Review failed"),
             ],
         ] {
-            assert!(
-                validate_clean_summary(&summary, &[], &statuses, &binding, &assessment, 17)
-                    .is_err()
-            );
+            assert!(validate_clean_summary(&summary, &[], &statuses, &binding, 17).is_err());
         }
         let (_, _, mut later) = review_fixture()?;
         later.submitted_at = Some("2026-10-14T00:00:40Z".into());
-        assert!(
-            validate_clean_summary(&summary, &[later], &statuses, &binding, &assessment, 17)
-                .is_err()
-        );
+        assert!(validate_clean_summary(&summary, &[later], &statuses, &binding, 17).is_err());
         Ok(())
     }
 
     #[test]
     fn published_review_layout_preserves_source_and_complete_inventory() -> Result<()> {
-        let (binding, assessment, mut review) = review_fixture()?;
+        let (binding, _, mut review) = review_fixture()?;
         let body = format!(
             "<!-- coderabbit-ai-generated:v1 -->\n\n**Actionable comments posted: 0**\n\n- **Run ID**: `189f0351-3902-4d47-bb7a-8f8f79c45069`\nReviewing files that changed from the base of the PR and between {} and {}.\n<details>\n<summary><picture><img src=\"icon.svg\"></picture> Files selected for processing: 1</summary>\n<dl>\n<dd>\n<br>\n\n* `README.md`\n\n</dd>\n</dl>\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit for review status -->\n\n<!-- coderabbit-review-publication v1 publication=4f08a048-9572-48c4-bc51-9fd7a20efccd attempt=8083a761-44ec-4a55-a9d4-a9bef65ae746 batch=1/1 -->",
             binding.base, binding.head
         );
         review.body = body.clone();
-        validate_submitted_review(&review, &binding, &assessment)?;
+        validate_submitted_review(&review, &binding)?;
         review.body = body.replace("**Actionable comments posted: 0**", "\n\n---");
-        validate_submitted_review(&review, &binding, &assessment)?;
+        validate_submitted_review(&review, &binding)?;
         let (without_publication, _) = body
             .rsplit_once("\n\n<!-- coderabbit-review-publication ")
             .context("fixture publication metadata missing")?;
         review.body = without_publication.replace("**Actionable comments posted: 0**", "");
-        validate_submitted_review(&review, &binding, &assessment)?;
+        validate_submitted_review(&review, &binding)?;
         for invalid in [
             body.replace("batch=1/1", "batch=1/2"),
             body.replace("publication=4f08a048", "publication=invalid"),
@@ -2557,7 +2547,7 @@ mod tests {
             format!("{body}\nUnexpected trailing content."),
         ] {
             review.body = invalid;
-            assert!(validate_submitted_review(&review, &binding, &assessment).is_err());
+            assert!(validate_submitted_review(&review, &binding).is_err());
         }
         Ok(())
     }
@@ -2856,25 +2846,23 @@ mod tests {
     }
 
     #[test]
-    fn critical_review_requires_full_range_and_severity_path_coverage() -> Result<()> {
-        let (binding, assessment, mut review) = review_fixture()?;
-        validate_submitted_review(&review, &binding, &assessment)?;
+    fn submitted_review_requires_current_head_and_complete_metadata() -> Result<()> {
+        let (binding, _, mut review) = review_fixture()?;
+        validate_submitted_review(&review, &binding)?;
         let original = review.body.clone();
         for body in [
             original.replace("**Actionable comments posted: 0**\n", ""),
-            original.replace(&binding.base, &"d".repeat(40)),
             original.replace(&binding.head, &"e".repeat(40)),
-            original.replace("README.md", "other.md"),
             original.replace("* `README.md`", "* `README.md`\n* `README.md`"),
             format!("Review skipped due to rate limit.\n{original}"),
             "Pre-merge checks failed. Please resolve the failing checks before merging.".into(),
         ] {
             review.body = body;
-            assert!(validate_submitted_review(&review, &binding, &assessment).is_err());
+            assert!(validate_submitted_review(&review, &binding).is_err());
         }
         review.body = original;
         review.state = "DISMISSED".into();
-        assert!(validate_submitted_review(&review, &binding, &assessment).is_err());
+        assert!(validate_submitted_review(&review, &binding).is_err());
         Ok(())
     }
 

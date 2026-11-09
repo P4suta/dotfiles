@@ -1,8 +1,9 @@
 {
-  "revision": "07f894f7ab7ec71c87e43390f3fb0ad2872e7daf1b9ea8356d2ec487f264a62e",
+  "revision": "914db4d7f0466d7637b13cbaec2bb59605efc5b66b6ea4f1c159dcca52f5a09e",
   "outcome": "implemented",
-  "reason": "Require current-head CodeRabbit PR review before completion and merge at every importance level.\nPermit readiness to start its review, preserve supported findings, and leave paused operations pending without changing descriptions.\nKeep explicitly requested CLI analysis within the existing guard and separate capacity pool.",
+  "reason": "Wait for automatic current-head CodeRabbit reviews after readiness and substantive updates without manual review commands.\nAccept incremental scope and preserve supported findings, completed status, owner pauses, and separate CLI capacity.",
   "evidence": [
+    "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
     "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",
     "docs/adr/require-no-cli-review-for-high-prs.md",

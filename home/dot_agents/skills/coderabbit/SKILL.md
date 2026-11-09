@@ -47,12 +47,13 @@ Batch related commits into one push, and let the current review finish before an
 Check review freshness after the final update, because automatic reviews can pause or hit rate limits.
 Use CodeRabbit PR review for ordinary changes, without importance thresholds or opt-in labels.
 Enable automatic reviews for ready PRs and their updates, and leave draft review off unless the repository needs earlier feedback.
+Set `auto_pause_after_reviewed_commits: 0` and wait for automatic reviews without posting manual review commands.
 Use `coderabbit-review` to inspect current-head reviews and supported findings.
 Keep suppression commands and personal workflow instructions out of PR descriptions.
 Verify the effective service configuration, because local instructions can't configure the service or establish capacity.
 Keep PR and CLI pools and their adaptive thresholds separate, and never substitute CLI capacity for PR capacity.
 Inspect the effective configuration after adoption because inherited positive labels can remain active.
-Read existing findings before requesting the selected review.
+Read existing findings before publishing an update.
 
 ## Triage and PR security
 

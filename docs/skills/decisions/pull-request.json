@@ -1,8 +1,9 @@
 {
-  "revision": "427c2473dd72c5c003e69237c12a1f5923c0ab008489da899d5d846f0caa3461",
+  "revision": "e6fafd27b50e7c699c5d273abcafd1540abcebd2de517bf420a81979a79043c7",
   "outcome": "implemented",
-  "reason": "Use current-head CodeRabbit PR review at every importance level and for every target branch.\nPreserve authored descriptions by disabling automatic summaries while retaining explicit generation placeholders.\nKeep commit statuses as the checked workflow's terminal signal and accept the provider's published review envelope without relaxing source or inventory validation.",
+  "reason": "Use automatic CodeRabbit reviews after readiness and updates without command generation, insertion, or directive validation.\nDisable commit-count auto-pause and admit authenticated incremental reviews ending at the current head.\nPreserve authored descriptions, source binding, completed status, and supported findings.",
   "evidence": [
+    "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
     "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",
     "docs/adr/require-no-cli-review-for-high-prs.md",

@@ -55,7 +55,7 @@ Test each finding on the current code before changing anything.
 Fix supported correctness, security, and regression issues within the authorized task, and reject unsupported findings with a concrete reason.
 Leave optional style suggestions out of the diff unless the task covers them.
 Run the affected project checks after fixes.
-Request at most one follow-up review, and only for substantive fixes or an unresolved concern.
+Wait for automatic review after substantive fixes without posting manual review commands.
 Use `coderabbit review findings` to replay stored results without spending a review.
 Report the reviewed scope, meaningful findings, fixes, verification, and any skipped or incomplete analysis.
 
@@ -67,6 +67,7 @@ Use `gh` to identify the exact repository, PR, base, and current head SHA before
 Poll the automatic review read-only with bounds, and post progress updates while it runs.
 Use `gh pr checks` for check state, and read the bot's review and summary for completion at the current head.
 Use ordinary automatic PR reviews without importance-based exclusions.
+Readiness starts the automatic review without a manual request.
 Ready admission can precede the review that it starts.
 Completion and merge require current-head review.
 When the owner pauses reviews, keep the operation pending without editing the PR description.

@@ -41,8 +41,9 @@ Keep severe levels exceptional and explain concrete consequences rather than esc
 A paused review remains pending without changing the PR description.
 Use `coderabbit-review` for current-head review and existing supported findings.
 Keep PR descriptions about the change without suppression commands or local workflow instructions.
-Read [commands and generation](references/workflow.md) for the placeholders, the PR review budget, and the optional configuration example.
-Write locally when generation fails or omits a required document.
+Read [workflow commands](references/workflow.md) for automatic reviews, the PR review budget, and the optional configuration example.
+Write complete PR documents locally.
+Use automatic reviews after readiness and updates without posting service commands.
 Local creation always starts as a draft, and moving it to review needs separate authorization.
 The workflow policy caps work units at three per person and repository by default.
 One open stack counts as one unit, and each declared independent PR counts as one unit.

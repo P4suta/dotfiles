@@ -58,8 +58,7 @@ pr-workflow ready --repo OWNER/REPO --pr 17
 pr-workflow check --repo OWNER/REPO --pr 17 --final
 ```
 
-The default `local` mode always creates a draft.
-Every generation mode starts as a draft before any review request.
+Creation always starts as a draft with an authored title and description.
 `ready` requires an open draft with an accepted document and only passing head checks.
 `edit` replaces title and body together and leaves draft state unchanged.
 Local-file `check` never contacts GitHub and leaves the live issue prerequisite unmet, and `check --pr` only reads.
@@ -73,7 +72,7 @@ pr-workflow link-issue --repo OWNER/REPO --pr 17 --issue 23
 ```
 
 The command checks the exact open issue, PR, source network, head, and base.
-It keeps the current title and body prefix, draft state, creator, labels, review requests, assessment markers, and CodeRabbit directives.
+It keeps the current title and body prefix, draft state, creator, labels, review requests, and assessment markers.
 A matching reference leaves the document unchanged.
 The command adds only one closing-reference paragraph through a body-only update.
 It rechecks state before writing and requires a matching acknowledgement and fresh readback.
@@ -170,10 +169,12 @@ A changed diff needs a current assessment, and supported earlier findings remain
 Every importance level uses CodeRabbit PR review.
 Enable automatic reviews for ready PRs and updates targeting every base branch, without positive label filters.
 Leave draft review off unless the repository needs early feedback.
+Set `auto_pause_after_reviewed_commits: 0` to keep automatic updates enabled.
 Read back the effective service configuration because local instructions don't configure the provider.
 Keep automatic summaries off to preserve authored descriptions.
-An explicit summary placeholder still requests generation.
 Use CodeRabbit commit statuses for the workflow's current-head review admission.
+Accept ordinary incremental reviews ending at the current head.
+Wait for automatic review after readiness or updates without posting manual review commands.
 
 Ready admission waits for unfinished, failed, or missing required checks.
 A repository that reports and requires no checks can accept a ready PR.
@@ -188,24 +189,6 @@ Use the prepared [configuration](../assets/coderabbit.yaml) for authorized confi
 The [automatic review controls](https://docs.coderabbit.ai/configuration/auto-review) define eligibility, labels, and updates.
 Check the current [rate limits](https://docs.coderabbit.ai/management/rate-limits) for the actual developer, organization, and pool.
 Never start a review merely to discover capacity or enable paid usage to continue.
-
-## CodeRabbit generation
-
-Finish local checks and prepare a complete document before requesting generation.
-Honor the owner's pause and verify the applicable capacity.
-The standard placeholders follow the [configuration reference](https://docs.coderabbit.ai/reference/configuration).
-
-```console
-pr-workflow check --repo OWNER/REPO --generation coderabbit --title "@coderabbitai" --body-file generation.md
-pr-workflow create --repo OWNER/REPO --generation coderabbit --head feature --base main --title "@coderabbitai" --body-file generation.md
-pr-workflow ready --repo OWNER/REPO --generation coderabbit --pr 17
-pr-workflow check --repo OWNER/REPO --pr 17 --final
-```
-
-Creation starts as a draft.
-Check generated text for destination rules, scope, and actual validation.
-Correct it with `edit` when authorized.
-A generation failure supplies no completed document.
 
 ## Destination title exception
 

@@ -1,32 +1,4 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Generation {
-    Local,
-    Coderabbit,
-}
-
-impl Generation {
-    pub const ALL: [Self; 2] = [Self::Local, Self::Coderabbit];
-
-    /// The name a command line gives.
-    #[must_use]
-    pub const fn key(self) -> &'static str {
-        match self {
-            Self::Local => "local",
-            Self::Coderabbit => "coderabbit",
-        }
-    }
-
-    /// The generation a command line names, or `None` for a name no generation carries.
-    #[must_use]
-    pub fn from_key(key: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|generation| generation.key() == key)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Operation {
     Create,
     Edit,
@@ -36,7 +8,6 @@ pub enum Operation {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Effect {
     CreateDraft,
-    CreateReady,
     Edit,
     Ready,
 }
@@ -248,11 +219,6 @@ pub const fn initial_import(facts: InitialImportFacts) -> InitialImport {
     } else {
         InitialImport::Refused
     }
-}
-
-#[must_use]
-pub fn coderabbit_body_marker_allowed(request: bool, summary: bool, ignore: bool) -> bool {
-    ignore || request && summary
 }
 
 /// The head commit's reported checks, which `pr_ready_rules::complete` decides from its report.
@@ -505,7 +471,6 @@ pub fn dependency(shared_commits: bool, merge: PathMerge) -> Option<Dependency> 
 /// Returns the blocker that refuses the operation.
 pub fn plan(
     operation: Operation,
-    generation: Generation,
     validated: bool,
     draft: bool,
     issue: IssueGate,
@@ -518,11 +483,7 @@ pub fn plan(
         return Err(Blocker::MissingIssue);
     }
     match operation {
-        Operation::Create => Ok(if generation == Generation::Local || draft {
-            Effect::CreateDraft
-        } else {
-            Effect::CreateReady
-        }),
+        Operation::Create => Ok(Effect::CreateDraft),
         Operation::Edit => Ok(Effect::Edit),
         Operation::Ready if !draft => Err(Blocker::NotDraft),
         Operation::Ready if checks != Checks::Success => Err(Blocker::UnfinishedChecks),
@@ -775,10 +736,9 @@ mod proofs {
         HeadChecks::Absent,
     ];
 
-    /// A rejected document never mutates a PR, local creation starts as a draft, ready needs a validated draft with passing checks, and a refusal names the first unmet condition.
+    /// A rejected document never mutates a PR, creation starts as a draft, ready needs a validated draft with passing checks, and a refusal names the first unmet condition.
     pub fn spec_plan(
         operation: Operation,
-        generation: Generation,
         validated: bool,
         draft: bool,
         issue: IssueGate,
@@ -790,20 +750,14 @@ mod proofs {
             Err(Blocker::MissingIssue)
         } else {
             match operation {
-                Operation::Create if generation == Generation::Local || draft => {
-                    Ok(Effect::CreateDraft)
-                }
-                Operation::Create => Ok(Effect::CreateReady),
+                Operation::Create => Ok(Effect::CreateDraft),
                 Operation::Edit => Ok(Effect::Edit),
                 Operation::Ready if !draft => Err(Blocker::NotDraft),
                 Operation::Ready if checks != Checks::Success => Err(Blocker::UnfinishedChecks),
                 Operation::Ready => Ok(Effect::Ready),
             }
         };
-        assert_eq!(
-            plan(operation, generation, validated, draft, issue, checks),
-            expected
-        );
+        assert_eq!(plan(operation, validated, draft, issue, checks), expected);
     }
 
     /// Any failure fails a merge, an empty report without a declared check can never fill, and any other empty or unfinished report waits.
@@ -830,10 +784,6 @@ mod proofs {
         assert_eq!(gate == IssueGate::NotRequired, !first || second);
         assert_eq!(gate == IssueGate::Linked, first && !second && third);
         assert_eq!(gate == IssueGate::Missing, first && !second && !third);
-        assert_eq!(
-            coderabbit_body_marker_allowed(first, second, third),
-            third || first && second
-        );
         assert_eq!(review_request_allowed(first, second), !first || !second);
         let kind = exclusion(first, second);
         assert_eq!(kind == Exclusion::None, !first);
@@ -1004,7 +954,6 @@ mod proofs {
     #[kani::proof]
     fn a_pr_operation_takes_its_effect_only_after_every_condition_and_names_the_first_unmet_one() {
         let operation = OPERATIONS[usize::from(kani::any::<u8>() % 3)];
-        let generation = Generation::ALL[usize::from(kani::any::<u8>() % 2)];
         let issue = ISSUES[usize::from(kani::any::<u8>() % 3)];
         let checks = if kani::any() {
             Checks::Success
@@ -1013,9 +962,9 @@ mod proofs {
         };
         let validated: bool = kani::any();
         let draft: bool = kani::any();
-        spec_plan(operation, generation, validated, draft, issue, checks);
-        let result = plan(operation, generation, validated, draft, issue, checks);
-        kani::cover!(result == Ok(Effect::CreateReady));
+        spec_plan(operation, validated, draft, issue, checks);
+        let result = plan(operation, validated, draft, issue, checks);
+        kani::cover!(result == Ok(Effect::CreateDraft));
         kani::cover!(result == Ok(Effect::Ready));
         kani::cover!(result == Err(Blocker::UnfinishedChecks));
     }
@@ -1226,14 +1175,10 @@ mod tests {
     #[cfg_attr(miri, ignore = "Miri takes seconds over every input")]
     fn every_input_meets_the_pr_specifications() {
         for operation in proofs::OPERATIONS {
-            for generation in Generation::ALL {
-                for issue in proofs::ISSUES {
-                    for checks in [Checks::Success, Checks::Incomplete] {
-                        for [validated, draft] in flags() {
-                            proofs::spec_plan(
-                                operation, generation, validated, draft, issue, checks,
-                            );
-                        }
+            for issue in proofs::ISSUES {
+                for checks in [Checks::Success, Checks::Incomplete] {
+                    for [validated, draft] in flags() {
+                        proofs::spec_plan(operation, validated, draft, issue, checks);
                     }
                 }
             }
@@ -1282,18 +1227,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn each_generation_has_its_own_key() {
-        assert_eq!(
-            Generation::ALL.map(Generation::key),
-            ["local", "coderabbit"]
-        );
-        for generation in Generation::ALL {
-            assert_eq!(Generation::from_key(generation.key()), Some(generation));
-        }
-        assert_eq!(Generation::from_key("remote"), None);
     }
 
     const READY: MergeState = MergeState {

@@ -2376,24 +2376,20 @@ fn reject_a_filename_prefix_being_registered_as_a_directory() {
     assert!(production::registered_path(b"crates/a", b"crates/another.rs"));
 }
 #[kani::proof]
-fn reject_ready_local_creation() {
-    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Success), Ok(production::Effect::CreateReady));
+fn reject_ready_creation() {
+    assert_ne!(production::plan(production::Operation::Create, true, false, production::IssueGate::Linked, production::Checks::Success), Ok(production::Effect::CreateDraft));
 }
 #[kani::proof]
 fn reject_creation_without_a_personal_issue() {
-    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Success).is_ok());
-}
-#[kani::proof]
-fn reject_unfinished_summary_as_review_exclusion() {
-    assert!(production::coderabbit_body_marker_allowed(false, true, false));
+    assert!(production::plan(production::Operation::Create, true, false, production::issue_gate(true, false, false), production::Checks::Success).is_ok());
 }
 #[kani::proof]
 fn reject_ready_with_unfinished_checks() {
-    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::Checks::Incomplete), Ok(production::Effect::Ready));
+    assert_eq!(production::plan(production::Operation::Ready, true, true, production::IssueGate::Linked, production::Checks::Incomplete), Ok(production::Effect::Ready));
 }
 #[kani::proof]
 fn reject_blaming_checks_for_a_published_pr() {
-    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Incomplete), Err(production::Blocker::UnfinishedChecks));
+    assert_eq!(production::plan(production::Operation::Ready, true, false, production::IssueGate::Linked, production::Checks::Incomplete), Err(production::Blocker::UnfinishedChecks));
 }
 #[kani::proof]
 fn reject_paused_review_request() {
