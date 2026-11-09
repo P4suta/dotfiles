@@ -1,0 +1,13 @@
+{
+  "revision": "c4f3574ca912ebfb04a8ccde8cd33e700885f53c7979b59f9848e13b15cf7ce8",
+  "outcome": "implemented",
+  "reason": "The owner chose Apple's system design with Liquid Glass for an iPhone app and asked for a shared skill. The skill records the method that the work followed: Apple's kit in Figma first, standard SwiftUI components, a source check, and audits in each appearance, language, text size, and contrast setting. It applies only on an explicit choice, because monochrome-design states that explicit requirements for the current artifact take precedence and remains the default for other visual work. Dated references hold the API availability, the kit's limits, and the audit behavior that the work observed, and apple-platform-guidelines holds the simulator mechanics that every Apple-platform app shares.",
+  "evidence": [
+    "home/dot_agents/skills/liquid-glass-design/SKILL.md",
+    "home/dot_agents/skills/liquid-glass-design/references/api-availability.md",
+    "home/dot_agents/skills/liquid-glass-design/references/audit-behavior.md",
+    "home/dot_agents/skills/liquid-glass-design/references/figma-kit.md",
+    "home/dot_agents/skills/monochrome-design/SKILL.md"
+  ],
+  "revisit": "Read the SDK, the kit, and the audit again when a new iOS release or a new kit replaces iOS 27 and the iOS and iPadOS 27 kit."
+}
