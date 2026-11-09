@@ -88,6 +88,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GH_FIXTURE_SIGNING_KEYS"
         } else if endpoint.contains("/rules/branches/") {
             "GH_FIXTURE_RULES"
+        } else if endpoint.contains("/issues/") && endpoint.contains("/comments?") {
+            "GH_FIXTURE_REVIEW_SUMMARIES"
         } else if endpoint.contains("/issues/") {
             "GH_FIXTURE_ISSUE"
         } else if endpoint.contains("/compare/") {
@@ -238,13 +240,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GH_FIXTURE_RULES",
             "GH_FIXTURE_REVIEWS",
             "GH_FIXTURE_STATUSES",
+            "GH_FIXTURE_REVIEW_SUMMARIES",
         ]
         .contains(&variable)
         {
-            println!(
-                "{}",
-                std::env::var(variable).unwrap_or_else(|_| "[]".into())
-            );
+            let response = match std::env::var(variable) {
+                Ok(response) => response,
+                Err(_) if std::env::var_os("GH_FIXTURE_DEFAULT_REVIEW").is_some()
+                    && variable == "GH_FIXTURE_REVIEWS" => completed_review(&endpoint, &log_path)?,
+                Err(_) if std::env::var_os("GH_FIXTURE_DEFAULT_REVIEW").is_some()
+                    && variable == "GH_FIXTURE_STATUSES" => r#"[{"id":1,"creator":{"login":"coderabbitai[bot]"},"context":"CodeRabbit","state":"success","description":"Review completed","created_at":"2026-10-26T00:01:00Z"}]"#.into(),
+                Err(_) => "[]".into(),
+            };
+            println!("{response}");
         } else {
             let mut response = std::env::var(variable)?;
             if variable == "GH_FIXTURE_REPOSITORY" && !response.contains("\"default_branch\"") {
@@ -301,6 +309,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     Ok(())
+}
+
+fn completed_review(
+    endpoint: &str,
+    log_path: &std::ffi::OsStr,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let (repo, suffix) = endpoint
+        .strip_prefix("repos/")
+        .ok_or("review repository missing")?
+        .split_once("/pulls/")
+        .ok_or("review PR missing")?;
+    let number = suffix.split('/').next().ok_or("review number missing")?;
+    let view = if let Ok(views) = std::env::var("GH_FIXTURE_VIEWS") {
+        let reads = std::fs::read_to_string(log_path)?
+            .matches(&format!("\nview\n--repo\n{repo}\n{number}\n"))
+            .count();
+        let views = states::parse(&views)?;
+        let states = views.get(number).ok_or("review states missing")?;
+        states[reads.saturating_sub(1).min(states.len() - 1)].clone()
+    } else {
+        std::env::var("GH_FIXTURE_VIEW")?
+    };
+    let view = view_fields(view)?;
+    let (start, end) = string_field(&view, "headRefOid").ok_or("review head missing")?;
+    let head = &view[start..end];
+    let (start, end) = string_field(&view, "baseRefOid").ok_or("review base missing")?;
+    let base = &view[start..end];
+    let output = std::process::Command::new(
+        std::env::var_os("PWF_FIXTURE_REAL_GIT").ok_or("real Git missing")?,
+    )
+    .args(["diff", "--no-ext-diff", "--name-only", base, head])
+    .output()?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned().into());
+    }
+    let files = String::from_utf8(output.stdout)?;
+    let selected = files
+        .lines()
+        .map(|path| format!("* `{path}`\n"))
+        .collect::<String>();
+    let count = files.lines().count();
+    let body = format!(
+        "<!-- coderabbit-ai-generated:v1 -->\n\n\n\n---\n\n- **Run ID**: `00000000-0000-0000-0000-000000000001`\nReviewing files that changed from the base of the PR and between {base} and {head}.\n<summary><picture><img src=\"icon.svg\"></picture> Files selected for processing: {count}</summary>\n{selected}</details>\n<!-- This is an auto-generated comment by CodeRabbit for review status -->\n\n<!-- coderabbit-review-publication v1 publication=00000000-0000-0000-0000-000000000001 attempt=00000000-0000-0000-0000-000000000002 batch=1/1 -->"
+    );
+    Ok(format!(
+        r#"[{{"id":1,"user":{{"login":"coderabbitai[bot]"}},"commit_id":"{head}","state":"COMMENTED","submitted_at":"2026-10-26T00:00:00Z","body":{body:?}}}]"#
+    ))
 }
 
 fn endpoint_response(
@@ -496,27 +551,6 @@ fn view_fields(mut view: String) -> Result<String, Box<dyn std::error::Error>> {
         if !view.contains(&format!("\"{name}\":")) {
             view = field(view, name, &value);
         }
-    }
-    let assessment = if let (Ok(records), Some((start, end))) = (
-        std::env::var("GH_FIXTURE_ASSESSMENTS"),
-        string_field(&view, "headRefOid"),
-    ) {
-        records.lines().find_map(|line| {
-            line.split_once('=')
-                .filter(|(head, _)| *head == &view[start..end])
-                .map(|(_, packet)| packet.to_owned())
-        })
-    } else {
-        None
-    }
-    .or_else(|| std::env::var("GH_FIXTURE_ASSESSMENT").ok());
-    // An assessed head carries only the standing exclusion of a noncritical route, because the assessment stays in owner-local state.
-    if let (Some(_), Some((start, end))) = (assessment, string_field(&view, "body"))
-        && std::env::var("GH_FIXTURE_LEVEL").as_deref() != Ok("critical")
-        && std::env::var("GH_FIXTURE_ALWAYS_PR").as_deref() != Ok("true")
-        && !view[start..end].contains("@coderabbitai ignore")
-    {
-        view.insert_str(end, "\\n@coderabbitai ignore\\n");
     }
     Ok(view)
 }

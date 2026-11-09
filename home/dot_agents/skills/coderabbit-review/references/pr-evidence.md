@@ -36,5 +36,6 @@ Match the installed CodeRabbit bot identity, normally `coderabbitai` in GraphQL 
 Fetch nested comment pages for a thread with more than 100 comments.
 Read REST `repos/<owner>/<repo>/pulls/<number>/reviews` and `repos/<owner>/<repo>/issues/<number>/comments` with `gh api --paginate` for review commit IDs and summary status.
 Compare the current head with completed review metadata and the newest bot summary, because an incremental review may report completion only in the summary.
+An incremental review covers updates since the preceding run and need not repeat the full PR range or the preceding run's selected files.
 Never describe an approval, a skipped review, `Review rate limited`, a superseded run, or missing commit evidence as a fresh completed review.
 Read the head again before acting when the branch moves.

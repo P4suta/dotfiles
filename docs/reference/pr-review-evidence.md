@@ -10,17 +10,23 @@ The [review routing decision](../adr/route-coderabbit-by-current-pr-importance.m
 
 ## Decision
 
-Keep the existing acceptance path for a complete current-head `COMMENTED` or `APPROVED` review.
+Accept authenticated current-head `COMMENTED` or `APPROVED` reviews with complete provider metadata.
+Automatic incremental reviews can start after the canonical PR base and select the files changed since the preceding run.
+Their selected files need not repeat assessment evidence paths.
+Accept a clean bot summary carrying current-head review metadata and the current head's completed status, including a summary updated by later provider postprocessing.
+The summary update time must be at or after the submission time of the bot review with the highest review ID.
+Follow the [automatic review decision](../adr/use-automatic-coderabbit-reviews-without-command-generation.md) without requesting manual reviews.
+
 For a missing current-head review or an empty current-head approval, select the CodeRabbit full-review body with the highest review ID on that PR.
 Validate its full metadata, reviewed commit, canonical PR base, and coverage of every assessment evidence path.
 Accept prior `CHANGES_REQUESTED` reviews only after the thread gate confirms resolution of every CodeRabbit finding.
 Refuse dismissed reviews and incomplete metadata.
 
 Require the current head's CodeRabbit status with the highest status ID to report `success` and `Review completed`.
-Require its creation timestamp to be greater than the full review's submission timestamp.
+When carrying an earlier review, require the status creation timestamp to be greater than the earlier review's submission timestamp.
 Reject equal timestamps.
 Parse timestamps as instants, including their offsets.
-Issue comments alone supply no review completion evidence.
+A summary without completed current-head status supplies no review completion evidence.
 
 Read [GitHub's compare API](https://docs.github.com/en/rest/commits/commits#compare-two-commits) for the reviewed and current commits.
 Inspect both directions when the reviewed head has commits absent from the current head.

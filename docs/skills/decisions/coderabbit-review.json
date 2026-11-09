@@ -1,8 +1,10 @@
 {
-  "revision": "195a71464995b26c8e3a751b7c71e48e8d5e2563dd9e6a96f8717518c6cd5d36",
+  "revision": "914db4d7f0466d7637b13cbaec2bb59605efc5b66b6ea4f1c159dcca52f5a09e",
   "outcome": "implemented",
-  "reason": "Per-PR CLI reviews cost more time than they returned, so high assessments now select no review and a guarded CLI review runs on an explicit request. The guard restores its pinned runtime when the CLI replaces it.",
+  "reason": "Wait for automatic current-head CodeRabbit reviews after readiness and substantive updates without manual review commands.\nAccept incremental scope and preserve supported findings, completed status, owner pauses, and separate CLI capacity.",
   "evidence": [
+    "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
+    "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",
     "docs/adr/require-no-cli-review-for-high-prs.md",
     "crates/coderabbit-guard/src/lib.rs",

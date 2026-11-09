@@ -44,7 +44,6 @@ pub fn current_review_route(
 ) -> Result<rules::review_routing_rules::ReviewRoute> {
     let target = Target {
         repo: repository.into(),
-        generation: Generation::Local,
         title_policy: None,
         issue: None,
         cli_receipt: None,
@@ -67,10 +66,9 @@ pub use rules::{pr_ready_rules, pr_rules, wip_rules};
 
 use crate::pr_ready_rules::{Action as Move, Report, Settlement, State, Workflow};
 use crate::pr_rules::{
-    Blocker, Checks, Dependency, DependencySkip, Effect, Exclusion, Generation, IssueGate,
-    Lifecycle, MergeState, Operation, PathMerge, Step, Stop, api_quota_available,
-    coderabbit_body_marker_allowed, dependency, dependency_skip, exclusion, head_checks,
-    issue_gate, keeps_pause_exclusion, merge_step, plan, requests_review, review_request_allowed,
+    Blocker, Checks, Dependency, DependencySkip, Effect, Exclusion, IssueGate, Lifecycle,
+    MergeState, Operation, PathMerge, Step, Stop, api_quota_available, dependency, dependency_skip,
+    head_checks, issue_gate, merge_step, plan,
 };
 use crate::refusal::{Refusal, command};
 use crate::tool::Tool;
@@ -92,12 +90,6 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-const TITLE_REQUEST: &str = "@coderabbitai";
-const SUMMARY_REQUEST: &str = "@coderabbitai summary";
-const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
-/// The body line that once marked a pause exclusion, which owner-local state now records instead.
-const PAUSE_EXCLUSION: &str = "<!-- coderabbit-pause -->";
-
 /// The characters of a refused line that a refusal quotes.
 const EVIDENCE_PREVIEW: usize = 80;
 
@@ -115,14 +107,6 @@ const SECONDS_PER_MINUTE: u64 = 60;
 const STACK_CONFLICT: i32 = 3;
 /// A scoped skill installation holds the skill's tree and its Claude link at least.
 const SKILL_WITH_ALIAS: usize = 2;
-
-/// Reads `--generation` as one of the names its rule module gives.
-fn generation_parser() -> impl clap::builder::TypedValueParser<Value = Generation> {
-    use clap::builder::TypedValueParser as _;
-    clap::builder::PossibleValuesParser::new(Generation::ALL.map(Generation::key)).try_map(
-        |key: String| Generation::from_key(&key).ok_or(format!("unknown generation `{key}`")),
-    )
-}
 
 #[derive(Debug, Parser)]
 #[command(about = "Validate PR documents before invoking gh; local creation always uses draft")]
@@ -201,11 +185,11 @@ pub enum Commands {
         /// Check the current GitHub document instead of local files.
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
         pr: Option<u64>,
-        /// Reject generation placeholders even in `CodeRabbit` mode.
+        /// Also require completed review of the live PR's current head.
         #[arg(long)]
         r#final: bool,
     },
-    /// Create a draft for local generation or request `CodeRabbit` generation.
+    /// Create a draft with a checked title and description.
     Create {
         #[command(flatten)]
         document: DocumentArgs,
@@ -213,9 +197,6 @@ pub enum Commands {
         head: String,
         #[arg(long)]
         base: Option<String>,
-        /// Also keep CodeRabbit-created PRs as drafts.
-        #[arg(long)]
-        draft: bool,
         /// Open an independent work unit and keep its reason in owner-local state.
         #[arg(long, value_name = "REASON", value_parser = work::reason)]
         independent: Option<String>,
@@ -419,9 +400,6 @@ pub struct Target {
     /// The exact GitHub repository rather than a URL or an inferred one.
     #[arg(long)]
     pub repo: String,
-    /// `CodeRabbit` mode permits its standard generation placeholders.
-    #[arg(long, value_parser = generation_parser(), default_value = "local")]
-    pub generation: Generation,
     /// Repository-scoped JSON exception with repository, source URL, and reason.
     #[arg(long)]
     pub title_policy: Option<PathBuf>,
@@ -626,8 +604,8 @@ fn tally(rollup: &[ReportedCheck], required: &[String]) -> (usize, usize, usize,
 
 /// The report of a head's rollup, given the checks its base requires.
 fn checks(rollup: &[ReportedCheck], required: &[String]) -> Report {
-    let (total, unfinished, failed, missing) = tally(rollup, required);
-    pr_ready_rules::report(total, unfinished, failed, missing)
+    let (_, unfinished, failed, missing) = tally(rollup, required);
+    pr_ready_rules::report(unfinished, failed, missing)
 }
 
 #[cfg(test)]
@@ -655,10 +633,10 @@ mod check_reports {
     }
 
     #[test]
-    fn optional_skips_alone_supply_no_completion_credit() {
+    fn optional_skips_leave_no_required_ready_work() {
         assert_eq!(
             checks(&[run(Some("build-test"), "SKIPPED")], &[]),
-            Report::Pending
+            Report::Complete
         );
     }
 
@@ -927,7 +905,7 @@ fn refuse_provenance(part: &str, text: &str, recheck: impl FnOnce() -> String) -
 fn refuse_local_evidence(body: &str, recheck: impl FnOnce() -> String) -> Result<()> {
     for (number, line) in body.lines().enumerate() {
         let line = line.trim();
-        if line.starts_with(review_policy::PACKET_PREFIX) || line == PAUSE_EXCLUSION {
+        if line.starts_with(review_policy::PACKET_PREFIX) {
             return Err(Refusal::new(
                 "pr.local-evidence",
                 "published documents can't carry local workflow evidence; delete the line, because pr-workflow keeps assessments and pause exclusions in owner-local state",
@@ -1132,48 +1110,13 @@ fn require(condition: bool, refusal: impl FnOnce() -> Refusal) -> Result<()> {
 /// The refusal rule for a head that no check can ever report on.
 const ABSENT_CHECKS_RULE: &str = "pr.checks-absent";
 
-/// Why a head without a declared check can't become ready or merge.
+/// Why a head without a declared check can't merge.
 const ABSENT_CHECKS_CAUSE: &str = "no check reported on the head, the base requires none, and the head carries no workflow under .github/workflows, so none can ever report; add a check";
-
-/// Refuses `ready` at once for a head that no check can ever report on, instead of naming unfinished checks.
-fn require_declared_checks(
-    github: &Github,
-    target: &Target,
-    pr: u64,
-    rollup: &[ReportedCheck],
-    required: &[String],
-    head: &str,
-) -> Result<()> {
-    let (total, unfinished, failed, missing) = tally(rollup, required);
-    let declared = total > 0 || !required.is_empty() || github.carries_workflow(target, head)?;
-    require(
-        head_checks(total, unfinished.saturating_add(missing), failed, declared)
-            != rules::pr_rules::HeadChecks::Absent,
-        || {
-            Refusal::new(
-                ABSENT_CHECKS_RULE,
-                format!("{ABSENT_CHECKS_CAUSE}, push, and mark the PR ready again"),
-                command(&[
-                    "gh",
-                    "pr",
-                    "checks",
-                    &pr.to_string(),
-                    "--repo",
-                    &target.repo,
-                ]),
-            )
-            .evidence(format!("#{pr}: head {head} reports no check"))
-        },
-    )
-}
 
 /// The local check to run on a corrected document.
 /// It keeps `title` unless the title caused the failure.
 fn recheck(target: &Target, title: Option<&str>) -> String {
     let mut words = vec!["pr-workflow", "check", "--repo", &target.repo];
-    if target.generation == Generation::Coderabbit {
-        words.extend(["--generation", "coderabbit"]);
-    }
     let policy = target
         .title_policy
         .as_ref()
@@ -1219,12 +1162,7 @@ fn failure(error: &anyhow::Error, name: &str, rerun: &str) -> Refusal {
     .evidence(format!("command: {rerun}"))
 }
 
-pub(crate) fn validate(
-    target: &Target,
-    title: String,
-    body: String,
-    final_check: bool,
-) -> Result<ValidatedDocument> {
+pub(crate) fn validate(target: &Target, title: String, body: String) -> Result<ValidatedDocument> {
     let required = target.conventional_required()?;
     let title_refusal = |cause: &str| {
         Refusal::new("pr.title", cause, recheck(target, None)).evidence(format!("title: {title:?}"))
@@ -1232,23 +1170,14 @@ pub(crate) fn validate(
     require(single_line(&title) && title.trim() == title, || {
         title_refusal("title must be a nonempty single line without surrounding whitespace")
     })?;
-    let request = target.generation == Generation::Coderabbit && !final_check;
     require(!unfinished(&title), || {
         title_refusal("title contains an unfinished placeholder")
     })?;
-    if title.contains(TITLE_REQUEST) {
-        require(request && title == TITLE_REQUEST, || {
-            title_refusal(
-                "CodeRabbit title generation is pending; use explicit coderabbit mode only for a generation request",
-            )
-        })?;
-    } else {
-        require(!required || conventional(&title), || {
-            title_refusal(
-                "title must use type(scope)!: description; scope and ! are optional (or supply a repository-scoped title policy)",
-            )
-        })?;
-    }
+    require(!required || conventional(&title), || {
+        title_refusal(
+            "title must use type(scope)!: description; scope and ! are optional (or supply a repository-scoped title policy)",
+        )
+    })?;
     refuse_attribution("title", &title, || recheck(target, None))?;
     refuse_attribution("body", &body, || recheck(target, Some(&title)))?;
     refuse_provenance("title", &title, || recheck(target, None))?;
@@ -1258,11 +1187,6 @@ pub(crate) fn validate(
         Refusal::new("pr.body", cause, recheck(target, Some(&title))).evidence(evidence)
     };
     let visible = without_comments(&body);
-    let visible = visible
-        .lines()
-        .filter(|line| line.trim() != REVIEW_EXCLUSION)
-        .collect::<Vec<_>>()
-        .join("\n");
     require(!visible.trim().is_empty(), || {
         body_refusal(
             "body is empty or contains only comments",
@@ -1279,20 +1203,6 @@ pub(crate) fn validate(
             format!("body line: {line:?}"),
         )
     })?;
-    if let Some(line) = body.lines().find(|line| {
-        line.contains(TITLE_REQUEST)
-            && !coderabbit_body_marker_allowed(
-                request,
-                line.trim() == SUMMARY_REQUEST,
-                line.trim() == REVIEW_EXCLUSION,
-            )
-    }) {
-        return Err(body_refusal(
-            "CodeRabbit summary generation is pending or the placeholder is not a standalone standard request",
-            format!("body line: {line:?}"),
-        )
-        .into());
-    }
     Ok(ValidatedDocument {
         title,
         body,
@@ -1300,9 +1210,9 @@ pub(crate) fn validate(
     })
 }
 
-fn read_document(document: DocumentArgs, final_check: bool) -> Result<(Target, ValidatedDocument)> {
+fn read_document(document: DocumentArgs) -> Result<(Target, ValidatedDocument)> {
     let body = fs::read_to_string(&document.body_file).context("read UTF-8 PR body file")?;
-    let mut validated = validate(&document.target, document.title, body, final_check)?;
+    let mut validated = validate(&document.target, document.title, body)?;
     figure::prepare_document(&mut validated, &document.body_file)?;
     Ok((document.target, validated))
 }
@@ -1369,7 +1279,6 @@ fn offline_destination(repo: &str) -> Result<Destination> {
 fn validate_issue(document: &IssueDocument) -> Result<ValidatedDocument> {
     let target = Target {
         repo: document.repo.clone(),
-        generation: Generation::Local,
         title_policy: None,
         issue: None,
         cli_receipt: None,
@@ -1407,10 +1316,6 @@ fn validate_issue_contents(title: &str, body: String) -> Result<ValidatedDocumen
     ensure!(
         !visible.trim().is_empty() && !unfinished(&prose(&visible)),
         "the issue body is empty, holds only comments, or contains an unfinished placeholder"
-    );
-    ensure!(
-        !body.contains(TITLE_REQUEST) && !title.contains(TITLE_REQUEST),
-        "an issue cannot request CodeRabbit generation"
     );
     Ok(ValidatedDocument {
         title: title.to_owned(),
@@ -1893,8 +1798,7 @@ fn inspect_issue_for(
         single_line(&issue.title)
             && !unfinished(&issue.title)
             && !visible.trim().is_empty()
-            && !unfinished(&prose(&visible))
-            && !issue_body.contains(TITLE_REQUEST),
+            && !unfinished(&prose(&visible)),
         || {
             Refusal::new(
                 "pr.issue",
@@ -1984,7 +1888,7 @@ fn planned(
     issue: IssueGate,
     checks: Checks,
 ) -> Result<Effect> {
-    let blocker = match plan(operation, target.generation, true, draft, issue, checks) {
+    let blocker = match plan(operation, true, draft, issue, checks) {
         Ok(effect) => return Ok(effect),
         Err(blocker) => blocker,
     };
@@ -2023,108 +1927,6 @@ fn planned(
         .evidence(format!("#{pr}: head checks {checks:?}")),
     }
     .into())
-}
-
-/// Read the owner's `CodeRabbit` PR review pause from the guard's state.
-fn pr_reviews_paused() -> Result<bool> {
-    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).context(
-        "the user directory is unavailable; set HOME or USERPROFILE to read the CodeRabbit pause",
-    )?;
-    Ok(coderabbit_guard::pr_reviews_paused(
-        coderabbit_guard::pause(std::path::Path::new(&home))?,
-    ))
-}
-
-fn excludes_review(body: &str) -> bool {
-    without_comments(body)
-        .lines()
-        .any(|line| line.trim() == REVIEW_EXCLUSION)
-}
-
-/// The exclusion of `pr`: its standalone ignore line, and whether owner-local state records the owner's pause as the reason.
-fn review_exclusion(repository: &str, pr: u64, body: &str) -> Result<Exclusion> {
-    Ok(exclusion(
-        excludes_review(body),
-        evidence::paused(repository, pr)?,
-    ))
-}
-
-/// Records or forgets the pause exclusion of `pr` after an operation published `body`.
-fn settle_pause(
-    repository: &str,
-    pr: u64,
-    route: rules::review_routing_rules::ReviewRoute,
-    body: &str,
-) -> Result<()> {
-    if !excludes_review(body) {
-        evidence::clear_pause(repository, pr)
-    } else if route == rules::review_routing_rules::ReviewRoute::Pr && pr_reviews_paused()? {
-        evidence::record_pause(repository, pr)
-    } else {
-        Ok(())
-    }
-}
-
-/// Refuse an operation that would request a `CodeRabbit` PR review while the owner pauses them.
-/// Also refuse one that would leave the review unowed after the owner resumes them.
-/// `live` yields the PR's current draft state and exclusion, and runs only during a pause.
-fn admit_review_request(
-    operation: Operation,
-    generation: Generation,
-    body: &str,
-    route: rules::review_routing_rules::ReviewRoute,
-    live: impl FnOnce() -> Result<(bool, Exclusion)>,
-) -> Result<()> {
-    if route != rules::review_routing_rules::ReviewRoute::Pr {
-        return Ok(());
-    }
-    if !pr_reviews_paused()? {
-        return Ok(());
-    }
-    let (draft, was) = if generation == Generation::Coderabbit {
-        (true, Exclusion::None)
-    } else {
-        live()?
-    };
-    ensure!(
-        review_request_allowed(
-            true,
-            requests_review(
-                operation,
-                generation,
-                draft,
-                was != Exclusion::None,
-                excludes_review(body)
-            )
-        ),
-        "CodeRabbit PR reviews are paused by the owner (`coderabbit --guard-status --json` reports reviews.pr paused), and this operation would request one; {}",
-        match (generation, operation) {
-            (Generation::Coderabbit, _) =>
-                "rerun with --generation local and a completed title and body".to_owned(),
-            (_, Operation::Edit) => format!(
-                "keep the standalone `{REVIEW_EXCLUSION}` line of this ready PR until the owner resumes PR reviews"
-            ),
-            _ => format!(
-                "keep the draft until the owner resumes PR reviews, or add the standalone `{REVIEW_EXCLUSION}` line with pr-workflow edit, which records in owner-local state that the review stays owed after resumption"
-            ),
-        }
-    );
-    // During the owner's pause, a critical PR keeps the ignore line only for the pause, so pr-workflow records it as one.
-    let now = exclusion(excludes_review(body), excludes_review(body));
-    ensure!(
-        keeps_pause_exclusion(operation, draft, was, now),
-        "CodeRabbit PR reviews are paused by the owner (`coderabbit --guard-status --json` reports reviews.pr paused), and without the pause exclusion the review would not be owed after resumption; {}",
-        if operation == Operation::Ready {
-            format!(
-                "add the standalone `{REVIEW_EXCLUSION}` line with pr-workflow edit, then rerun ready"
-            )
-        } else {
-            format!(
-                "keep the standalone `{REVIEW_EXCLUSION}` line of this ready PR until the owner resumes PR reviews"
-            )
-        }
-    );
-    Ok(())
 }
 
 fn arguments(operation: &str, repo: &str) -> Vec<OsString> {
@@ -2272,13 +2074,12 @@ fn run(action: Commands, rerun: &str) -> Result<()> {
             document,
             head,
             base,
-            draft,
             independent,
         } => create(
             document,
             &head,
             base.as_deref(),
-            &Creation::Regular { draft, independent },
+            &Creation::Regular { independent },
             rerun,
         )?,
         Commands::Edit { document, pr } => edit(document, pr, rerun)?,
@@ -2326,14 +2127,11 @@ fn check_command(
         return check_live(&target, pr, r#final, rerun);
     }
     let destination = offline_destination(&target.repo)?;
-    let (target, document) = read_document(
-        DocumentArgs {
-            target,
-            title: title.context("title required")?,
-            body_file: body_file.context("body file required")?,
-        },
-        r#final,
-    )?;
+    let (target, document) = read_document(DocumentArgs {
+        target,
+        title: title.context("title required")?,
+        body_file: body_file.context("body file required")?,
+    })?;
     authored_to_standard(destination, &target.repo, PULL_REQUEST, &document)?;
     println!(
         "Offline document format accepted; no issue, source, classification, or review credit"
@@ -2366,14 +2164,6 @@ fn ready_command(target: &Target, pr: u64, rerun: &str) -> Result<()> {
         bail!("GitHub reported no base branch or no head commit");
     };
     let required = github.required_checks(target, base)?;
-    require_declared_checks(
-        &github,
-        target,
-        pr,
-        &live.status_check_rollup,
-        &required,
-        head,
-    )?;
     let body = make_ready(
         &github,
         target,
@@ -2397,7 +2187,7 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
     let live = live_document(&github, target, pr)?;
     let checked = review_policy::live_binding(&github, target, &live.body, &live)?;
     review_policy::remember(&checked, target, &github, pr)?;
-    let document = validate(target, live.title, live.body, r#final)?;
+    let document = validate(target, live.title, live.body)?;
     let destination = destination(&github, &target.repo)?;
     written_to_standard(destination, PULL_REQUEST, &document)?;
     require_issue(
@@ -2417,10 +2207,7 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
 }
 
 enum Creation {
-    Regular {
-        draft: bool,
-        independent: Option<String>,
-    },
+    Regular { independent: Option<String> },
     Stack,
 }
 
@@ -2474,15 +2261,15 @@ fn create(
 ) -> Result<()> {
     let body_file = document.body_file.clone();
     let title = document.title.clone();
-    let (target, document) = read_document(document, false)?;
+    let (target, document) = read_document(document)?;
     branch(head)?;
     if let Some(base) = &base {
         branch(base)?;
     }
     let github = Github::connect()?;
-    let (draft, independent) = match creation {
-        Creation::Regular { draft, independent } => (*draft, independent.as_deref()),
-        Creation::Stack => (true, None),
+    let independent = match creation {
+        Creation::Regular { independent } => independent.as_deref(),
+        Creation::Stack => None,
     };
     let work = work::prepare(
         &github,
@@ -2500,14 +2287,7 @@ fn create(
     let checked =
         review_policy::create_binding(&github, &target, &document.body, head, Some(work.base()))?;
     let head = review_policy::qualified_head(&checked, head)?;
-    review_policy::admit_publication(&checked, &document.body)?;
-    admit_review_request(
-        Operation::Create,
-        target.generation,
-        &document.body,
-        checked.route,
-        || Ok((true, Exclusion::None)),
-    )?;
+    review_policy::admit_publication(&checked)?;
     let destination = destination(&github, &target.repo)?;
     authored_to_standard(destination, &target.repo, PULL_REQUEST, &document)?;
     let issue = inspect_issue(
@@ -2517,11 +2297,11 @@ fn create(
         Some((&document.body, BodySource::File(&body_file))),
         rerun,
     )?;
-    let effect = planned(
+    planned(
         Operation::Create,
         &target,
         None,
-        draft,
+        true,
         issue,
         Checks::Incomplete,
     )?;
@@ -2537,11 +2317,7 @@ fn create(
     let mut args = arguments("create", &target.repo);
     args.extend([OsString::from("--head"), head.into()]);
     args.extend([OsString::from("--base"), work.base().into()]);
-    if effect == Effect::CreateDraft
-        || checked.route == rules::review_routing_rules::ReviewRoute::Pr
-    {
-        args.push("--draft".into());
-    }
+    args.push("--draft".into());
     let _body = write_document(&mut args, &document)?;
     work.before_publication()?;
     let created = gh(&args)?;
@@ -2555,24 +2331,12 @@ fn create(
 
 fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     let body_file = document.body_file.clone();
-    let (target, document) = read_document(document, false)?;
+    let (target, document) = read_document(document)?;
     let github = Github::connect()?;
     let live = live_document(&github, &target, pr)?;
     let checked = review_policy::live_binding(&github, &target, &document.body, &live)?;
-    review_policy::admit_publication(&checked, &document.body)?;
+    review_policy::admit_publication(&checked)?;
     review_policy::preserve_edit(&github, &target, pr, &checked)?;
-    admit_review_request(
-        Operation::Edit,
-        target.generation,
-        &document.body,
-        checked.route,
-        || {
-            Ok((
-                live.is_draft,
-                review_exclusion(&target.repo, pr, &live.body)?,
-            ))
-        },
-    )?;
     let destination = destination(&github, &target.repo)?;
     authored_to_standard(destination, &target.repo, PULL_REQUEST, &document)?;
     let issue = inspect_issue_for(
@@ -2602,7 +2366,7 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     print!("{}", gh(&args)?);
     figure::verify_publication(&document, "pr", &target.repo, pr)?;
     review_policy::remember(&checked, &target, &github, pr)?;
-    settle_pause(&target.repo, pr, checked.route, &document.body)
+    Ok(())
 }
 
 /// Validates a live document and moves the open draft to review, returning the checked body.
@@ -2627,8 +2391,8 @@ fn make_ready(
         "PR head changed before its ready admission"
     );
     let reviewed = review_policy::live_binding(github, target, &body, &live)?;
-    review_policy::admit_ready(&reviewed, target, github, pr, &body)?;
-    let document = validate(target, title, body, false)?;
+    review_policy::admit_ready(&reviewed, target, github, pr)?;
+    let document = validate(target, title, body)?;
     let destination = destination(github, &target.repo)?;
     let issue = inspect_issue(
         github,
@@ -2654,18 +2418,10 @@ fn make_ready(
         )),
         &dotfiles::assure::Tree::Commit(Some(head.to_owned())),
     )?;
-    admit_review_request(
-        Operation::Ready,
-        target.generation,
-        &document.body,
-        reviewed.route,
-        || Ok((draft, review_exclusion(&target.repo, pr, &document.body)?)),
-    )?;
     // The command walks the model of `specs/pr_ready.qnt`: head 0 carries the report this read returned.
     let reported = ready_step(pr_ready_rules::initial(), Move::Report(report))
         .unwrap_or_else(|_| pr_ready_rules::initial());
     let marked = ready_step(ready_step(reported, Move::View)?, Move::Mark)?;
-    settle_pause(&target.repo, pr, reviewed.route, &document.body)?;
     let mut args = arguments("ready", &target.repo);
     args.push(pr.to_string().into());
     print!("{}", gh(&args)?);
@@ -2864,7 +2620,7 @@ fn merge_state(
         || !requirements.checks.is_empty()
         || github.carries_workflow(target, &view.head_ref_oid)?;
     let checks = head_checks(total, unfinished.saturating_add(missing), failed, declared);
-    let mut exclusion = review_exclusion(&target.repo, pr, &view.body)?;
+    let mut exclusion = Exclusion::None;
     let mut assessment = None;
     if matches!(lifecycle, Lifecycle::Draft | Lifecycle::Ready) {
         review_policy::fetch_pr(
@@ -2889,10 +2645,10 @@ fn merge_state(
             &view.head_ref_oid,
             signer,
         )?;
-        review_policy::admit_publication(&reviewed, &view.body)?;
+        review_policy::admit_publication(&reviewed)?;
         review_policy::remember(&reviewed, target, github, pr)?;
         review_policy::validate_live_source(&reviewed, &view.source, carry)?;
-        review_policy::labels(&reviewed, &view.labels)?;
+        review_policy::labels(&view.labels)?;
         if lifecycle == Lifecycle::Ready
             && (stacked || requirements.queue || !behind)
             && view.mergeable != "CONFLICTING"
@@ -2990,28 +2746,6 @@ fn sleep_interval(polling: Polling, started: Instant) {
     std::thread::sleep(Duration::from_secs(polling.interval).min(remaining));
 }
 
-/// Excludes the review for the owner's pause, so the draft becomes ready during the pause.
-/// The body keeps the ignore line, and owner-local state records that the PR needs the review again after resumption.
-fn add_pause_lines(target: &Target, pr: u64, view: &MergeView) -> Result<()> {
-    if !excludes_review(&view.body) {
-        let mut body = view.body.trim_end().to_owned();
-        body.push_str("\n\n");
-        body.push_str(REVIEW_EXCLUSION);
-        body.push('\n');
-        let document = validate(target, view.title.clone(), body, false)?;
-        let mut args = vec![
-            OsString::from("pr"),
-            "edit".into(),
-            pr.to_string().into(),
-            "--repo".into(),
-            target.repo.clone().into(),
-        ];
-        let _body = write_document(&mut args, &document)?;
-        print!("{}", gh(&args)?);
-    }
-    evidence::record_pause(&target.repo, pr)
-}
-
 /// The target of one PR's ready transition: its own closing issue unless the command named one.
 /// GitHub reports no closing reference for a PR whose base isn't the default branch, so the visible body supplies it then.
 fn ready_target(target: &Target, view: &MergeView) -> Target {
@@ -3080,7 +2814,7 @@ fn merge_independent(
             }
             Step::Restack => bail!("an independent PR is never restacked"),
             Step::Wait => wait(target, pr, polling, started)?,
-            Step::Exclude => add_pause_lines(target, pr, &view)?,
+            Step::Exclude => bail!("CodeRabbit PR reviews are paused by the owner"),
             Step::Ready => {
                 make_ready(
                     github,
@@ -3510,10 +3244,7 @@ fn merge_stack(
                     wait(target, pr, polling, started)?;
                     continue 'restart;
                 }
-                Step::Exclude => {
-                    add_pause_lines(target, pr, &view)?;
-                    continue 'restart;
-                }
+                Step::Exclude => bail!("CodeRabbit PR reviews are paused by the owner"),
                 Step::Ready => {
                     make_ready(
                         github,
@@ -3756,20 +3487,8 @@ fn link_stack(target: &Target, numbers: &[u64], base: &str) -> Result<()> {
             Some(&member.base),
         )?;
         review_policy::validate_live_source(&checked, &live.source, None)?;
-        review_policy::admit_publication(&checked, &live.body)?;
-        review_policy::labels(&checked, &live.labels)?;
-        admit_review_request(
-            Operation::Edit,
-            target.generation,
-            &live.body,
-            checked.route,
-            || {
-                Ok((
-                    live.is_draft,
-                    review_exclusion(&target.repo, member.number, &live.body)?,
-                ))
-            },
-        )?;
+        review_policy::admit_publication(&checked)?;
+        review_policy::labels(&live.labels)?;
         before.push(live);
     }
     plan.require_current()?;
@@ -3902,13 +3621,8 @@ fn issue(action: IssueAction) -> Result<()> {
 
 pub(crate) fn install(binary: &std::path::Path, user_directory: &std::path::Path) -> Result<()> {
     let directory = user_directory.join(".local/bin");
-    fs::create_dir_all(&directory)?;
-    let file = tempfile::NamedTempFile::new_in(&directory)?;
-    fs::copy(binary, file.path())?;
-    file.as_file().sync_all()?;
-    let (_, staged) = file.keep()?;
-    crate::aside::replace(
-        &staged,
+    crate::aside::install(
+        binary,
         &directory.join(format!("pr-workflow{}", std::env::consts::EXE_SUFFIX)),
     )?;
     println!("Installed pr-workflow in {}", directory.display());

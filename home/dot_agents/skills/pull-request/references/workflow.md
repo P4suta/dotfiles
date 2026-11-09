@@ -58,8 +58,7 @@ pr-workflow ready --repo OWNER/REPO --pr 17
 pr-workflow check --repo OWNER/REPO --pr 17 --final
 ```
 
-The default `local` mode always creates a draft.
-Every generation mode starts as a draft before any review request.
+Creation always starts as a draft with an authored title and description.
 `ready` requires an open draft with an accepted document and only passing head checks.
 `edit` replaces title and body together and leaves draft state unchanged.
 Local-file `check` never contacts GitHub and leaves the live issue prerequisite unmet, and `check --pr` only reads.
@@ -73,7 +72,7 @@ pr-workflow link-issue --repo OWNER/REPO --pr 17 --issue 23
 ```
 
 The command checks the exact open issue, PR, source network, head, and base.
-It keeps the current title and body prefix, draft state, creator, labels, review requests, assessment markers, and CodeRabbit directives.
+It keeps the current title and body prefix, draft state, creator, labels, review requests, and assessment markers.
 A matching reference leaves the document unchanged.
 The command adds only one closing-reference paragraph through a body-only update.
 It rechecks state before writing and requires a matching acknowledgement and fresh readback.
@@ -130,150 +129,66 @@ Git execution failures stop creation, and no flag overrides a conflict.
 `stack sync` and `stack rebase` hold the repository's stack lease, the only way dotguard admits a rebase or leased force push of a published branch besides an `ALLOW_FORCE` waiver.
 `merge` takes independent PRs in order.
 It fetches the head and base before checking evidence, updates a behind head by merge, and waits for every head check.
-It enforces the assessed review route, marks a draft ready, and merges the verified head with `--match-head-commit`.
+It marks a draft ready and merges the verified head with `--match-head-commit`.
+It stops when required CodeRabbit review evidence is missing.
 `stack merge` restacks instead of updating and merges the stack up to the PR together.
 When the trunk's active rulesets require a merge queue, both merge commands enqueue the verified heads and wait for every member to merge.
 Queue admission alone grants no merge completion.
 The structured result reports `merged`, `ejected`, `timed_out`, `head_changed`, or `closed`, and a stopped queue entry is never resubmitted automatically.
 The head bound to the merge request must match the verified head.
-Both stop with a structured refusal on a failed check, conflict, timeout, or missing evidence for the assessed CodeRabbit route.
+Both stop on a failed check, conflict, timeout, or missing CodeRabbit review.
 
-## Importance assessment
+## Source assessment
 
-Use the [importance criteria](importance.md) for every PR.
-Prepare a bounded JSON assessment of the actual committed diff and sign it with the existing trusted Git identity:
+Use the [risk criteria](importance.md) to describe the actual changed behavior.
+The checked tool keeps its existing repository, source, merge-base, head, and diff binding in owner-local state.
+That assessment never selects whether CodeRabbit runs.
 
 ```console
 pr-workflow assess --repo OWNER/REPO --base origin/main --assessment-file importance.json
 ```
 
-The command stores the signed statement in owner-local state, and every later command reads it from there.
-Keep it out of the PR body, which refuses it.
-Another machine reassesses instead of reading evidence from GitHub.
-Pass the remote base, because a stale local `main` widens the bound diff.
-The signed statement binds the exact repository, merge base, head, diff, and assessment.
-Fork contributions also bind the verified source and destination repository identities.
-Use the source owner's qualified head when publishing to an upstream repository.
-Preparation can assess local commits before their authorized push, while publication verifies the actual published source branch.
-It contains no private CLI output.
-A base update or restack that preserves the exact diff and source identity carries the authenticated assessment to the new binding, signed again by the same trusted identity.
-Any changed diff still requires a fresh assessment.
-
-An ordinary bounded behavior change can use this input shape:
+A bounded assessment uses the existing input shape:
 
 ```json
 {
   "level": "medium",
   "model": "The actual assessing model",
-  "rationale": "The changed operation is bounded and recoverable under its existing checks.",
-  "evidence": [{"path": "src/operation.rs", "change": "Describe the concrete changed behavior and effective recovery."}],
+  "rationale": "The changed operation is bounded and recoverable.",
+  "evidence": [{"path": "src/operation.rs", "change": "Describe the changed behavior."}],
   "severe": null
 }
 ```
 
-Evidence paths must occur in the current diff.
-For `high` and `critical`, replace `severe` with the required concrete ground, consequence, likelihood, blast radius, rollback reasons, and their closed categories.
-The executable rejects unknown fields, unsupported levels, and an assessment that fails the severe threshold.
-The assessment's factual accuracy remains the accountable agent's responsibility.
+Keep assessment records, private diagnostics, and local operating instructions out of PR descriptions.
+Use a qualified source head for a verified fork contribution.
+A changed diff needs a current assessment, and supported earlier findings remain obligations.
 
-For a selected CLI route, pass the guard's signed private receipt with `--cli-receipt PATH` to the publication command.
-Produce it on the managed review executor with:
+## Automatic CodeRabbit reviews
 
-```console
-coderabbit review-committed --base-commit FULL_MERGE_BASE_SHA --receipt NEW_PRIVATE_FILE
-```
+Every importance level uses CodeRabbit PR review.
+Enable automatic reviews for ready PRs and updates targeting every base branch, without positive label filters.
+Leave draft review off unless the repository needs early feedback.
+Set `auto_pause_after_reviewed_commits: 0` to keep automatic updates enabled.
+Read back the effective service configuration because local instructions don't configure the provider.
+Keep automatic summaries off to preserve authored descriptions.
+Use CodeRabbit commit statuses for the workflow's current-head review admission.
+Accept ordinary incremental reviews ending at the current head.
+Wait for automatic review after readiness or updates without posting manual review commands.
 
-Keep the receipt outside the reviewed checkout and write it to a new destination file.
-Don't embed that receipt, raw diagnostics, or authentication data in the PR body.
-Missing or stale required review evidence holds readiness and merge.
-`critical` uses actual current-head PR review evidence and doesn't accept a CLI receipt as a substitute.
-Reassess a published high route with `assess --pr NUMBER --prior-cli-receipt PATH` before changing its route.
-Keep that private prior receipt available to later checks.
-Its authenticated findings remain obligations while its old completion supplies no credit for the new diff.
-Put every returned finding's ID, resolved or unsupported disposition, concrete reason, and current-source evidence in the signed assessment.
+Ready admission waits for unfinished, failed, or missing required checks.
+A repository that reports and requires no checks can accept a ready PR.
+The review that readiness starts can finish afterward.
+Final validation and merge still require the review of the current head and resolved supported findings.
 
-## Repository PR review policy
+An owner pause keeps the affected operation pending without inserting a command into the PR description.
+Keep subscription limits, separate PR and CLI pools, and existing billing controls.
+Use a guarded CLI review for an explicit local review request.
 
-Record a repository that requires CodeRabbit PR review for every change in owner-local state.
-Use `~/.local/state/pr-workflow/review-policies/OWNER__REPO/policy.json`, with the owner and repository in lowercase in the directory name.
-On Windows, use the same relative path beneath the owner's home directory.
-For example:
-
-```json
-{
-  "repository": "P4suta/Hellooo",
-  "review": "always_pr",
-  "reason": "Every PR in this repository requires CodeRabbit PR review."
-}
-```
-
-The workflow loads this policy for the destination repository on every command that checks the review route.
-An absent policy keeps the importance routes below.
-The workflow refuses malformed policies, unknown fields, mismatched repositories, missing reasons, oversize files, and symlinks.
-Keep this file outside tracked projects and keep the signed assessment at its actual importance.
-The policy replaces the default route with PR review, including for `high`, and needs no CLI receipt or `review:critical` label.
-Create and edit use a completed body without `@coderabbitai ignore`.
-Ready, final validation, and merge require observed current-head full PR review and resolved supported findings.
-An earlier CLI route still requires its signed history before changing routes.
-A high assessment reviewed through PR keeps that PR route in the historical record.
-The policy doesn't clear the owner's pause, spend capacity, or configure CodeRabbit.
-A PR pause blocks create, edit, ready, and merge under this policy without inserting an ignore line.
-Only the owner resumes reviews.
-
-Check the effective repository service configuration.
-Enable automatic review and draft review, and remove positive label filters.
-Readiness requires review first.
-Removing an ignore line restores automatic review on the next commit, according to the [service commands](https://docs.coderabbit.ai/guides/commands).
-For an existing head, request `@coderabbitai full review` only after the owner resumes and the PR pool has verified capacity.
-The separate pools and adaptive thresholds below still apply.
-
-## CodeRabbit generation
-
-Complete local checks and the authenticated importance assessment before the selected review.
-`coderabbit --guard-status --json` reports the owner's pause scope: `reviews.pr` and `reviews.cli` each read `paused` or `allowed`.
-Without the repository PR policy, keep the standalone `@coderabbitai ignore` description line for `low`, `medium`, and `high`, with no `review:critical` opt-in label.
-The current PR route permits CodeRabbit generation and PR opt-in.
-An owner pause blocks the selected required route rather than lifting its obligation.
-The live check and `ready` report the current route and any missing evidence.
-The guard preserves its CLI budget and pause.
-An unavailable allowance leaves a required CLI review pending.
-
-CLI reviews, IDE reviews, PR reviews, chat, and paid add-ons have separate usage pools.
-Check PR quota with the [official guidance](https://docs.coderabbit.ai/management/rate-limits), including an authorized `@coderabbitai rate limit` comment, which starts no review.
-Request at most one such status per hour and never trigger a review to discover capacity.
-Only a fresh numeric observation for the correct developer, organization, and pool establishes a reserve, and a response that says reviews exist gives none.
-The Review Usage dashboard shows historical rates, not current capacity.
-The Advanced plan's 0–49-review activity band sets the PR refill rate, not a weekly PR allowance, and excludes the CLI pool.
-Apply the same layered budget to a verified adaptive threshold and the hourly quota.
-A confirmed highest-band threshold of 49 gives 35 events per rolling 168 hours.
-Confirm the applicable window and current counts, because the official policy can use 24-hour or seven-day activity.
-Hold ready publication, generation, and pushes that would start an automatic PR review while the required capacity stays unknown, and report the reason and reconsideration time.
-After a one-hour hold, recheck once instead of pushing on a timer.
-Keep paid usage inactive and honor an owner-imposed pause until the owner resumes.
-The CLI guard and checked PR workflow enforce their managed entry points.
-Ordinary Git and GitHub clients can bypass them.
-Other clients can spend capacity after a snapshot, so account-wide limits need service enforcement or a common reservation gateway.
-
-Use the standard placeholders from the [official configuration reference](https://docs.coderabbit.ai/reference/configuration).
-Put the summary request on its own line beside otherwise completed content.
-
-```console
-pr-workflow check --repo OWNER/REPO --generation coderabbit --title "@coderabbitai" --body-file generation.md
-pr-workflow create --repo OWNER/REPO --generation coderabbit --head feature --base main --title "@coderabbitai" --body-file generation.md
-pr-workflow ready --repo OWNER/REPO --generation coderabbit --pr 17
-pr-workflow check --repo OWNER/REPO --pr 17 --final
-```
-
-CodeRabbit creation also starts as a draft with a current assessment selecting PR review.
-A permitted ready transition must meet the selected route and the destination's checks.
-For the default `critical` route, readiness can precede PR review, but final validation and merge require its observed completion.
-The repository PR policy requires completion before readiness too.
-Add the critical opt-in label or request a full review only after verifying the corresponding capacity and authorization.
-The final check rejects remaining placeholders.
-Check the generated document for destination rules, intent, and truthful validation results, then correct it with `edit` when authorized.
-Use [the configuration example](../assets/coderabbit.yaml) only for authorized configuration work, merged with the destination's existing rules.
-The example puts the summary in the description.
-If the destination uses the walkthrough comment, copy that summary into the body with `edit` before final validation.
+Use the prepared [configuration](../assets/coderabbit.yaml) for authorized configuration work.
+The [automatic review controls](https://docs.coderabbit.ai/configuration/auto-review) define eligibility, labels, and updates.
+Check the current [rate limits](https://docs.coderabbit.ai/management/rate-limits) for the actual developer, organization, and pool.
+Never start a review merely to discover capacity or enable paid usage to continue.
 
 ## Destination title exception
 

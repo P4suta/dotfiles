@@ -2232,11 +2232,11 @@ fn reject_marking_a_partial_report_ready() {
 }
 #[kani::proof]
 fn reject_a_report_that_lacks_a_required_check_as_complete() {
-    assert!(report(3, 0, 0, 1) == Report::Complete);
+    assert!(report(0, 0, 1) == Report::Complete);
 }
 #[kani::proof]
 fn reject_a_report_with_an_unfinished_check_as_complete() {
-    assert!(report(3, 1, 0, 0) == Report::Complete);
+    assert!(report(1, 0, 0) == Report::Complete);
 }
 #[kani::proof]
 fn reject_keeping_a_moved_head_ready() {
@@ -2376,40 +2376,28 @@ fn reject_a_filename_prefix_being_registered_as_a_directory() {
     assert!(production::registered_path(b"crates/a", b"crates/another.rs"));
 }
 #[kani::proof]
-fn reject_ready_local_creation() {
-    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Success), Ok(production::Effect::CreateReady));
+fn reject_ready_creation() {
+    assert_ne!(production::plan(production::Operation::Create, true, false, production::IssueGate::Linked, production::Checks::Success), Ok(production::Effect::CreateDraft));
 }
 #[kani::proof]
 fn reject_creation_without_a_personal_issue() {
-    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Success).is_ok());
-}
-#[kani::proof]
-fn reject_unfinished_summary_as_review_exclusion() {
-    assert!(production::coderabbit_body_marker_allowed(false, true, false));
+    assert!(production::plan(production::Operation::Create, true, false, production::issue_gate(true, false, false), production::Checks::Success).is_ok());
 }
 #[kani::proof]
 fn reject_ready_with_unfinished_checks() {
-    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::Checks::Incomplete), Ok(production::Effect::Ready));
+    assert_eq!(production::plan(production::Operation::Ready, true, true, production::IssueGate::Linked, production::Checks::Incomplete), Ok(production::Effect::Ready));
 }
 #[kani::proof]
 fn reject_blaming_checks_for_a_published_pr() {
-    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Incomplete), Err(production::Blocker::UnfinishedChecks));
+    assert_eq!(production::plan(production::Operation::Ready, true, false, production::IssueGate::Linked, production::Checks::Incomplete), Err(production::Blocker::UnfinishedChecks));
 }
 #[kani::proof]
 fn reject_paused_review_request() {
-    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Ready, production::Generation::Local, true, false, false)));
-}
-#[kani::proof]
-fn reject_paused_exclusion_removal() {
-    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Edit, production::Generation::Local, false, true, false)));
+    assert!(production::review_request_allowed(true, true));
 }
 #[kani::proof]
 fn reject_pause_exclusion_as_standing() {
     assert_eq!(production::review_requirement(false, production::exclusion(true, true)), production::ReviewRequirement::Excluded);
-}
-#[kani::proof]
-fn reject_standing_exclusion_when_ready_during_the_pause() {
-    assert!(production::keeps_pause_exclusion(production::Operation::Ready, true, production::Exclusion::None, production::exclusion(true, false)));
 }
 fn state(lifecycle: production::Lifecycle, behind: bool, checks: production::HeadChecks, exclusion: production::Exclusion) -> production::MergeState {
     production::MergeState { lifecycle, conflict: false, behind, checks, clean: true, exclusion }
@@ -2843,8 +2831,8 @@ fn reject_substituting_a_cli_review_for_a_critical_change() {
     assert_eq!(production::route(production::ReviewLevel::Critical), production::ReviewRoute::Cli);
 }
 #[kani::proof]
-fn reject_a_high_change_spending_the_pr_review_pool() {
-    assert_eq!(production::route(production::ReviewLevel::High), production::ReviewRoute::Pr);
+fn reject_skipping_review_for_a_high_change() {
+    assert_eq!(production::route(production::ReviewLevel::High), production::ReviewRoute::None);
 }
 #[kani::proof]
 fn reject_suppressing_review_under_the_repository_pr_policy() {

@@ -33,16 +33,17 @@ When publication becomes authorized, link the actual local history with checked 
 The new remote start supplies no retroactive authority for earlier local edits.
 
 Assess every PR using the [importance criteria](references/importance.md) before publication.
-The checked workflow requires an authenticated current-diff assessment and defaults to no CodeRabbit review for `low`, `medium`, and `high`, and PR review for `critical`.
-An [owner-local repository policy](references/workflow.md#repository-pr-review-policy) selects PR review for every level without changing importance.
-The workflow keeps its assessments, pause records, and issue contexts in owner-local state, and published documents and tracked files never carry them.
+The checked workflow authenticates the current diff and uses CodeRabbit PR review for every importance level.
+Importance never skips a review or selects a review opt-in label.
+The workflow keeps its assessments and issue contexts in owner-local state, and published documents and tracked files never carry them.
 Keep severe levels exceptional and explain concrete consequences rather than escalating by filename or diff size.
 `coderabbit --guard-status --json` reports the separate PR and CLI pause scopes.
-A paused required route remains pending and never changes its classification.
-Use `coderabbit-review` for the selected route and existing supported findings.
-Keep the standalone PR description exclusion for routes other than PR review, and permit CodeRabbit generation only for the PR route.
-Read [commands and generation](references/workflow.md) for the placeholders, the PR review budget, and the optional configuration example.
-Write locally when generation fails or omits a required document.
+A paused review remains pending without changing the PR description.
+Use `coderabbit-review` for current-head review and existing supported findings.
+Keep PR descriptions about the change without suppression commands or local workflow instructions.
+Read [workflow commands](references/workflow.md) for automatic reviews, the PR review budget, and the optional configuration example.
+Write complete PR documents locally.
+Use automatic reviews after readiness and updates without posting service commands.
 Local creation always starts as a draft, and moving it to review needs separate authorization.
 The workflow policy caps work units at three per person and repository by default.
 One open stack counts as one unit, and each declared independent PR counts as one unit.
@@ -52,7 +53,8 @@ Declare unrelated work with `start --independent <reason>` or `create --independ
 The reason stays in owner-local state and never enters the PR body.
 A declaration from `start` carries into `create` for the same source, branch, issue, and descendant history.
 At the cap, work can join the existing stack but can't add another unit.
-`ready` refuses until every head check passes, so run it only when no scoped work remains.
+`ready` refuses unfinished, failed, or missing required checks, and accepts a destination that reports and requires no checks.
+Run it only when no scoped work remains.
 Use `pr-workflow stack create` to name the open stack tip explicitly.
 The dependency check skips PRs opened by bots identified by an `app/` login prefix, a `[bot]` login suffix, or the `Bot` account type.
 It also skips stale PRs that already conflict with their own base and reports every skipped PR with its reason.

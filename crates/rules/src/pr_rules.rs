@@ -1,32 +1,4 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Generation {
-    Local,
-    Coderabbit,
-}
-
-impl Generation {
-    pub const ALL: [Self; 2] = [Self::Local, Self::Coderabbit];
-
-    /// The name a command line gives.
-    #[must_use]
-    pub const fn key(self) -> &'static str {
-        match self {
-            Self::Local => "local",
-            Self::Coderabbit => "coderabbit",
-        }
-    }
-
-    /// The generation a command line names, or `None` for a name no generation carries.
-    #[must_use]
-    pub fn from_key(key: &str) -> Option<Self> {
-        Self::ALL
-            .iter()
-            .copied()
-            .find(|generation| generation.key() == key)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Operation {
     Create,
     Edit,
@@ -36,7 +8,6 @@ pub enum Operation {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Effect {
     CreateDraft,
-    CreateReady,
     Edit,
     Ready,
 }
@@ -250,11 +221,6 @@ pub const fn initial_import(facts: InitialImportFacts) -> InitialImport {
     }
 }
 
-#[must_use]
-pub fn coderabbit_body_marker_allowed(request: bool, summary: bool, ignore: bool) -> bool {
-    ignore || request && summary
-}
-
 /// The head commit's reported checks, which `pr_ready_rules::complete` decides from its report.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Checks {
@@ -287,40 +253,6 @@ pub fn exclusion(ignore: bool, pause_marker: bool) -> Exclusion {
         (false, _) => Exclusion::None,
         (true, false) => Exclusion::Owner,
         (true, true) => Exclusion::Pause,
-    }
-}
-
-/// Whether an operation asks `CodeRabbit` for a PR review or generation.
-/// An edit requests a review when it removes the exclusion of a ready PR.
-#[must_use]
-pub fn requests_review(
-    operation: Operation,
-    generation: Generation,
-    draft: bool,
-    was_excluded: bool,
-    excluded: bool,
-) -> bool {
-    generation == Generation::Coderabbit
-        || match operation {
-            Operation::Create => false,
-            Operation::Edit => !draft && was_excluded && !excluded,
-            Operation::Ready => !excluded,
-        }
-}
-
-/// Whether an operation during a PR pause keeps the review owed after resumption.
-/// A PR becomes ready, or stays ready, only with the exclusion made for the pause.
-#[must_use]
-pub fn keeps_pause_exclusion(
-    operation: Operation,
-    draft: bool,
-    was: Exclusion,
-    now: Exclusion,
-) -> bool {
-    match operation {
-        Operation::Create => true,
-        Operation::Edit => draft || was != Exclusion::Pause || now == Exclusion::Pause,
-        Operation::Ready => now == Exclusion::Pause,
     }
 }
 
@@ -539,7 +471,6 @@ pub fn dependency(shared_commits: bool, merge: PathMerge) -> Option<Dependency> 
 /// Returns the blocker that refuses the operation.
 pub fn plan(
     operation: Operation,
-    generation: Generation,
     validated: bool,
     draft: bool,
     issue: IssueGate,
@@ -552,11 +483,7 @@ pub fn plan(
         return Err(Blocker::MissingIssue);
     }
     match operation {
-        Operation::Create => Ok(if generation == Generation::Local || draft {
-            Effect::CreateDraft
-        } else {
-            Effect::CreateReady
-        }),
+        Operation::Create => Ok(Effect::CreateDraft),
         Operation::Edit => Ok(Effect::Edit),
         Operation::Ready if !draft => Err(Blocker::NotDraft),
         Operation::Ready if checks != Checks::Success => Err(Blocker::UnfinishedChecks),
@@ -809,10 +736,9 @@ mod proofs {
         HeadChecks::Absent,
     ];
 
-    /// A rejected document never mutates a PR, local creation starts as a draft, ready needs a validated draft with passing checks, and a refusal names the first unmet condition.
+    /// A rejected document never mutates a PR, creation starts as a draft, ready needs a validated draft with passing checks, and a refusal names the first unmet condition.
     pub fn spec_plan(
         operation: Operation,
-        generation: Generation,
         validated: bool,
         draft: bool,
         issue: IssueGate,
@@ -824,20 +750,14 @@ mod proofs {
             Err(Blocker::MissingIssue)
         } else {
             match operation {
-                Operation::Create if generation == Generation::Local || draft => {
-                    Ok(Effect::CreateDraft)
-                }
-                Operation::Create => Ok(Effect::CreateReady),
+                Operation::Create => Ok(Effect::CreateDraft),
                 Operation::Edit => Ok(Effect::Edit),
                 Operation::Ready if !draft => Err(Blocker::NotDraft),
                 Operation::Ready if checks != Checks::Success => Err(Blocker::UnfinishedChecks),
                 Operation::Ready => Ok(Effect::Ready),
             }
         };
-        assert_eq!(
-            plan(operation, generation, validated, draft, issue, checks),
-            expected
-        );
+        assert_eq!(plan(operation, validated, draft, issue, checks), expected);
     }
 
     /// Any failure fails a merge, an empty report without a declared check can never fill, and any other empty or unfinished report waits.
@@ -864,10 +784,6 @@ mod proofs {
         assert_eq!(gate == IssueGate::NotRequired, !first || second);
         assert_eq!(gate == IssueGate::Linked, first && !second && third);
         assert_eq!(gate == IssueGate::Missing, first && !second && !third);
-        assert_eq!(
-            coderabbit_body_marker_allowed(first, second, third),
-            third || first && second
-        );
         assert_eq!(review_request_allowed(first, second), !first || !second);
         let kind = exclusion(first, second);
         assert_eq!(kind == Exclusion::None, !first);
@@ -995,34 +911,8 @@ mod proofs {
         kani::cover!(skip.is_none());
     }
 
-    /// No operation requests a paused PR review, and an edit requests one only by removing the exclusion of a ready PR.
-    pub fn spec_review(operation: Operation, generation: Generation, flags: [bool; 4]) {
-        let [draft, was_excluded, excluded, paused] = flags;
-        let request = requests_review(operation, generation, draft, was_excluded, excluded);
-        let expected = generation == Generation::Coderabbit
-            || (operation == Operation::Edit && !draft && was_excluded && !excluded)
-            || (operation == Operation::Ready && !excluded);
-        assert_eq!(request, expected);
-        let accepted = review_request_allowed(paused, request);
-        assert!(!paused || generation == Generation::Local || !accepted);
-        assert!(paused || accepted);
-    }
-
-    /// A PR ready during the pause keeps its pause exclusion, and a review comes back once the pause ends.
-    pub fn spec_pause(
-        operation: Operation,
-        draft: bool,
-        was: Exclusion,
-        now: Exclusion,
-        paused: bool,
-    ) {
-        let kept = keeps_pause_exclusion(operation, draft, was, now);
-        let expected = match operation {
-            Operation::Create => true,
-            Operation::Edit => draft || was != Exclusion::Pause || now == Exclusion::Pause,
-            Operation::Ready => now == Exclusion::Pause,
-        };
-        assert_eq!(kept, expected);
+    /// Pausing and resuming preserve the meaning of each recorded exclusion.
+    pub fn spec_pause(now: Exclusion, paused: bool) {
         let requirement = review_requirement(paused, now);
         assert_eq!(requirement == ReviewRequirement::Paused, paused);
         assert_eq!(
@@ -1064,7 +954,6 @@ mod proofs {
     #[kani::proof]
     fn a_pr_operation_takes_its_effect_only_after_every_condition_and_names_the_first_unmet_one() {
         let operation = OPERATIONS[usize::from(kani::any::<u8>() % 3)];
-        let generation = Generation::ALL[usize::from(kani::any::<u8>() % 2)];
         let issue = ISSUES[usize::from(kani::any::<u8>() % 3)];
         let checks = if kani::any() {
             Checks::Success
@@ -1073,9 +962,9 @@ mod proofs {
         };
         let validated: bool = kani::any();
         let draft: bool = kani::any();
-        spec_plan(operation, generation, validated, draft, issue, checks);
-        let result = plan(operation, generation, validated, draft, issue, checks);
-        kani::cover!(result == Ok(Effect::CreateReady));
+        spec_plan(operation, validated, draft, issue, checks);
+        let result = plan(operation, validated, draft, issue, checks);
+        kani::cover!(result == Ok(Effect::CreateDraft));
         kani::cover!(result == Ok(Effect::Ready));
         kani::cover!(result == Err(Blocker::UnfinishedChecks));
     }
@@ -1107,17 +996,13 @@ mod proofs {
     #[cfg(kani)]
     #[kani::proof]
     fn paused_reviews_are_never_requested_and_return_after_resumption() {
-        let operation = OPERATIONS[usize::from(kani::any::<u8>() % 3)];
-        let generation = Generation::ALL[usize::from(kani::any::<u8>() % 2)];
-        let flags: [bool; 4] = [kani::any(), kani::any(), kani::any(), kani::any()];
-        spec_review(operation, generation, flags);
-        let was = EXCLUSIONS[usize::from(kani::any::<u8>() % 3)];
+        let paused: bool = kani::any();
+        assert_eq!(review_request_allowed(paused, true), !paused);
+        kani::cover!(paused && !review_request_allowed(paused, true));
+        kani::cover!(!paused && review_request_allowed(paused, true));
         let now = EXCLUSIONS[usize::from(kani::any::<u8>() % 3)];
-        spec_pause(operation, flags[0], was, now, flags[3]);
-        kani::cover!(
-            !keeps_pause_exclusion(operation, flags[0], was, now) && operation == Operation::Edit
-        );
-        kani::cover!(review_requirement(flags[3], now) == ReviewRequirement::Resumed);
+        spec_pause(now, paused);
+        kani::cover!(review_requirement(paused, now) == ReviewRequirement::Resumed);
     }
 
     #[cfg(kani)]
@@ -1290,26 +1175,17 @@ mod tests {
     #[cfg_attr(miri, ignore = "Miri takes seconds over every input")]
     fn every_input_meets_the_pr_specifications() {
         for operation in proofs::OPERATIONS {
-            for generation in Generation::ALL {
-                for issue in proofs::ISSUES {
-                    for checks in [Checks::Success, Checks::Incomplete] {
-                        for [validated, draft] in flags() {
-                            proofs::spec_plan(
-                                operation, generation, validated, draft, issue, checks,
-                            );
-                        }
+            for issue in proofs::ISSUES {
+                for checks in [Checks::Success, Checks::Incomplete] {
+                    for [validated, draft] in flags() {
+                        proofs::spec_plan(operation, validated, draft, issue, checks);
                     }
-                }
-                for review in flags() {
-                    proofs::spec_review(operation, generation, review);
                 }
             }
-            for was in proofs::EXCLUSIONS {
-                for now in proofs::EXCLUSIONS {
-                    for [draft, paused] in flags() {
-                        proofs::spec_pause(operation, draft, was, now, paused);
-                    }
-                }
+        }
+        for now in proofs::EXCLUSIONS {
+            for paused in [false, true] {
+                proofs::spec_pause(now, paused);
             }
         }
         for [first, second, third] in flags() {
@@ -1351,18 +1227,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn each_generation_has_its_own_key() {
-        assert_eq!(
-            Generation::ALL.map(Generation::key),
-            ["local", "coderabbit"]
-        );
-        for generation in Generation::ALL {
-            assert_eq!(Generation::from_key(generation.key()), Some(generation));
-        }
-        assert_eq!(Generation::from_key("remote"), None);
     }
 
     const READY: MergeState = MergeState {
