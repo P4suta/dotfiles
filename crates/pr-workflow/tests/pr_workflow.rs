@@ -5923,12 +5923,15 @@ fn clean_full_review_summaries_accept_completion_and_preserve_open_findings() ->
             }}}}).to_string());
         }
         let output = command.output()?;
+        let error = String::from_utf8_lossy(&output.stderr);
         assert_eq!(
             output.status.success(),
             case != "open-finding",
-            "{case}: {}",
-            String::from_utf8_lossy(&output.stderr)
+            "{case}: {error}"
         );
+        if case == "open-finding" {
+            assert!(error.contains("unresolved"), "{error}");
+        }
     }
     Ok(())
 }
