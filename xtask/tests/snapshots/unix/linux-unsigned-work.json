@@ -76,7 +76,7 @@
     {"mode":"0755","path":".agents/skills/editorial-assurance","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/editorial-assurance/SKILL.md","sha256":"b5e2e7db0db9be4d896608318601495a814425c34a5ce793216d4c53fccbb5bb","type":"file"},
     {"mode":"0755","path":".agents/skills/editorial-assurance/references","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/editorial-assurance/references/editorial-review.md","sha256":"ba6b6b8eadc23601445d555342bd41e72bfec1061c77e2db0451b0f018c1c7be","type":"file"},
+    {"mode":"0644","path":".agents/skills/editorial-assurance/references/editorial-review.md","sha256":"454fbc08ba4725f1bbada479eee652c3e126ebf168c0b731120020ddff888bb1","type":"file"},
     {"mode":"0644","path":".agents/skills/editorial-assurance/references/japanese-style.md","sha256":"6a9d12ae46ffeb9b09d39d590103ee5f6fa82c3e6e6f618b9cd9fc0fe347b12e","type":"file"},
     {"mode":"0644","path":".agents/skills/editorial-assurance/references/mechanical-checks.md","sha256":"443abeb62748460fafbe764e0c868e721e23512405778e47d3935571b4808598","type":"file"},
     {"mode":"0644","path":".agents/skills/editorial-assurance/references/public-urls.md","sha256":"a3337206cb13a51e541623ef9e74fb4f24d9059ad5e25873a8a236d53cd2ad1d","type":"file"},

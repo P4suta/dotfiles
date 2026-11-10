@@ -29,6 +29,7 @@ Choose facts from the reader's task and existing knowledge, following [Google's 
 Use plain Japanese in Japanese product copy.
 [The plain Japanese guideline](https://www.bunka.go.jp/seisaku/kokugo_nihongo/kyoiku/pdf/92484001_01.pdf#page=7) explains selecting necessary information and simplifying the wording for the intended reader.
 Name the action, visible result, and conditions needed to use the feature.
+Preserve exact existing UI labels in instructions so the reader can find the named control.
 Include price, data use, permissions, and device requirements when they affect that decision.
 Keep the language direct and factual.
 

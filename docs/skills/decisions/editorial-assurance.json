@@ -1,7 +1,7 @@
 {
-  "revision": "680ded380c78f95791bcf55f786acb1fe50d663e6f370edf34381f60dbf85fd9",
+  "revision": "1fecf3e70f6ab3ddc10d2876c3db0cbafb31603a11394c4edd61305044ffe5ff",
   "outcome": "implemented",
-  "reason": "Choose product copy and operational notes from reader tasks while preserving requested technical depth and required disclosures.",
+  "reason": "Choose product copy and operational notes from reader tasks, preserving exact UI labels in instructions, requested technical depth, and required disclosures.",
   "evidence": [
     "home/dot_agents/skills/editorial-assurance/SKILL.md",
     "home/dot_agents/skills/editorial-assurance/references/editorial-review.md",
