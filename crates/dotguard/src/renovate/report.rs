@@ -309,12 +309,6 @@ fn dependency_records(managers: &Map<String, Value>) -> Result<Vec<Record>, Repo
                         "invalid lockfile ownership",
                     )
                 })?;
-            let lock_files = if manager == "npm" {
-                npm_lock_files(file, lock_files)
-                    .map_err(|reason| invalid(format!("{manager} / {name:?}"), reason))?
-            } else {
-                lock_files
-            };
             for dependency in dependencies {
                 let name_hint = dependency
                     .get("depName")
@@ -342,12 +336,17 @@ fn dependency_records(managers: &Map<String, Value>) -> Result<Vec<Record>, Repo
                         "missing dependency name or update classification",
                     ));
                 }
-                records.push(Record {
+                let mut record = Record {
                     manager: manager.clone(),
                     file: name.to_owned(),
                     dependency,
                     lock_files: lock_files.clone(),
-                });
+                };
+                if super::tarball::requires_npm_lock(&record) {
+                    record.lock_files = npm_lock_files(file, record.lock_files.take())
+                        .map_err(|reason| invalid(record.location(), reason))?;
+                }
+                records.push(record);
             }
         }
     }
@@ -642,6 +641,24 @@ mod tests {
             &serde_json::to_vec(value).unwrap(),
             "minor patch pin pinDigest",
         )
+    }
+
+    #[test]
+    fn unrelated_npm_records_keep_their_lockfiles_without_tarball_metadata_validation() {
+        for metadata in [
+            Value::Null,
+            json!("unsupported metadata"),
+            json!({"npmLock":"package-lock.json"}),
+        ] {
+            let report = json!({"repositories":{"local":{"packageFiles":{"npm":[{
+                "packageFile":"package.json",
+                "lockFiles":["yarn.lock"],
+                "managerData":metadata,
+                "deps":[{"depName":"example","packageName":"example","datasource":"npm",
+                    "currentValue":"1.0.0","currentVersion":"1.0.0","lockedVersion":"1.0.0","updates":[]}]
+            }]}}}});
+            assert!(check(&report).is_ok(), "{metadata}");
+        }
     }
 
     #[test]

@@ -61,12 +61,29 @@ pub(super) fn covers(records: &[Record], record: &Record, found: Option<&Found>)
     let Some(source) = super::mise::source(found, &record.file) else {
         return false;
     };
-    let locked = record
-        .dependency
-        .locked_version
-        .clone()
-        .or_else(|| lockfile::version(found, record, &source));
+    let locked = record.dependency.locked_version.clone().or_else(|| {
+        requires_npm_lock(record)
+            .then(|| lockfile::version(found, record, &source))
+            .flatten()
+    });
     binds(records, record, &source, locked.as_deref())
+}
+
+pub(super) fn requires_npm_lock(record: &Record) -> bool {
+    let dependency = &record.dependency;
+    record.manager == "npm"
+        && dependency.enabled
+        && dependency.warnings.is_empty()
+        && dependency.updates.is_empty()
+        && dependency.current_digest.is_none()
+        && dependency.locked_version.is_none()
+        && dependency.skip_reason.as_deref() == Some("unspecified-version")
+        && dependency.package_name.as_deref() == Some(dependency.dep_name.as_str())
+        && dependency
+            .current_value
+            .as_deref()
+            .and_then(|value| official_tarball_version(&dependency.dep_name, value))
+            .is_some()
 }
 
 fn binds(records: &[Record], record: &Record, source: &str, locked: Option<&str>) -> bool {
