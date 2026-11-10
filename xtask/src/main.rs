@@ -143,6 +143,8 @@ enum Action {
     InstallPrWorkflow,
     /// Refresh the verified PR workflow executable without applying shared skills.
     InstallPrWorkflowBinary,
+    /// Install the Git guard and its matching Renovate policy companion.
+    InstallGitGuard,
     /// Build the pinned answer proof image and record its immutable identity on this host.
     InstallAnswerProver,
     /// Verify the answer gate's registered Kani contracts, rejecting probes, and parser corpus.
@@ -533,6 +535,7 @@ fn run() -> Result<()> {
         Action::PublicAudit { denylist } => xtask::profiles::audit_private(&cli.root, &denylist)?,
         Action::InstallPrWorkflow => install_pr_workflow(&cli.root)?,
         Action::InstallPrWorkflowBinary => install_pr_workflow_binary(&cli.root)?,
+        Action::InstallGitGuard => install_git_guard(&cli.root)?,
         Action::InstallAnswerProver => install_answer_prover(&cli.root)?,
         Action::AnswerProofs { policy } => {
             xtask::skill_proofs::verify_answer(&cli.root, policy.as_deref())?;
@@ -771,6 +774,14 @@ fn install_pr_workflow(root: &Path) -> Result<()> {
 }
 
 fn install_workflow_guard(guard: &Path, directory: &Path) -> Result<()> {
+    install_workflow_guard_with(guard, directory, platform::aside::install)
+}
+
+fn install_workflow_guard_with(
+    guard: &Path,
+    directory: &Path,
+    mut install: impl FnMut(&Path, &Path) -> Result<()>,
+) -> Result<()> {
     let companion = guard.with_file_name(format!(
         "{}{}",
         dotguard::RENOVATE_BINARY,
@@ -783,19 +794,118 @@ fn install_workflow_guard(guard: &Path, directory: &Path) -> Result<()> {
             binary.display()
         );
     }
-    for binary in [&companion, guard] {
+    fs::create_dir_all(directory)?;
+    let staging = tempfile::Builder::new()
+        .prefix(".git-guard-")
+        .tempdir_in(directory)?;
+    let mut binaries = Vec::new();
+    for (index, binary) in [&companion, guard].into_iter().enumerate() {
         let name = binary.file_name().context("Git guard bundle filename")?;
-        let destination = directory.join(name);
-        platform::aside::install(binary, &destination)?;
-        ensure!(
-            fs::read(binary)? == fs::read(&destination)?,
-            "installed {} differs from its verified build",
-            name.to_string_lossy()
-        );
+        binaries.push(PreparedGuardBinary::new(
+            binary,
+            directory.join(name),
+            staging.path(),
+            index,
+        )?);
     }
     #[cfg(windows)]
-    platform::aside::install(guard, &directory.join("git.exe"))?;
+    binaries.push(PreparedGuardBinary::new(
+        guard,
+        directory.join("git.exe"),
+        staging.path(),
+        binaries.len(),
+    )?);
+    for (index, binary) in binaries.iter().enumerate() {
+        if let Err(error) = binary.publish(&mut install) {
+            let failures: Vec<_> = binaries[..=index]
+                .iter()
+                .rev()
+                .filter_map(|binary| binary.restore().err())
+                .map(|error| format!("{error:#}"))
+                .collect();
+            if failures.is_empty() {
+                return Err(
+                    error.context("Git guard installation restored after publication failed")
+                );
+            }
+            let recovery = staging.keep();
+            return Err(error.context(format!(
+                "Git guard recovery failed: {}; recovery files remain in {}",
+                failures.join("; "),
+                recovery.display()
+            )));
+        }
+    }
     Ok(())
+}
+
+struct PreparedGuardBinary {
+    candidate: PathBuf,
+    destination: PathBuf,
+    previous: Option<PathBuf>,
+}
+
+impl PreparedGuardBinary {
+    fn new(source: &Path, destination: PathBuf, staging: &Path, index: usize) -> Result<Self> {
+        let candidate = staging.join(format!("candidate-{index}"));
+        fs::copy(source, &candidate)?;
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&candidate)?
+            .sync_all()?;
+        let previous = staging.join(format!("previous-{index}"));
+        let previous = preserve_guard_binary(&destination, &previous)?.then_some(previous);
+        Ok(Self {
+            candidate,
+            destination,
+            previous,
+        })
+    }
+
+    fn publish(&self, install: &mut impl FnMut(&Path, &Path) -> Result<()>) -> Result<()> {
+        install(&self.candidate, &self.destination)?;
+        ensure!(
+            fs::read(&self.candidate)? == fs::read(&self.destination)?,
+            "installed {} differs from its verified build",
+            self.destination.display()
+        );
+        Ok(())
+    }
+
+    fn restore(&self) -> Result<()> {
+        if let Some(previous) = &self.previous {
+            platform::aside::replace(previous, &self.destination)?;
+        } else if let Some(aside) = platform::aside::move_aside(&self.destination)? {
+            platform::cleanup::remove_file(&aside);
+        }
+        Ok(())
+    }
+}
+
+fn preserve_guard_binary(source: &Path, backup: &Path) -> Result<bool> {
+    let metadata = match fs::symlink_metadata(source) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() {
+        let target = fs::read_link(source)?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, backup)?;
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(target, backup)?;
+    } else {
+        ensure!(
+            metadata.is_file(),
+            "installed Git guard is not a regular file"
+        );
+        fs::copy(source, backup)?;
+        fs::OpenOptions::new()
+            .write(true)
+            .open(backup)?
+            .sync_all()?;
+    }
+    Ok(true)
 }
 
 fn build_workflow_guard(root: &Path) -> Result<PathBuf> {
@@ -866,6 +976,13 @@ fn install_attachment_cli(root: &Path, user_directory: &Path) -> Result<()> {
         destination.display()
     );
     Ok(())
+}
+
+fn install_git_guard(root: &Path) -> Result<()> {
+    let guard = build_workflow_guard(root)?;
+    let directory = user_directory()?.join(".local/bin");
+    fs::create_dir_all(&directory)?;
+    install_workflow_guard(&guard, &directory)
 }
 
 fn install_pr_workflow_binary(root: &Path) -> Result<()> {
@@ -1128,6 +1245,113 @@ mod tests {
             fs::read(installed.join(binary(dotguard::RENOVATE_BINARY)))?,
             b"matching policy companion"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn failed_workflow_guard_publication_restores_the_previous_bundle() -> Result<()> {
+        for (existing, corrupt) in [(true, false), (false, false), (true, true), (false, true)] {
+            let scope = tempfile::tempdir()?;
+            let built = scope.path().join("built");
+            let installed = scope.path().join("installed");
+            fs::create_dir_all(&built)?;
+            fs::create_dir_all(&installed)?;
+            let name = |stem: &str| format!("{stem}{}", std::env::consts::EXE_SUFFIX);
+            let names = [name("dotguard"), name(dotguard::RENOVATE_BINARY)];
+            for name in &names {
+                fs::write(built.join(name), b"replacement bundle")?;
+                if existing {
+                    fs::write(installed.join(name), b"previous bundle")?;
+                }
+            }
+            let mut calls = 0;
+            let result = install_workflow_guard_with(
+                &built.join(&names[0]),
+                &installed,
+                |source, destination| {
+                    calls += 1;
+                    if calls == 2 && !corrupt {
+                        anyhow::bail!("injected guard publication failure");
+                    }
+                    platform::aside::install(source, destination)?;
+                    if calls == 2 {
+                        fs::write(destination, b"corrupted publication")?;
+                    }
+                    Ok(())
+                },
+            );
+            assert!(result.is_err());
+            for name in names {
+                let path = installed.join(name);
+                if existing {
+                    assert_eq!(fs::read(path)?, b"previous bundle");
+                } else {
+                    assert!(!path.exists());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_workflow_guard_publication_restores_relative_symlinks() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let built = scope.path().join("built");
+        let installed = scope.path().join("installed");
+        fs::create_dir_all(&built)?;
+        fs::create_dir_all(&installed)?;
+        let names = ["dotguard", dotguard::RENOVATE_BINARY];
+        fs::write(installed.join("previous"), b"previous bundle")?;
+        for name in names {
+            fs::write(built.join(name), b"replacement bundle")?;
+            std::os::unix::fs::symlink("previous", installed.join(name))?;
+        }
+        let mut calls = 0;
+        let result = install_workflow_guard_with(
+            &built.join(names[0]),
+            &installed,
+            |source, destination| {
+                calls += 1;
+                anyhow::ensure!(calls != 2, "injected guard publication failure");
+                platform::aside::install(source, destination)
+            },
+        );
+        assert!(result.is_err());
+        for name in names {
+            assert_eq!(fs::read_link(installed.join(name))?, Path::new("previous"));
+            assert_eq!(fs::read(installed.join(name))?, b"previous bundle");
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_git_alias_publication_restores_the_complete_guard_bundle() -> Result<()> {
+        let scope = tempfile::tempdir()?;
+        let built = scope.path().join("built");
+        let installed = scope.path().join("installed");
+        fs::create_dir_all(&built)?;
+        fs::create_dir_all(&installed)?;
+        let names = ["dotguard.exe", "dotguard-renovate.exe", "git.exe"];
+        for name in names {
+            fs::write(built.join(name), b"replacement bundle")?;
+            fs::write(installed.join(name), b"previous bundle")?;
+        }
+        let mut calls = 0;
+        let result = install_workflow_guard_with(
+            &built.join(names[0]),
+            &installed,
+            |source, destination| {
+                calls += 1;
+                anyhow::ensure!(calls != 3, "injected Git alias publication failure");
+                platform::aside::install(source, destination)
+            },
+        );
+        assert!(result.is_err());
+        for name in names {
+            assert_eq!(fs::read(installed.join(name))?, b"previous bundle");
+        }
         Ok(())
     }
 

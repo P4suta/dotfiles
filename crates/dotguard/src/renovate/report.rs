@@ -336,16 +336,43 @@ fn dependency_records(managers: &Map<String, Value>) -> Result<Vec<Record>, Repo
                         "missing dependency name or update classification",
                     ));
                 }
-                records.push(Record {
+                let mut record = Record {
                     manager: manager.clone(),
                     file: name.to_owned(),
                     dependency,
                     lock_files: lock_files.clone(),
-                });
+                };
+                if super::tarball::requires_npm_lock(&record) {
+                    record.lock_files = npm_lock_files(file, record.lock_files.take())
+                        .map_err(|reason| invalid(record.location(), reason))?;
+                }
+                records.push(record);
             }
         }
     }
     Ok(records)
+}
+
+fn npm_lock_files(
+    file: &Map<String, Value>,
+    reported: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, &'static str> {
+    let Some(metadata) = file.get("managerData") else {
+        return Ok(reported);
+    };
+    let metadata = metadata.as_object().ok_or("invalid npm manager data")?;
+    let lock = match metadata.get("npmLock") {
+        None | Some(Value::Null) => return Ok(reported),
+        Some(Value::String(path)) if !path.is_empty() => path,
+        _ => return Err("invalid npm lockfile ownership"),
+    };
+    if reported
+        .as_ref()
+        .is_some_and(|paths| paths.len() != 1 || paths.first() != Some(lock))
+    {
+        return Err("conflicting npm lockfile ownership");
+    }
+    Ok(Some(vec![lock.clone()]))
 }
 
 fn problems(value: Option<&Value>, location: &str) -> Result<usize, ReportError> {
@@ -614,6 +641,24 @@ mod tests {
             &serde_json::to_vec(value).unwrap(),
             "minor patch pin pinDigest",
         )
+    }
+
+    #[test]
+    fn unrelated_npm_records_keep_their_lockfiles_without_tarball_metadata_validation() {
+        for metadata in [
+            Value::Null,
+            json!("unsupported metadata"),
+            json!({"npmLock":"package-lock.json"}),
+        ] {
+            let report = json!({"repositories":{"local":{"packageFiles":{"npm":[{
+                "packageFile":"package.json",
+                "lockFiles":["yarn.lock"],
+                "managerData":metadata,
+                "deps":[{"depName":"example","packageName":"example","datasource":"npm",
+                    "currentValue":"1.0.0","currentVersion":"1.0.0","lockedVersion":"1.0.0","updates":[]}]
+            }]}}}});
+            assert!(check(&report).is_ok(), "{metadata}");
+        }
     }
 
     #[test]

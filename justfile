@@ -166,6 +166,9 @@ install-pr-workflow: trust
 install-pr-workflow-binary: trust
     mise x -- cargo xtask install-pr-workflow-binary
 
+install-git-guard: trust
+    mise x -- cargo xtask install-git-guard
+
 install-answer-prover: trust
     mise x -- cargo xtask install-answer-prover
 
