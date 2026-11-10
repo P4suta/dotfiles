@@ -23,6 +23,35 @@ For a narrative, inspect chronology, perspective, continuity, character motivati
 Preserve a deliberate rhythm, ambiguity, or nonstandard voice when it serves that purpose.
 Don't impose the factual-exposition profile on fiction or an explicitly requested personal essay.
 
+## Product copy and operational notes
+
+Choose facts from the reader's task and existing knowledge, following [Google's audience guidance](https://developers.google.com/tech-writing/one/audience).
+Use plain Japanese in Japanese product copy.
+[The plain Japanese guideline](https://www.bunka.go.jp/seisaku/kokugo_nihongo/kyoiku/pdf/92484001_01.pdf#page=7) explains selecting necessary information and simplifying the wording for the intended reader.
+Name the action, visible result, and conditions needed to use the feature.
+Include price, data use, permissions, and device requirements when they affect that decision.
+Keep the language direct and factual.
+
+Respect the purpose of the destination field.
+A store description explains what the person can do and the conditions for using it.
+Release notes identify changes the person encounters.
+Review notes give the reviewer the setup and steps needed to test the app.
+[Apple's App Review information](https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information/#app-review-information) asks for information useful during review, including app-specific settings and test account details.
+
+Remove engineering background, implementation terminology, promotional claims, and defensive statements that aren't needed for the task or the destination field.
+A search prompt should tell the person what to enter.
+An explanation of the matching algorithm belongs in a requested explanation of search behavior.
+A review memo can require a paired device or an enabled setting without describing the framework that implements the feature.
+Keep required disclosures and limitations that change the reader's action in the field where they apply.
+
+Check the revision through the reader's task.
+An empty screen must identify the next action, and an error must identify the failed operation and an available recovery.
+A review memo must let the reviewer prepare and test the relevant features.
+A support instruction must identify the information needed to resolve the request.
+A requested mechanism explanation must keep the necessary technical details, evidence, and tradeoffs.
+Remove a sentence when its removal loses no needed action, decision, condition, explanation, or required disclosure.
+Keep that semantic review separate from mechanical prose checks.
+
 ## Argument structure and transitions
 
 For factual exposition, make each paragraph a unit of reasoning with an identifiable point, following [Google's paragraph guidance](https://developers.google.com/tech-writing/one/paragraphs).
