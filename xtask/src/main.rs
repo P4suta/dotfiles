@@ -143,6 +143,8 @@ enum Action {
     InstallPrWorkflow,
     /// Refresh the verified PR workflow executable without applying shared skills.
     InstallPrWorkflowBinary,
+    /// Install the Git guard and its matching Renovate policy companion.
+    InstallGitGuard,
     /// Build the pinned answer proof image and record its immutable identity on this host.
     InstallAnswerProver,
     /// Verify the answer gate's registered Kani contracts, rejecting probes, and parser corpus.
@@ -533,6 +535,7 @@ fn run() -> Result<()> {
         Action::PublicAudit { denylist } => xtask::profiles::audit_private(&cli.root, &denylist)?,
         Action::InstallPrWorkflow => install_pr_workflow(&cli.root)?,
         Action::InstallPrWorkflowBinary => install_pr_workflow_binary(&cli.root)?,
+        Action::InstallGitGuard => install_git_guard(&cli.root)?,
         Action::InstallAnswerProver => install_answer_prover(&cli.root)?,
         Action::AnswerProofs { policy } => {
             xtask::skill_proofs::verify_answer(&cli.root, policy.as_deref())?;
@@ -866,6 +869,13 @@ fn install_attachment_cli(root: &Path, user_directory: &Path) -> Result<()> {
         destination.display()
     );
     Ok(())
+}
+
+fn install_git_guard(root: &Path) -> Result<()> {
+    let guard = build_workflow_guard(root)?;
+    let directory = user_directory()?.join(".local/bin");
+    fs::create_dir_all(&directory)?;
+    install_workflow_guard(&guard, &directory)
 }
 
 fn install_pr_workflow_binary(root: &Path) -> Result<()> {

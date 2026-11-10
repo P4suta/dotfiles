@@ -309,6 +309,12 @@ fn dependency_records(managers: &Map<String, Value>) -> Result<Vec<Record>, Repo
                         "invalid lockfile ownership",
                     )
                 })?;
+            let lock_files = if manager == "npm" {
+                npm_lock_files(file, lock_files)
+                    .map_err(|reason| invalid(format!("{manager} / {name:?}"), reason))?
+            } else {
+                lock_files
+            };
             for dependency in dependencies {
                 let name_hint = dependency
                     .get("depName")
@@ -346,6 +352,28 @@ fn dependency_records(managers: &Map<String, Value>) -> Result<Vec<Record>, Repo
         }
     }
     Ok(records)
+}
+
+fn npm_lock_files(
+    file: &Map<String, Value>,
+    reported: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, &'static str> {
+    let Some(metadata) = file.get("managerData") else {
+        return Ok(reported);
+    };
+    let metadata = metadata.as_object().ok_or("invalid npm manager data")?;
+    let lock = match metadata.get("npmLock") {
+        None | Some(Value::Null) => return Ok(reported),
+        Some(Value::String(path)) if !path.is_empty() => path,
+        _ => return Err("invalid npm lockfile ownership"),
+    };
+    if reported
+        .as_ref()
+        .is_some_and(|paths| paths.len() != 1 || paths.first() != Some(lock))
+    {
+        return Err("conflicting npm lockfile ownership");
+    }
+    Ok(Some(vec![lock.clone()]))
 }
 
 fn problems(value: Option<&Value>, location: &str) -> Result<usize, ReportError> {
