@@ -1,7 +1,7 @@
 {
-  "revision": "e1f5d0ada3151495dddf6bf37c8fc1b47fc1f7e5cd7471d85e9ca3423980dc39",
+  "revision": "1fecf3e70f6ab3ddc10d2876c3db0cbafb31603a11394c4edd61305044ffe5ff",
   "outcome": "implemented",
-  "reason": "Preserve source review and prose checks without mandatory claim ledgers or routine answer receipts.",
+  "reason": "Choose product copy and operational notes from reader tasks, preserving exact UI labels in instructions, requested technical depth, and required disclosures.",
   "evidence": [
     "home/dot_agents/skills/editorial-assurance/SKILL.md",
     "home/dot_agents/skills/editorial-assurance/references/editorial-review.md",
