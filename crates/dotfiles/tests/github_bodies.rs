@@ -60,6 +60,7 @@ fn attachment_files(root: &Path) -> Result<()> {
         "First! Second!.png",
         "The.check.passed.png",
         "clip.mp4",
+        "First! Second!.mp4",
         ".png",
     ] {
         std::fs::write(root.join(file), b"fixture")?;
@@ -266,6 +267,125 @@ fn referenced_images_keep_the_body_alt_text() -> Result<()> {
             "",
         )],
     )
+}
+
+#[test]
+fn standalone_video_images_discard_their_alt_text() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    attachment_files(root)?;
+    std::fs::write(
+        root.join("body.md"),
+        "The check passed.\n\n![First sentence. Second sentence.](clip.mp4)\n",
+    )?;
+    check_publications(
+        root,
+        &[(
+            "gh pr create --body-file body.md --attach clip.mp4",
+            true,
+            "",
+        )],
+    )
+}
+
+#[test]
+fn a_video_replacement_cannot_hide_an_appended_image_caption() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    attachment_files(root)?;
+    std::fs::write(
+        root.join("body.md"),
+        "The check passed.\n\n![See [the screenshot](./image.png)](./clip.mp4)\n",
+    )?;
+    check_publications(
+        root,
+        &[(
+            "gh pr create --body-file body.md --attach clip.mp4 --attach 'image.png#First sentence. Second sentence.'",
+            false,
+            "SentencePerLine",
+        )],
+    )
+}
+
+#[test]
+fn video_replacements_preserve_writes_to_reference_definitions() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    attachment_files(root)?;
+    for (body, accepted, diagnostic) in [
+        (
+            "![See [the screenshot][screen]](clip.mp4)\n\n[screen]: image.png\n",
+            true,
+            "",
+        ),
+        (
+            "> [screen]:\n>   image.png\n\n[spare]: image.png\n\n![See [the screenshot][screen]](clip.mp4)\n",
+            true,
+            "",
+        ),
+        (
+            "![See ![the clip][video]](clip.mp4)\n\n[video]: clip.mp4\n",
+            false,
+            "reference-style image",
+        ),
+    ] {
+        std::fs::write(root.join("body.md"), format!("The check passed.\n\n{body}"))?;
+        check_publications(
+            root,
+            &[(
+                "gh pr create --body-file body.md --attach clip.mp4 --attach 'image.png#First sentence. Second sentence.'",
+                accepted,
+                diagnostic,
+            )],
+        )?;
+    }
+    Ok(())
+}
+
+#[test]
+fn video_projection_preserves_inline_labels_and_filename_fallbacks() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    attachment_files(root)?;
+    for (body, attachments, accepted, diagnostic) in [
+        ("Watch ![the clip](clip.mp4) here.\n", "clip.mp4", true, ""),
+        ("Watch ![](clip.mp4) here.\n", "clip.mp4", true, ""),
+        (
+            "Watch ![First sentence. Second sentence.](clip.mp4) here.\n",
+            "clip.mp4",
+            false,
+            "SentencePerLine",
+        ),
+        (
+            "Watch ![](<First! Second!.mp4>) here.\n",
+            "'First! Second!.mp4'",
+            false,
+            "SentencePerLine",
+        ),
+        (
+            "Watch ![See [the screenshot](image.png)](clip.mp4) here.\n",
+            "clip.mp4 --attach 'image.png#First sentence. Second sentence.'",
+            true,
+            "",
+        ),
+        (
+            "> ![First sentence. Second sentence.](clip.mp4)\n",
+            "clip.mp4",
+            true,
+            "",
+        ),
+        (
+            "![The clip][video]\n\n[video]: clip.mp4\n",
+            "clip.mp4",
+            false,
+            "reference-style image",
+        ),
+    ] {
+        std::fs::write(root.join("body.md"), format!("The check passed.\n\n{body}"))?;
+        let command = format!("gh pr create --body-file body.md --attach {attachments}");
+        check_publications(root, &[(&command, accepted, diagnostic)])?;
+    }
+    Ok(())
 }
 
 #[test]

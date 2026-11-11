@@ -832,26 +832,13 @@ fn resolve_publication(
         let [Body::Text { text, .. }] = bodies.as_mut_slice() else {
             anyhow::bail!("GitHub attachments require one explicit body");
         };
-        let additions = attachments::appended_markdown(
-            &attachment_arguments,
-            text,
-            body_file.as_deref(),
-            directory,
-        )?;
-        if !additions.is_empty() {
-            let prefix = text.trim_end_matches([' ', '\t', '\r', '\n']);
-            let suffix = additions.join("\n\n");
-            let combined = if prefix.is_empty() {
-                suffix
-            } else {
-                format!("{prefix}\n\n{suffix}")
-            };
-            ensure!(
-                combined.len() <= MAX_BODY_INPUT && !combined.contains('\0'),
-                "GitHub body is oversized or contains NUL"
-            );
-            *text = combined;
-        }
+        let projected =
+            attachments::project(&attachment_arguments, text, body_file.as_deref(), directory)?;
+        ensure!(
+            projected.len() <= MAX_BODY_INPUT && !projected.contains('\0'),
+            "GitHub body is oversized or contains NUL"
+        );
+        *text = projected;
         ensure!(
             bodies.len() <= MAX_BODIES,
             "GitHub body inspection exceeds its body-count limit"

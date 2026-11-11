@@ -1,15 +1,16 @@
 use anyhow::{Context, Result, bail, ensure};
 use percent_encoding::percent_decode_str;
-use pulldown_cmark::{Event, LinkType, Parser, Tag};
+use pulldown_cmark::{Event, LinkType, Parser, Tag, TagEnd};
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 
-const ALT_TEXT_PROBE_URL: &str = "https://example.invalid/attachment";
+const ASSET_PROBE_URL: &str = "https://example.invalid/attachment";
 const MAX_ATTACHMENTS: usize = 50;
 
 enum Media {
     Image(String),
-    Video,
+    Video(String),
 }
 
 struct Attachment {
@@ -52,7 +53,7 @@ fn media(path: &Path, alt: &str) -> Result<Media> {
                 alt.is_empty(),
                 "GitHub video attachment cannot have alt text"
             );
-            Ok(Media::Video)
+            Ok(Media::Video(filename.to_owned()))
         }
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" => Ok(Media::Image(if alt.is_empty() {
             stem.replace('.', " ")
@@ -129,61 +130,128 @@ fn referenced_attachment(
     None
 }
 
+struct Edit {
+    range: Range<usize>,
+    text: String,
+}
+
+struct References {
+    used: BTreeSet<usize>,
+    edits: Vec<Edit>,
+}
+
+fn escape_alt(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+        .replace(['\r', '\n'], " ")
+}
+
+fn standalone(markdown: &str, paragraph: Option<&Range<usize>>, node: &Range<usize>) -> bool {
+    paragraph.is_some_and(|paragraph| {
+        paragraph.start <= node.start
+            && node.end <= paragraph.end
+            && markdown[paragraph.start..node.start]
+                .bytes()
+                .chain(markdown[node.end..paragraph.end].bytes())
+                .all(|byte| b" \t\r\n".contains(&byte))
+    })
+}
+
+fn video_label(markdown: &str, node: &Range<usize>, filename: &str) -> Option<Edit> {
+    // Inline images and links expose the same label to the prose checker.
+    markdown[node.clone()].starts_with("![](").then(|| Edit {
+        range: node.start + 2..node.start + 2,
+        text: escape_alt(filename),
+    })
+}
+
 fn referenced(
     markdown: &str,
     paths: &BTreeMap<PathBuf, usize>,
+    attachments: &[Attachment],
     directory: &Path,
     markdown_directory: &Path,
-) -> BTreeSet<usize> {
+) -> Result<References> {
     let parser = Parser::new(markdown);
     let definitions = Parser::new(markdown);
-    let mut result = BTreeSet::new();
-    for event in parser {
-        if let Event::Start(
-            Tag::Image {
+    let mut result = References {
+        used: BTreeSet::new(),
+        edits: Vec::new(),
+    };
+    let mut paragraph = None;
+    let mut dropped_through = 0;
+    for (event, range) in parser.into_offset_iter() {
+        match &event {
+            Event::Start(Tag::Paragraph) => paragraph = Some(range.clone()),
+            Event::End(TagEnd::Paragraph) => paragraph = None,
+            _ => {}
+        }
+        let (image, destination, link_type) = match event {
+            Event::Start(Tag::Image {
                 dest_url,
                 link_type,
-                id,
                 ..
-            }
-            | Tag::Link {
+            }) => (true, dest_url, link_type),
+            Event::Start(Tag::Link {
                 dest_url,
                 link_type,
-                id,
                 ..
-            },
-        ) = event
+            }) => (false, dest_url, link_type),
+            _ => continue,
+        };
+        if let Some(index) =
+            referenced_attachment(&destination, paths, directory, markdown_directory)
         {
+            if image && matches!(&attachments[index].media, Media::Video(_)) {
+                ensure!(
+                    link_type == LinkType::Inline,
+                    "GitHub cannot embed a video as a reference-style image"
+                );
+            }
+            if range.start < dropped_through && link_type == LinkType::Inline {
+                continue;
+            }
+            if image && let Media::Video(filename) = &attachments[index].media {
+                if standalone(markdown, paragraph.as_ref(), &range) {
+                    dropped_through = range.end;
+                    result.edits.push(Edit {
+                        range,
+                        text: ASSET_PROBE_URL.to_owned(),
+                    });
+                } else {
+                    result.edits.extend(video_label(markdown, &range, filename));
+                }
+            }
             let rewritable = match link_type {
                 LinkType::Inline => true,
                 LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut => definitions
                     .reference_definitions()
-                    .get(&id)
-                    .is_some_and(|definition| {
-                        !markdown[definition.span.clone()]
-                            .lines()
-                            .skip(1)
-                            .any(|line| line.trim_start().starts_with('>'))
+                    .iter()
+                    .any(|(_, definition)| {
+                        definition.dest == destination
+                            && !markdown[definition.span.clone()]
+                                .lines()
+                                .skip(1)
+                                .any(|line| line.trim_start().starts_with('>'))
                     }),
                 _ => false,
             };
-            if rewritable
-                && let Some(index) =
-                    referenced_attachment(&dest_url, paths, directory, markdown_directory)
-            {
-                result.insert(index);
+            if rewritable {
+                result.used.insert(index);
             }
         }
     }
-    result
+    Ok(result)
 }
 
-pub(super) fn appended_markdown(
+pub(super) fn project(
     arguments: &[String],
     markdown: &str,
     body_file: Option<&str>,
     directory: &Path,
-) -> Result<Vec<String>> {
+) -> Result<String> {
     ensure!(
         arguments.len() <= MAX_ATTACHMENTS,
         "too many GitHub attachments"
@@ -206,23 +274,41 @@ pub(super) fn appended_markdown(
         .as_deref()
         .and_then(Path::parent)
         .unwrap_or(directory);
-    let used = referenced(markdown, &paths, directory, markdown_directory);
+    let References { used, mut edits } = referenced(
+        markdown,
+        &paths,
+        &attachments,
+        directory,
+        markdown_directory,
+    )?;
+    edits.sort_by_key(|edit| edit.range.start);
+    let mut projected = markdown.to_owned();
+    for edit in edits.into_iter().rev() {
+        projected.replace_range(edit.range, &edit.text);
+    }
     let mut result = Vec::new();
     for (index, attachment) in attachments.into_iter().enumerate() {
-        if !used.contains(&index)
-            && let Media::Image(alt) = attachment.media
-        {
-            ensure!(
-                !alt.trim().is_empty(),
-                "GitHub attachment has no filename caption"
-            );
-            let escaped = alt
-                .replace('\\', "\\\\")
-                .replace('[', "\\[")
-                .replace(']', "\\]")
-                .replace(['\r', '\n'], " ");
-            result.push(format!("![{escaped}]({ALT_TEXT_PROBE_URL})"));
+        if !used.contains(&index) {
+            match attachment.media {
+                Media::Image(alt) => {
+                    ensure!(
+                        !alt.trim().is_empty(),
+                        "GitHub attachment has no filename caption"
+                    );
+                    result.push(format!("![{}]({ASSET_PROBE_URL})", escape_alt(&alt)));
+                }
+                Media::Video(_) => result.push(ASSET_PROBE_URL.to_owned()),
+            }
         }
     }
-    Ok(result)
+    if result.is_empty() {
+        return Ok(projected);
+    }
+    let prefix = projected.trim_end_matches([' ', '\t', '\r', '\n']);
+    let suffix = result.join("\n\n");
+    Ok(if prefix.is_empty() {
+        suffix
+    } else {
+        format!("{prefix}\n\n{suffix}")
+    })
 }
