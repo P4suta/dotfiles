@@ -32,6 +32,24 @@ fn hook(root: &Path, command: &str, configured: bool) -> Result<Output> {
     Ok(child.wait_with_output()?)
 }
 
+fn check_publications(root: &Path, cases: &[(&str, bool, &str)]) -> Result<()> {
+    for &(command, accepted, diagnostic) in cases {
+        let output = hook(root, command, true)?;
+        assert_eq!(
+            output.status.code(),
+            Some(if accepted { 0 } else { 2 }),
+            "{command}: {output:?}"
+        );
+        if !accepted {
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains(diagnostic),
+                "{command}: {output:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn the_native_hook_checks_publication_inputs_through_the_installed_bundle_adapter() -> Result<()> {
     let directory = tempfile::tempdir()?;
@@ -48,111 +66,119 @@ fn the_native_hook_checks_publication_inputs_through_the_installed_bundle_adapte
         root.join("nested.json"),
         r#"{"input":{"comments":[{"body":"The check passed. The issue is complete."}]}}"#,
     )?;
-    for (command, accepted, diagnostic) in [
-        (
-            "gh issue close 3 --comment 'The check passed. The issue is complete.'",
-            false,
-            "SentencePerLine",
-        ),
-        (
-            "gh pr close 3 -c 'The check passed. The issue is complete.'",
-            false,
-            "SentencePerLine",
-        ),
-        ("gh issue comment 3 -F bad.md", false, "SentencePerLine"),
-        ("gh api x --input nested.json", false, "SentencePerLine"),
-        ("gh pr comment 3 -F good.md", true, ""),
-        (
-            "gh pr create --attach before.png --body-file good.md --attach=after.png",
-            true,
-            "",
-        ),
-        (
-            "gh pr edit 3 --body-file good.md --attach image.png",
-            true,
-            "",
-        ),
-        (
-            "gh pr comment 3 --attach 'image file.png' --body-file good.md",
-            true,
-            "",
-        ),
-        (
-            "gh issue create --body-file good.md --attach image.png",
-            true,
-            "",
-        ),
-        (
-            "gh issue edit 3 --attach image.png --body-file good.md",
-            true,
-            "",
-        ),
-        (
-            "gh issue comment 3 --attach image.png --body-file good.md",
-            true,
-            "",
-        ),
-        (
-            "gh pr create --attach image.png --body-file bad.md",
-            false,
-            "SentencePerLine",
-        ),
-        (
-            "gh pr edit 3 --title 'A title' --attach image.png",
-            false,
-            "interactive or implicit input",
-        ),
-        (
-            "gh pr create --body-file good.md --attach",
-            false,
-            "option has no value",
-        ),
-        (
-            "gh pr create --body-file good.md --attach=",
-            false,
-            "attachment option has no file",
-        ),
-        (
-            "gh pr create --attach image.png --body-file missing.md",
-            false,
-            "inspect GitHub body file",
-        ),
-        (
-            "gh pr create --body-file good.md --attach image.png --unrecognized-option",
-            false,
-            "option has no supported body contract",
-        ),
-        ("gh issue close 3 --comment 'The check passed.'", true, ""),
-        (
-            "gh pr comment 3 --body 'Co-authored-by: A. Human <human@example.com>'",
-            true,
-            "",
-        ),
-        (
-            "gh pr comment 3 --body 'Co-authored-by: Claude <noreply@anthropic.com>'",
-            false,
-            "AI attribution",
-        ),
-        (
-            "gh pr comment 3 --body-file missing.md",
-            false,
-            "inspect GitHub body file",
-        ),
-    ] {
-        let output = hook(root, command, true)?;
-        assert_eq!(
-            output.status.code(),
-            Some(if accepted { 0 } else { 2 }),
-            "{command}: {output:?}"
-        );
-        if !accepted {
-            assert!(
-                String::from_utf8_lossy(&output.stderr).contains(diagnostic),
-                "{command}: {output:?}"
-            );
-        }
-    }
-    Ok(())
+    check_publications(
+        root,
+        &[
+            (
+                "gh issue close 3 --comment 'The check passed. The issue is complete.'",
+                false,
+                "SentencePerLine",
+            ),
+            (
+                "gh pr close 3 -c 'The check passed. The issue is complete.'",
+                false,
+                "SentencePerLine",
+            ),
+            ("gh issue comment 3 -F bad.md", false, "SentencePerLine"),
+            ("gh api x --input nested.json", false, "SentencePerLine"),
+            ("gh pr comment 3 -F good.md", true, ""),
+            ("gh issue close 3 --comment 'The check passed.'", true, ""),
+            (
+                "gh pr comment 3 --body 'Co-authored-by: A. Human <human@example.com>'",
+                true,
+                "",
+            ),
+            (
+                "gh pr comment 3 --body 'Co-authored-by: Claude <noreply@anthropic.com>'",
+                false,
+                "AI attribution",
+            ),
+            (
+                "gh pr comment 3 --body-file missing.md",
+                false,
+                "inspect GitHub body file",
+            ),
+        ],
+    )
+}
+
+#[test]
+fn attachments_preserve_explicit_body_inspection() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    std::fs::write(
+        root.join("bad.md"),
+        "The check passed. The issue is complete.\n",
+    )?;
+    std::fs::write(
+        root.join("good.md"),
+        "The check passed.\nThe issue is complete.\n",
+    )?;
+    check_publications(
+        root,
+        &[
+            (
+                "gh pr create --attach before.png --body-file good.md --attach=after.png",
+                true,
+                "",
+            ),
+            (
+                "gh pr edit 3 --body-file good.md --attach image.png",
+                true,
+                "",
+            ),
+            (
+                "gh pr comment 3 --attach 'image file.png' --body-file good.md",
+                true,
+                "",
+            ),
+            (
+                "gh issue create --body-file good.md --attach image.png",
+                true,
+                "",
+            ),
+            (
+                "gh issue edit 3 --attach image.png --body-file good.md",
+                true,
+                "",
+            ),
+            (
+                "gh issue comment 3 --attach image.png --body-file good.md",
+                true,
+                "",
+            ),
+            (
+                "gh pr create --attach image.png --body-file bad.md",
+                false,
+                "SentencePerLine",
+            ),
+            (
+                "gh pr edit 3 --title 'A title' --attach image.png",
+                false,
+                "interactive or implicit input",
+            ),
+            (
+                "gh pr create --body-file good.md --attach",
+                false,
+                "option has no value",
+            ),
+            (
+                "gh pr create --body-file good.md --attach=",
+                false,
+                "attachment option has no file",
+            ),
+            (
+                "gh pr create --attach image.png --body-file missing.md",
+                false,
+                "inspect GitHub body file",
+            ),
+            (
+                "gh pr create --body-file good.md --attach image.png --unrecognized-option",
+                false,
+                "option has no supported body contract",
+            ),
+        ],
+    )
 }
 
 #[test]
