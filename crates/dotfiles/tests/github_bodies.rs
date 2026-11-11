@@ -62,6 +62,66 @@ fn the_native_hook_checks_publication_inputs_through_the_installed_bundle_adapte
         ("gh issue comment 3 -F bad.md", false, "SentencePerLine"),
         ("gh api x --input nested.json", false, "SentencePerLine"),
         ("gh pr comment 3 -F good.md", true, ""),
+        (
+            "gh pr create --attach before.png --body-file good.md --attach=after.png",
+            true,
+            "",
+        ),
+        (
+            "gh pr edit 3 --body-file good.md --attach image.png",
+            true,
+            "",
+        ),
+        (
+            "gh pr comment 3 --attach 'image file.png' --body-file good.md",
+            true,
+            "",
+        ),
+        (
+            "gh issue create --body-file good.md --attach image.png",
+            true,
+            "",
+        ),
+        (
+            "gh issue edit 3 --attach image.png --body-file good.md",
+            true,
+            "",
+        ),
+        (
+            "gh issue comment 3 --attach image.png --body-file good.md",
+            true,
+            "",
+        ),
+        (
+            "gh pr create --attach image.png --body-file bad.md",
+            false,
+            "SentencePerLine",
+        ),
+        (
+            "gh pr edit 3 --title 'A title' --attach image.png",
+            false,
+            "interactive or implicit input",
+        ),
+        (
+            "gh pr create --body-file good.md --attach",
+            false,
+            "option has no value",
+        ),
+        (
+            "gh pr create --body-file good.md --attach=",
+            false,
+            "attachment option has no file",
+        ),
+        (
+            "gh pr create --attach image.png --body-file missing.md",
+            false,
+            "inspect GitHub body file",
+        ),
+        (
+            "gh pr create --body-file good.md --attach image.png --unrecognized-option",
+            false,
+            "option has no supported body contract",
+        ),
         ("gh issue close 3 --comment 'The check passed.'", true, ""),
         (
             "gh pr comment 3 --body 'Co-authored-by: A. Human <human@example.com>'",

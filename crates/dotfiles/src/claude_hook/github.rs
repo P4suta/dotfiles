@@ -497,6 +497,7 @@ fn target(arguments: &[String]) -> Result<Option<Target<'_>>> {
 
 enum ArgumentInput {
     Body(Input),
+    Attachment,
     Metadata,
     Unmatched,
 }
@@ -559,6 +560,12 @@ fn publication_input(target: &Target<'_>, index: &mut usize) -> Result<ArgumentI
     }
     if let Some(path) = option(target.arguments, index, "--body-file", Some("-F"))? {
         return Ok(ArgumentInput::Body(Input::File { path, json: false }));
+    }
+    if matches!(target.verb, "create" | "edit" | "comment")
+        && let Some(file) = option(target.arguments, index, "--attach", None)?
+    {
+        ensure!(!file.is_empty(), "GitHub attachment option has no file");
+        return Ok(ArgumentInput::Attachment);
     }
     if matches!(target.verb, "close" | "reopen")
         && let Some(text) = option(target.arguments, index, "--comment", Some("-c"))?
@@ -629,6 +636,7 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
     let mut found = Vec::new();
     let mut index = 0;
     let mut implicit = matches!(target.verb, "create" | "comment" | "review" | "edit");
+    let mut has_attachments = false;
     let mut review_approval = false;
     let mut review_comment = false;
     while index < target.arguments.len() {
@@ -643,6 +651,10 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
         match publication_input(target, &mut index)? {
             ArgumentInput::Body(input) => {
                 found.push(input);
+                continue;
+            }
+            ArgumentInput::Attachment => {
+                has_attachments = true;
                 continue;
             }
             ArgumentInput::Metadata => continue,
@@ -709,7 +721,7 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
         implicit = !review_approval || review_comment;
     }
     ensure!(
-        !implicit || !found.is_empty(),
+        !(implicit || has_attachments) || !found.is_empty(),
         "GitHub body depends on interactive or implicit input"
     );
     ensure!(
