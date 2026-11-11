@@ -182,6 +182,58 @@ fn attachments_preserve_explicit_body_inspection() -> Result<()> {
 }
 
 #[test]
+fn attachment_captions_use_publication_rules() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    std::fs::write(root.join("good.md"), "![A facility.](image.png)\n")?;
+    check_publications(
+        root,
+        &[
+            (
+                "gh pr create --body-file good.md --attach 'extra.png#First sentence. Second sentence.'",
+                false,
+                "SentencePerLine",
+            ),
+            (
+                "gh pr create --body-file good.md --attach 'First! Second!.png'",
+                false,
+                "SentencePerLine",
+            ),
+            (
+                "gh pr create --body-file good.md --attach 'extra.png#First sentence.\nSecond sentence.'",
+                false,
+                "SentencePerLine",
+            ),
+            (
+                "gh pr create --body-file good.md --attach 'image.png#A facility.'",
+                true,
+                "",
+            ),
+            (
+                "gh pr create --body-file good.md --attach The.check.passed.png",
+                true,
+                "",
+            ),
+            (
+                "gh pr create --body-file good.md --attach clip.mp4",
+                true,
+                "",
+            ),
+            (
+                "gh pr create --body-file good.md --attach .png",
+                false,
+                "attachment has no filename caption",
+            ),
+            (
+                "gh pr create --body-file good.md --attach 'clip.mp4#A caption'",
+                false,
+                "video attachment cannot have alt text",
+            ),
+        ],
+    )
+}
+
+#[test]
 fn a_missing_prose_bundle_blocks_publication_without_blocking_read_only_commands() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let output = hook(

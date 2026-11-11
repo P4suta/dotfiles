@@ -14,6 +14,7 @@ use std::path::Path;
 /// The byte budget for a literal body or one JSON input.
 pub const MAX_BODY_INPUT: usize = 1024 * 1024;
 const MAX_BODIES: usize = 64;
+const ATTACHMENT_CAPTION_URL: &str = "https://example.invalid/attachment";
 
 /// Decodes a parsed shell word when its quoting and values are static.
 #[must_use]
@@ -497,7 +498,7 @@ fn target(arguments: &[String]) -> Result<Option<Target<'_>>> {
 
 enum ArgumentInput {
     Body(Input),
-    Attachment,
+    Attachment(Option<Input>),
     Metadata,
     Unmatched,
 }
@@ -551,6 +552,44 @@ fn api_input(arguments: &[String], index: &mut usize) -> Result<ArgumentInput> {
     Ok(ArgumentInput::Unmatched)
 }
 
+fn attachment_input(value: &str) -> Result<Option<Input>> {
+    let (file, alt) = value.split_once('#').unwrap_or((value, ""));
+    ensure!(!file.is_empty(), "GitHub attachment option has no file");
+    let path = super::native_path(file);
+    let filename = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .context("GitHub attachment has no filename caption")?;
+    let (stem, extension) = filename.rsplit_once('.').unwrap_or((filename, ""));
+    if ["mp4", "mov", "webm"]
+        .iter()
+        .any(|video| extension.eq_ignore_ascii_case(video))
+    {
+        ensure!(
+            alt.is_empty(),
+            "GitHub video attachment cannot have alt text"
+        );
+        return Ok(None);
+    }
+    let caption = if alt.is_empty() {
+        stem.replace('.', " ")
+    } else {
+        alt.to_owned()
+    };
+    ensure!(
+        !caption.trim().is_empty(),
+        "GitHub attachment has no filename caption"
+    );
+    let escaped = caption
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+        .replace(['\r', '\n'], " ");
+    Ok(Some(Input::Text(format!(
+        "![{escaped}]({ATTACHMENT_CAPTION_URL})"
+    ))))
+}
+
 fn publication_input(target: &Target<'_>, index: &mut usize) -> Result<ArgumentInput> {
     if target.api {
         return api_input(target.arguments, index);
@@ -564,8 +603,7 @@ fn publication_input(target: &Target<'_>, index: &mut usize) -> Result<ArgumentI
     if matches!(target.verb, "create" | "edit" | "comment")
         && let Some(file) = option(target.arguments, index, "--attach", None)?
     {
-        ensure!(!file.is_empty(), "GitHub attachment option has no file");
-        return Ok(ArgumentInput::Attachment);
+        return Ok(ArgumentInput::Attachment(attachment_input(&file)?));
     }
     if matches!(target.verb, "close" | "reopen")
         && let Some(text) = option(target.arguments, index, "--comment", Some("-c"))?
@@ -637,6 +675,7 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
     let mut index = 0;
     let mut implicit = matches!(target.verb, "create" | "comment" | "review" | "edit");
     let mut has_attachments = false;
+    let mut has_body = false;
     let mut review_approval = false;
     let mut review_comment = false;
     while index < target.arguments.len() {
@@ -650,11 +689,13 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
         reject_implicit_source(argument)?;
         match publication_input(target, &mut index)? {
             ArgumentInput::Body(input) => {
+                has_body = true;
                 found.push(input);
                 continue;
             }
-            ArgumentInput::Attachment => {
+            ArgumentInput::Attachment(caption) => {
                 has_attachments = true;
+                found.extend(caption);
                 continue;
             }
             ArgumentInput::Metadata => continue,
@@ -721,7 +762,7 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
         implicit = !review_approval || review_comment;
     }
     ensure!(
-        !(implicit || has_attachments) || !found.is_empty(),
+        !(implicit || has_attachments) || has_body,
         "GitHub body depends on interactive or implicit input"
     );
     ensure!(
