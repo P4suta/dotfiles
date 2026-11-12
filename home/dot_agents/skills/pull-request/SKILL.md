@@ -39,6 +39,7 @@ The workflow keeps its assessments and issue contexts in owner-local state, and 
 Keep severe levels exceptional and explain concrete consequences rather than escalating by filename or diff size.
 Apply service capacity and pause checks when the owner explicitly requests a review or service operation.
 An unavailable optional review supplies no completed-review claim and doesn't override an explicit instruction to merge despite its absence.
+For already authorized personal non-fork PR merges, the user grants standing permission to proceed when the current-head CodeRabbit PR review is rate-limited.
 Use `coderabbit-review` for current-head review and existing supported findings.
 Keep PR descriptions about the change without suppression commands or local workflow instructions.
 Read [workflow commands](references/workflow.md) for automatic reviews, the PR review budget, and the optional configuration example.
@@ -85,6 +86,10 @@ The shell guard checks literal GitHub body, body-file, close and reopen comment,
 An unreadable file, unresolved expansion, ambiguous standard input, or unsupported publishing command supplies no completed check and blocks the command.
 Use a readable UTF-8 body file with a direct command in its known execution directory, and keep issue and PR documents on the checked workflow route.
 Use `Why`, `Changes`, and `Validation` when no template exists, and state the actual validation outcome.
+Keep each section to one or two short sentences.
+Remove repeated rationale, implementation walkthroughs, and routine workflow notes.
+Include benchmark tables and command logs when the user or destination requires them.
+Link supporting details instead of copying them into the body.
 Use [diagram-explanations](../diagram-explanations/SKILL.md) proactively to show relationships, state transitions, boundaries, or behavioral differences that readers need to understand.
 Draw the actual change in D2 with `pr-workflow diagram --repo OWNER/REPO --source FILE.d2 --alt TEXT` and include its printed local reference and editable source section in the body.
 The checked publication command attaches local images and verifies the resulting body without creating a storage branch.

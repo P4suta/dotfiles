@@ -143,6 +143,11 @@ Both stop on a failed check, conflict, timeout, or missing CodeRabbit review.
 
 The owner can explicitly request a merge despite an unavailable optional CodeRabbit review.
 That instruction grants no completed-review claim and changes no repository-required review, check, approval, merge queue, or publication hold.
+For an already authorized PR merge in a personal non-fork repository, the user grants standing permission to proceed when the current-head CodeRabbit PR review is rate-limited.
+Apply the [review quota](https://docs.coderabbit.ai/management/rate-limits#when-a-review-is-rate-limited) exception without another per-PR confirmation.
+Verify the actual current-head provider notice through the completion APIs and comments.
+A CLI pool limit establishes no PR quota state.
+Other unavailable or failed review states still need an explicit merge instruction.
 Inspect the exact head, required checks, all supported unresolved findings, and the actual review state with `gh`.
 Resolve supported findings and pass the applicable project checks before merging.
 Keep issue scope, source assessment, and document validation through `pr-workflow check --pr`.
@@ -157,6 +162,7 @@ The [GitHub CLI merge options](https://cli.github.com/manual/gh_pr_merge) define
 Never use `--admin`, change required protections, bypass hooks, or turn off reviews to make a merge succeed.
 Wait for an admitted queue entry to reach `MERGED` before reporting completion.
 Report unavailable review accurately without demanding a manual command, CLI fallback, Resume operation, or account setting change.
+Don't wait for quota refill, retry reviews, enable paid usage, or switch to CLI analysis to complete an authorized quota-limited merge.
 
 ## Source assessment
 
@@ -205,7 +211,7 @@ Ready admission waits for unfinished, failed, or missing required checks.
 A repository that reports and requires no checks can accept a ready PR.
 The review that readiness starts can finish afterward.
 Inspect the current head's actual review state and resolve supported findings before completing the authorized PR task.
-Apply [owner-authorized merges](#owner-authorized-merges) when optional analysis is unavailable and the owner explicitly chooses to merge.
+Apply [owner-authorized merges](#owner-authorized-merges) when optional analysis is unavailable and the user explicitly chooses to merge, including the standing PR review quota exception.
 
 An owner review pause prohibits starting another review and remains separate from an owner publication hold.
 Keep subscription limits, separate PR and CLI pools, and existing billing controls.

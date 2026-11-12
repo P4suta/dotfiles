@@ -73,6 +73,7 @@ Ready admission can precede the review that it starts.
 Accept incremental reviews without demanding a full review or posting manual review commands.
 Missing, skipped, stale, failed, incomplete, and rate-limited reviews supply no completed-review claim.
 When the owner explicitly authorizes merging despite an unavailable optional review, use `pull-request` for normal GitHub admission of the verified head.
+For an already authorized personal non-fork PR merge, use the merge route during a current-head PR review limit without asking again.
 Required checks, repository-required reviews, supported findings, and publication holds remain authoritative.
 An owner pause prohibits starting another review and grants no merge authority by itself.
 Keep ordinary PR work in `gh`.

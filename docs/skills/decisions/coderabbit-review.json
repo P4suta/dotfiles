@@ -1,8 +1,9 @@
 {
-  "revision": "604ee57f6bbe562ebdb01919d80dc1c134feb8d2e70087d1789b742b460d9e7c",
+  "revision": "7494d3593db17fa9bd5dfa95a5187f95e0f347eb3283cb395c2873515e8185b1",
   "outcome": "implemented",
-  "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, explicit holds, and guarded explicit reviews.\nRead both GitHub completion APIs because a completed review may have no commit status.",
+  "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, explicit holds, and guarded explicit reviews.\nRead both GitHub completion APIs because a completed review may have no commit status.\nApply the standing current-head PR quota exception without granting review completion or using another review pool.\nPreserve the Check Run diagnosis and authorized Draft update cycle from the installed guide.\nRoute to neighboring skills by name so scoped installation can retain or omit their files.",
   "evidence": [
+    "docs/adr/merge-after-coderabbit-review-limits.md",
     "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
     "docs/adr/use-coderabbit-without-importance-opt-outs.md",
