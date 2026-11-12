@@ -1,0 +1,10 @@
+{
+  "revision": "18eb6651967cb6288cea1d0558c8f265e83aa40f0581c1023437ec46bc0973a1",
+  "outcome": "implemented",
+  "reason": "The CLI workflow verifies key selection, binds placement to the returned image ID, and preserves final submission authority.",
+  "evidence": [
+    "home/dot_agents/skills/app-store-connect/SKILL.md",
+    "home/dot_agents/skills/app-store-connect/references/creative-assets.md"
+  ],
+  "revisit": null
+}
