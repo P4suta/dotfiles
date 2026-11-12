@@ -9,12 +9,12 @@ namespace Dotfiles.SkillPlan.Vectors
 
 open Dotfiles.SkillPlan
 
-/-- The shared skills in sorted order: 0 adr, 1 android-platform-guidelines, 2 apple-notarization, 3 apple-platform-guidelines, 4 apple-signing, 5 approval-boundaries, 6 checked-arguments, 7 ci-budget, 8 code-signing, 9 coderabbit, 10 coderabbit-review, 11 concise-source, 12 decision-naming, 13 delegation, 14 development-assurance, 15 diagram-explanations, 16 domyjob, 17 doppler, 18 dotfiles, 19 editorial-assurance, 20 executable-policy, 21 formal-assurance, 22 functional-architecture, 23 gcp, 24 github-repository, 25 github-style-slides, 26 ideal-first-development, 27 ideal-specification, 28 japanese-lexicon, 29 just, 30 knowledge-to-skills, 31 lefthook, 32 liquid-glass-design, 33 macos-pkg, 34 macos-platform-guidelines, 35 mise, 36 monochrome-design, 37 multi-machine, 38 mutation-testing, 39 nas, 40 ocomment, 41 orbstack, 42 oss-readme, 43 portable-skills, 44 presentation-decks, 45 pull-request, 46 registry-publishing, 47 release-evidence, 48 release-please, 49 release-workflow, 50 reliability, 51 renovate, 52 resource-coordination, 53 rust-invariants, 54 rust-release, 55 rust-tooling, 56 screenshots, 57 skill-operations, 58 source-bound-interface-design, 59 sslcom-esigner, 60 storage-scout, 61 synology-dsm, 62 systematic-fixes, 63 tailscale, 64 type-contracts, 65 verification-tools, 66 xtask. -/
+/-- The shared skills in sorted order: 0 adr, 1 android-platform-guidelines, 2 app-store-connect, 3 apple-notarization, 4 apple-platform-guidelines, 5 apple-signing, 6 approval-boundaries, 7 checked-arguments, 8 ci-budget, 9 code-signing, 10 coderabbit, 11 coderabbit-review, 12 concise-source, 13 decision-naming, 14 delegation, 15 development-assurance, 16 diagram-explanations, 17 domyjob, 18 doppler, 19 dotfiles, 20 editorial-assurance, 21 executable-policy, 22 formal-assurance, 23 functional-architecture, 24 gcp, 25 github-repository, 26 github-style-slides, 27 ideal-first-development, 28 ideal-specification, 29 japanese-lexicon, 30 just, 31 knowledge-to-skills, 32 lefthook, 33 liquid-glass-design, 34 macos-pkg, 35 macos-platform-guidelines, 36 mise, 37 monochrome-design, 38 multi-machine, 39 mutation-testing, 40 nas, 41 ocomment, 42 orbstack, 43 oss-readme, 44 portable-skills, 45 presentation-decks, 46 pull-request, 47 registry-publishing, 48 release-evidence, 49 release-please, 50 release-workflow, 51 reliability, 52 renovate, 53 resource-coordination, 54 rust-invariants, 55 rust-release, 56 rust-tooling, 57 screenshots, 58 skill-operations, 59 source-bound-interface-design, 60 sslcom-esigner, 61 storage-scout, 62 synology-dsm, 63 systematic-fixes, 64 tailscale, 65 type-contracts, 66 verification-tools, 67 xtask. -/
 def catalog : Deps
-  | 21 => [22]
-  | 57 => [43]
-  | 64 => [20]
-  | 65 => [64, 20]
+  | 22 => [23]
+  | 58 => [44]
+  | 65 => [21]
+  | 66 => [65, 21]
   | _ => []
 
 /-- Two skills that rely on each other. -/
@@ -28,11 +28,11 @@ def unknown : Deps
   | 0 => [2]
   | _ => []
 
-theorem plan_implementation_assurance : plan catalog 67 [14, 21, 22, 65] = .ok [14, 20, 22, 21, 64, 65] := by decide +kernel
+theorem plan_implementation_assurance : plan catalog 68 [15, 22, 23, 66] = .ok [15, 21, 23, 22, 65, 66] := by decide +kernel
 
-theorem plan_skill_maintenance : plan catalog 67 [43, 57] = .ok [43, 57] := by decide +kernel
+theorem plan_skill_maintenance : plan catalog 68 [44, 58] = .ok [44, 58] := by decide +kernel
 
-theorem plan_every_skill : plan catalog 67 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66] = .ok [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 21, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66] := by decide +kernel
+theorem plan_every_skill : plan catalog 68 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67] = .ok [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 23, 22, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67] := by decide +kernel
 
 theorem plan_cycle : plan cyclic 2 [0] = .error .cycle := by decide +kernel
 
