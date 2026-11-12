@@ -1041,7 +1041,7 @@ fn upstream_comment_findings(root: &Path, path: &Path, original: &[u8]) -> Resul
         .to_str()
         .context("upstream source path is not UTF-8")?
         .replace('\\', "/");
-    let inputs = prose::upstream_comment_inputs(root, &relative, original, &fs::read(path)?)?;
+    let inputs = prose::upstream_prose_inputs(root, &relative, original, &fs::read(path)?)?;
     if inputs.is_empty() {
         return Ok(Vec::new());
     }

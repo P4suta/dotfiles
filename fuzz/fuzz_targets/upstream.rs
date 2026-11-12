@@ -1,6 +1,6 @@
 #![no_main]
 
-use platform::upstream::{Preserved, Source, parse, preserved_members};
+use platform::upstream::{Preserved, Source, parse, parse_git, preserved_members};
 use sha2::{Digest, Sha256};
 use std::path::{Component, Path};
 
@@ -13,6 +13,12 @@ fn digest(bytes: &[u8]) -> String {
 }
 
 libfuzzer_sys::fuzz_target!(|data: &[u8]| {
+    if let Ok(checked) = parse_git(data) {
+        assert_eq!(
+            parse_git(&serde_json::to_vec(&checked).unwrap()).unwrap(),
+            checked
+        );
+    }
     let directory = Path::new(DIRECTORY);
     let manifest = directory.join("SHA256SUMS");
     if let Ok(members) = preserved_members(directory, &manifest, data) {

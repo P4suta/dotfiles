@@ -421,6 +421,8 @@ pub struct Input {
     pub text: String,
     pub markdown_document: bool,
     pub lines: Vec<usize>,
+    preserve_layout: bool,
+    baseline_prose: String,
 }
 
 impl Input {
@@ -431,6 +433,8 @@ impl Input {
             lines: (1..=text.lines().count().max(1)).collect(),
             text: text.to_owned(),
             markdown_document,
+            preserve_layout: false,
+            baseline_prose: String::new(),
         }
     }
 
@@ -458,6 +462,9 @@ impl Input {
 /// Checks sentence layout without running the persisted language or style linters.
 #[must_use]
 pub fn sentence_per_line(input: &Input) -> Vec<Finding> {
+    if input.preserve_layout {
+        return Vec::new();
+    }
     prose_rules::sentence_lines(&masked(&input.text))
         .into_iter()
         .map(|finding| {
@@ -496,6 +503,21 @@ struct Alert {
     span: Vec<usize>,
     #[serde(rename = "Message")]
     message: String,
+    #[serde(rename = "Match")]
+    matched: Option<String>,
+}
+
+impl Alert {
+    fn inheritance_key(&self, input: usize) -> Option<(usize, [String; 3])> {
+        Some((
+            input,
+            [
+                self.check.clone(),
+                self.message.clone(),
+                self.matched.clone()?,
+            ],
+        ))
+    }
 }
 
 /// Runs the pinned Vale over every input in one process.
@@ -505,17 +527,25 @@ fn vale(bundle: &Bundle, inputs: &[Input]) -> Result<Vec<Finding>> {
     }
     let directory = tempfile::tempdir()?;
     let mut names = Vec::new();
+    let mut scans = Vec::new();
     for (index, input) in inputs.iter().enumerate() {
-        let name = format!(
-            "{index}.{}",
-            if input.markdown_document {
-                "md"
-            } else {
-                "prose"
+        for (text, baseline) in [(&input.text, false), (&input.baseline_prose, true)] {
+            if baseline && text.is_empty() {
+                continue;
             }
-        );
-        fs::write(directory.path().join(&name), &input.text)?;
-        names.push(name);
+            let name = format!(
+                "{}.{}",
+                scans.len(),
+                if input.markdown_document {
+                    "md"
+                } else {
+                    "prose"
+                }
+            );
+            fs::write(directory.path().join(&name), text)?;
+            names.push(name);
+            scans.push((index, baseline));
+        }
     }
     let config = crate::canonical(&bundle.config.join("vale.ini"))?;
     let output = bundle
@@ -541,20 +571,36 @@ fn vale(bundle: &Bundle, inputs: &[Input]) -> Result<Vec<Finding>> {
     } else {
         serde_json::from_slice(&output.stdout).context("read the Vale report")?
     };
-    let mut findings = Vec::new();
+    let mut inherited = BTreeMap::<(usize, [String; 3]), usize>::new();
+    let mut current = Vec::new();
     for (file, alerts) in report {
-        let index: usize = Path::new(&file)
+        let scan: usize = Path::new(&file)
             .file_stem()
             .and_then(|stem| stem.to_str())
             .and_then(|stem| stem.parse().ok())
             .with_context(|| format!("Vale reported an unknown file {file}"))?;
-        let input = inputs
-            .get(index)
-            .context("Vale reported an unknown input")?;
+        let &(index, baseline) = scans.get(scan).context("Vale reported an unknown input")?;
         for alert in alerts {
-            let column = alert.span.first().copied().unwrap_or(1);
-            findings.push(input.finding(alert.line, column, &alert.check, &alert.message));
+            if baseline {
+                if let Some(key) = alert.inheritance_key(index) {
+                    *inherited.entry(key).or_default() += 1;
+                }
+            } else {
+                current.push((index, alert));
+            }
         }
+    }
+    let mut findings = Vec::new();
+    for (index, alert) in current {
+        if alert
+            .inheritance_key(index)
+            .and_then(|key| inherited.get_mut(&key))
+            .is_some_and(rules::third_party_rules::consume)
+        {
+            continue;
+        }
+        let column = alert.span.first().copied().unwrap_or(1);
+        findings.push(inputs[index].finding(alert.line, column, &alert.check, &alert.message));
     }
     Ok(findings)
 }
@@ -897,6 +943,21 @@ pub fn comment_prose(line: &str) -> String {
     text.strip_prefix(' ').unwrap_or(text).trim_end().to_owned()
 }
 
+fn csharp_documentation_prose(text: &str) -> &str {
+    let mut text = text;
+    for (opening, closing) in [
+        ("<summary>", "</summary>"),
+        ("<remarks>", "</remarks>"),
+        ("<returns>", "</returns>"),
+        ("<value>", "</value>"),
+        ("<example>", "</example>"),
+    ] {
+        text = text.strip_prefix(opening).unwrap_or(text).trim_start();
+        text = text.strip_suffix(closing).unwrap_or(text).trim_end();
+    }
+    text
+}
+
 /// Reads the comments of `paths` through `OComment`.
 /// Each batch leaves room for the executable and configuration in the Windows command line.
 pub(crate) fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>> {
@@ -927,7 +988,9 @@ pub(crate) fn comment_inputs(root: &Path, paths: &[String]) -> Result<Vec<Input>
 fn authored_paragraphs(mut current: Input, baseline: &str) -> Input {
     let mut remaining = BTreeMap::<&str, usize>::new();
     for paragraph in baseline.split_inclusive("\n\n") {
-        *remaining.entry(paragraph).or_default() += 1;
+        *remaining
+            .entry(paragraph.trim_end_matches('\n'))
+            .or_default() += 1;
     }
     let mut text = String::new();
     let mut lines = Vec::new();
@@ -935,7 +998,7 @@ fn authored_paragraphs(mut current: Input, baseline: &str) -> Input {
     for paragraph in current.text.split_inclusive("\n\n") {
         let count = paragraph.lines().count();
         let inherited = remaining
-            .get_mut(paragraph)
+            .get_mut(paragraph.trim_end_matches('\n'))
             .is_some_and(rules::third_party_rules::consume);
         if !inherited {
             text.push_str(paragraph);
@@ -945,17 +1008,50 @@ fn authored_paragraphs(mut current: Input, baseline: &str) -> Input {
     }
     current.text = text;
     current.lines = lines;
+    current.baseline_prose.clear();
+    for (paragraph, count) in remaining {
+        for _ in 0..count {
+            current.baseline_prose.push_str(paragraph);
+            current.baseline_prose.push_str("\n\n");
+        }
+    }
     current
 }
 
+fn upstream_document(root: &Path, path: &str, original: &str, current: &str) -> Result<Input> {
+    let mut input = authored_paragraphs(Input::new(path, current, true), original);
+    match fs::read_to_string(root.join(".ocomment.toml")) {
+        Ok(text) => {
+            let config: toml::Value = toml::from_str(&text)?;
+            input.preserve_layout = config
+                .get("style")
+                .and_then(|style| style.get("wrap"))
+                .and_then(toml::Value::as_str)
+                == Some("preserve");
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("read upstream document layout configuration"),
+    }
+    Ok(input)
+}
+
 /// # Errors
-/// Rejects unavailable temporary storage or an unsuccessful comment scan.
-pub fn upstream_comment_inputs(
+/// Rejects unavailable temporary storage, invalid document encoding, or an unsuccessful source scan.
+pub fn upstream_prose_inputs(
     root: &Path,
     path: &str,
     original: &[u8],
     current: &[u8],
 ) -> Result<Vec<Input>> {
+    if documents(root, &[path.to_owned()])?.contains(path) {
+        let original = std::str::from_utf8(original).context("upstream document is not UTF-8")?;
+        let current = std::str::from_utf8(current).context("authored document is not UTF-8")?;
+        let input = upstream_document(root, path, original, current)?;
+        return Ok((!input.text.is_empty())
+            .then_some(input)
+            .into_iter()
+            .collect());
+    }
     let temporary = tempfile::tempdir()?;
     let name = Path::new(path)
         .file_name()
@@ -1101,6 +1197,9 @@ pub fn scanned_comments(jsonl: &str) -> Result<Vec<Input>> {
         let Some(report) = scanned.report else {
             continue;
         };
+        let is_csharp = Path::new(&scanned.path)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("cs"));
         let mut text = String::new();
         let mut lines = Vec::new();
         let mut previous_end = None;
@@ -1117,7 +1216,14 @@ pub fn scanned_comments(jsonl: &str) -> Result<Vec<Input>> {
                 lines.push(comment.line);
             }
             for (offset, part) in comment.text.lines().enumerate() {
-                text.push_str(&comment_prose(part));
+                let prose = comment_prose(part);
+                text.push_str(
+                    if is_csharp && matches!(comment.kind.as_str(), "doc-line" | "doc-block") {
+                        csharp_documentation_prose(&prose)
+                    } else {
+                        &prose
+                    },
+                );
                 text.push('\n');
                 lines.push(comment.line + offset);
             }
@@ -1129,6 +1235,8 @@ pub fn scanned_comments(jsonl: &str) -> Result<Vec<Input>> {
                 text,
                 markdown_document: false,
                 lines,
+                preserve_layout: false,
+                baseline_prose: String::new(),
             });
         }
     }
@@ -1157,12 +1265,50 @@ pub fn check_inputs(bundle: &Bundle, inputs: &[Input]) -> Result<Vec<Finding>> {
 }
 
 fn house_findings(bundle: &Bundle, input: &Input) -> Result<Vec<Finding>> {
+    let inherited = house::layout_findings(&input.path, &input.baseline_prose)?
+        .into_iter()
+        .map(|item| item.rule)
+        .collect::<BTreeSet<_>>();
     Ok(
         house::check(&input.path, &input.text, || Ok(bundle.clone()))?
             .into_iter()
+            .filter(|item| {
+                if !inherited.contains(&item.rule) {
+                    return true;
+                }
+                match (
+                    markdown_layout_count(&input.baseline_prose, &item.rule),
+                    markdown_layout_count(&input.text, &item.rule),
+                ) {
+                    (Some(before), Some(after)) if after > 0 => after > before,
+                    _ => true,
+                }
+            })
             .map(|item| input.finding(item.line, item.column, &item.rule, &item.message))
             .collect(),
     )
+}
+
+fn markdown_layout_count(text: &str, rule: &str) -> Option<usize> {
+    let mut count = 0;
+    let mut quotes = 0_usize;
+    let mut metadata = false;
+    let options = Options::ENABLE_TABLES | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS;
+    for event in Parser::new_ext(text, options) {
+        match event {
+            Event::Start(Tag::MetadataBlock(_)) => metadata = true,
+            Event::End(TagEnd::MetadataBlock(_)) => metadata = false,
+            _ if metadata => {}
+            Event::Start(Tag::BlockQuote(_)) => quotes += 1,
+            Event::End(TagEnd::BlockQuote(_)) => quotes = quotes.saturating_sub(1),
+            _ if quotes > 0 => {}
+            Event::Html(_) | Event::InlineHtml(_) => return None,
+            Event::Start(Tag::Item) if rule == house::LIST => count += 1,
+            Event::Start(Tag::TableCell) if rule == house::TABLE => count += 1,
+            _ => {}
+        }
+    }
+    Some(count)
 }
 
 /// Checks the comments of source files for language and style.
@@ -1172,13 +1318,14 @@ fn house_findings(bundle: &Bundle, input: &Input) -> Result<Vec<Finding>> {
 /// Returns an error when the bundle fails verification, `OComment` can't start or scan the files, or Vale fails to run or report.
 pub fn check_comments(bundle: &Bundle, root: &Path, paths: &[String]) -> Result<Vec<Finding>> {
     bundle.verify()?;
+    let registered = platform::upstream::has_sources(root)?;
     let mut ordinary = Vec::new();
     let mut inputs = Vec::new();
     for path in paths {
-        if let Some(original) = platform::upstream::original(root, path)? {
+        if registered && let Some(original) = platform::upstream::original(root, path)? {
             let current = fs::read(root.join(path))?;
             if original != current {
-                inputs.extend(upstream_comment_inputs(root, path, &original, &current)?);
+                inputs.extend(upstream_prose_inputs(root, path, &original, &current)?);
             }
         } else {
             ordinary.push(path.clone());
@@ -1296,6 +1443,7 @@ fn scan(
     bundle.verify()?;
     let files = source_files(root)?;
     let documents = documents(root, &files)?;
+    let registered = platform::upstream::has_sources(root)?;
     let mut selected = Vec::new();
     for path in files {
         let in_scope = match scope {
@@ -1307,9 +1455,11 @@ fn scan(
         {
             continue;
         }
-        if platform::upstream::original(root, &path)?.is_some_and(|original| {
-            fs::read(root.join(&path)).is_ok_and(|current| current == original)
-        }) {
+        if registered
+            && platform::upstream::original(root, &path)?.is_some_and(|original| {
+                fs::read(root.join(&path)).is_ok_and(|current| current == original)
+            })
+        {
             continue;
         }
         let mut skipped = false;
@@ -1337,7 +1487,15 @@ fn scan(
             for path in &selected {
                 let text =
                     fs::read_to_string(root.join(path)).with_context(|| format!("read {path}"))?;
-                let input = Input::new(path, &text, true);
+                let mut input = Input::new(path, &text, true);
+                if registered && let Some(original) = platform::upstream::original(root, path)? {
+                    input = upstream_document(
+                        root,
+                        path,
+                        std::str::from_utf8(&original).context("upstream document is not UTF-8")?,
+                        &text,
+                    )?;
+                }
                 findings.extend(language(&input, lang::Mode::English));
                 findings.extend(sentence_per_line(&input));
                 inputs.push(input);

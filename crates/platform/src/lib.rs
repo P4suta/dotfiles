@@ -28,6 +28,8 @@ pub mod checks;
 #[cfg(feature = "tools")]
 pub mod code_environment;
 #[cfg(feature = "tools")]
+pub mod contribution;
+#[cfg(feature = "tools")]
 pub mod freshness;
 #[cfg(feature = "tools")]
 pub mod issue_context;

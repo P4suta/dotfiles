@@ -199,3 +199,10 @@ path = "fuzz_targets/upstream.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "contribution_notice"
+path = "fuzz_targets/contribution_notice.rs"
+test = false
+doc = false
+bench = false

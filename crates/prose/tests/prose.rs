@@ -386,6 +386,132 @@ fn comments_from_ocomment_map_findings_to_source_lines() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn csharp_xml_documentation_keeps_prose_visible_to_sentence_checks() -> Result<()> {
+    for (path, kind, text) in [
+        (
+            "src/Library.cs",
+            "doc-line",
+            "/// <summary>Reads a value. Returns the value.</summary>",
+        ),
+        (
+            "src/Library.CS",
+            "doc-block",
+            "/** <summary>Reads a value. Returns the value.</summary> */",
+        ),
+    ] {
+        let scanned = json!({"path": path, "report": {"comments": [
+            {"line": 7, "column": 1, "end_line": 7, "kind": kind, "text": text}
+        ]}});
+        let inputs = prose::scanned_comments(&scanned.to_string())?;
+        let findings = prose::sentence_per_line(&inputs[0]);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "Dotfiles.SentencePerLine" && finding.line == 7)
+        );
+    }
+    let scanned = json!({"path": "src/Library.cs", "report": {"comments": [
+        {"line": 7, "column": 1, "end_line": 7, "kind": "doc-line", "text": "/// <summary>Reads the value.</summary>"}
+    ]}});
+    let inputs = prose::scanned_comments(&scanned.to_string())?;
+    assert_eq!(prose::sentence_per_line(&inputs[0]), []);
+    Ok(())
+}
+
+#[test]
+fn upstream_markdown_respects_explicit_preserved_layout_and_checks_wording() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let original = b"Currently we have the [guide](before). More guides are coming up!\n";
+    let edited = b"Currently we have the [guide](after). More guides are coming up!\n";
+    let inputs = prose::upstream_prose_inputs(root.path(), "guide.md", original, edited)?;
+    assert_ne!(prose::sentence_per_line(&inputs[0]), [] as [Finding; 0]);
+
+    fs::write(
+        root.path().join(".ocomment.toml"),
+        "[style]\nwrap = 'preserve'\n",
+    )?;
+    let inputs = prose::upstream_prose_inputs(root.path(), "guide.md", original, edited)?;
+    assert_eq!(prose::check_inputs(&source()?, &inputs)?, []);
+    for candidate in [original.as_slice(), edited.as_slice()] {
+        let mut added = candidate.to_vec();
+        added.extend_from_slice(b"\nCurrently, the checks pass.\n");
+        let inputs = prose::upstream_prose_inputs(root.path(), "guide.md", original, &added)?;
+        assert!(
+            prose::check_inputs(&source()?, &inputs)?
+                .iter()
+                .any(|finding| finding.rule == "Google.Timeless" && finding.line == 3)
+        );
+    }
+    let duplicated =
+        String::from_utf8(edited.to_vec())?.replace("More guides", "Currently more guides");
+    let inputs =
+        prose::upstream_prose_inputs(root.path(), "guide.md", original, duplicated.as_bytes())?;
+    assert_eq!(
+        prose::check_inputs(&source()?, &inputs)?
+            .iter()
+            .filter(|finding| finding.rule == "Google.Timeless")
+            .count(),
+        1
+    );
+    let inputs = prose::upstream_prose_inputs(
+        root.path(),
+        "guide.md",
+        original,
+        "記録を保存します。\n".as_bytes(),
+    )?;
+    assert!(
+        prose::check_inputs(&source()?, &inputs)?
+            .iter()
+            .any(|finding| finding.rule == "Dotfiles.English")
+    );
+    fs::write(root.path().join(".ocomment.toml"), "invalid=[")?;
+    assert!(prose::upstream_prose_inputs(root.path(), "guide.md", original, edited).is_err());
+    Ok(())
+}
+
+#[test]
+fn editing_upstream_lists_and_tables_preserves_shape_and_rejects_growth() -> Result<()> {
+    for (original, edited, addition, rule) in [
+        (
+            "- Read the `before` value.\n- Keep the record.\n",
+            "- Read the `after` value.\n- Keep the record.\n",
+            "\n- Store the value.\n",
+            "House.List",
+        ),
+        (
+            "| Field | Value |\n| --- | --- |\n| Record | `before` |\n",
+            "| Field | Value |\n| --- | --- |\n| Record | `after` |\n",
+            "\n| Other | Value |\n| --- | --- |\n| Record | stored |\n",
+            "House.Table",
+        ),
+    ] {
+        let root = tempfile::tempdir()?;
+        let inputs = prose::upstream_prose_inputs(
+            root.path(),
+            "guide.md",
+            original.as_bytes(),
+            edited.as_bytes(),
+        )?;
+        assert_eq!(prose::check_inputs(&source()?, &inputs)?, []);
+        for candidate in [original, edited] {
+            let added = format!("{candidate}{addition}");
+            let inputs = prose::upstream_prose_inputs(
+                root.path(),
+                "guide.md",
+                original.as_bytes(),
+                added.as_bytes(),
+            )?;
+            assert!(
+                prose::check_inputs(&source()?, &inputs)?
+                    .iter()
+                    .any(|finding| finding.rule == rule)
+            );
+        }
+    }
+    Ok(())
+}
+
 fn finding(path: &str, rule: &str, sentence: &str) -> Finding {
     Finding {
         path: path.into(),
