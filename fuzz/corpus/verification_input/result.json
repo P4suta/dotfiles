@@ -1,0 +1,1 @@
+{"version":1,"source":"fixture","plan":"fixture","method":"test","scope":"affected","tool_version":"fixture","target":"fixture","bounds":"one test","results":[{"name":"contract","status":"passed","executed":1,"failed":0,"skipped":0,"inconclusive":0}]}

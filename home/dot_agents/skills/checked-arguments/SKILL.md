@@ -28,16 +28,18 @@ Don't add praise, personal agreement, rhetorical contrast, or certainty to compe
 
 Choose verification by the property, using [the method matrix](references/verification-methods.md).
 Use independent checks with different failure modes where they cover the claim.
-For supported propositional arguments, `dotfiles answer check` enumerates the complete declared Boolean domain and checks generated theorems with a proof assistant and independent kernel replay.
-For other properties, use a suitable theorem prover, proof-producing solver, model checker, or independently checked calculation under `formal-assurance`.
+Use formal verification when the project requires it or the question needs it, following `formal-assurance`.
 State whether a result covers the complete admitted domain, a finite bound, a statistical estimate, or a conditional model.
 Never promote a bounded result to an unbounded theorem.
 
-Read [the evidence format](references/evidence-format.md) before running the answer checker.
-Bind evidence to the exact draft and current request.
-Require explicit source support and a checked derivation for a formal conclusion.
+Check source support and the actual derivation of consequential conclusions.
 Reject circular support, inconsistent premises, missing interpretations, and incomplete proof evidence.
 Don't turn causal, statistical, ethical, or semantic assumptions into unexplained propositional atoms and claim that a Boolean theorem establishes them.
+Confirm completed verification with a short concrete reason.
+Do the required checks instead of reporting an avoidable gap.
+Resolve a blocked check or ask the user for the decision needed before claiming completion.
+Don't require claim ledgers, evidence files, or per-answer proofs.
+Use [the optional evidence format](references/evidence-format.md) only when the user explicitly requests detailed answer evidence.
 
 A proof establishes its formal statement under its assumptions.
 It doesn't establish empirical premise truth, the adequacy of the chosen model, or the correspondence between prose and formulas.
@@ -46,5 +48,5 @@ An independent prover that receives the same mistaken model leaves that modeling
 
 Keep the visible answer natural and proportionate to the question.
 Include the premises, source links, qualifications, and limitations needed to assess the conclusion.
-Keep long verification records in inspectable artifacts.
+Keep routine verification reports brief.
 Don't claim that a post-display Stop hook prevented the initial display of an unverified answer.

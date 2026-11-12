@@ -1,0 +1,10 @@
+{
+  "revision": "bfac2ee53ebf962b6abfe6a43c5a3b99bf200df7b3a91cf1373e3827487165bc",
+  "outcome": "keep",
+  "reason": "Release-please configuration and recovery need focused guidance without duplicating release authorization and signing procedures.",
+  "evidence": [
+    "home/dot_agents/skills/release-please/SKILL.md",
+    "home/dot_agents/skills/release-please/references/configuration.md"
+  ],
+  "revisit": null
+}

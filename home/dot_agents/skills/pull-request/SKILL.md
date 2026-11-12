@@ -33,16 +33,18 @@ When publication becomes authorized, link the actual local history with checked 
 The new remote start supplies no retroactive authority for earlier local edits.
 
 Assess every PR using the [importance criteria](references/importance.md) before publication.
-The checked workflow requires an authenticated current-diff assessment and defaults to no CodeRabbit review for `low`, `medium`, and `high`, and PR review for `critical`.
-An [owner-local repository policy](references/workflow.md#repository-pr-review-policy) selects PR review for every level without changing importance.
-The workflow keeps its assessments, pause records, and issue contexts in owner-local state, and published documents and tracked files never carry them.
+The checked workflow authenticates the current diff and uses CodeRabbit PR review for every importance level.
+Importance never skips a review or selects a review opt-in label.
+The workflow keeps its assessments and issue contexts in owner-local state, and published documents and tracked files never carry them.
 Keep severe levels exceptional and explain concrete consequences rather than escalating by filename or diff size.
-`coderabbit --guard-status --json` reports the separate PR and CLI pause scopes.
-A paused required route remains pending and never changes its classification.
-Use `coderabbit-review` for the selected route and existing supported findings.
-Keep the standalone PR description exclusion for routes other than PR review, and permit CodeRabbit generation only for the PR route.
-Read [commands and generation](references/workflow.md) for the placeholders, the PR review budget, and the optional configuration example.
-Write locally when generation fails or omits a required document.
+Apply service capacity and pause checks when the owner explicitly requests a review or service operation.
+An unavailable optional review supplies no completed-review claim and doesn't override an explicit instruction to merge despite its absence.
+Use `coderabbit-review` for current-head review and existing supported findings.
+Keep PR descriptions about the change without suppression commands or local workflow instructions.
+Read [workflow commands](references/workflow.md) for automatic reviews, the PR review budget, and the optional configuration example.
+Write complete PR documents locally.
+Use automatic incremental reviews after readiness and updates without requiring a full review or posting service commands.
+Keep ordinary PR inspection in `gh` without opening service administration or billing screens.
 Local creation always starts as a draft, and moving it to review needs separate authorization.
 The workflow policy caps work units at three per person and repository by default.
 One open stack counts as one unit, and each declared independent PR counts as one unit.
@@ -52,7 +54,8 @@ Declare unrelated work with `start --independent <reason>` or `create --independ
 The reason stays in owner-local state and never enters the PR body.
 A declaration from `start` carries into `create` for the same source, branch, issue, and descendant history.
 At the cap, work can join the existing stack but can't add another unit.
-`ready` refuses until every head check passes, so run it only when no scoped work remains.
+`ready` refuses unfinished, failed, or missing required checks, and accepts a destination that reports and requires no checks.
+Run it only when no scoped work remains.
 Use `pr-workflow stack create` to name the open stack tip explicitly.
 The dependency check skips PRs opened by bots identified by an `app/` login prefix, a `[bot]` login suffix, or the `Bot` account type.
 It also skips stale PRs that already conflict with their own base and reports every skipped PR with its reason.
@@ -63,6 +66,7 @@ Restack with `pr-workflow stack sync` or `stack rebase`.
 Never use a manual rebase or force push.
 Merge with `pr-workflow merge` or `stack merge`.
 The section [stacks and merging](references/workflow.md#stacks-and-merging) describes both.
+Use [owner-authorized merges](references/workflow.md#owner-authorized-merges) when the owner explicitly chooses to merge despite unavailable optional review.
 
 Use `pr-workflow link-issue --repo OWNER/REPO --pr NUMBER --issue NUMBER` to add a closing reference to an existing PR as the authenticated numeric repository owner.
 The operation checks the open issue, PR source network, head, base, and current document.
@@ -81,9 +85,11 @@ The shell guard checks literal GitHub body, body-file, close and reopen comment,
 An unreadable file, unresolved expansion, ambiguous standard input, or unsupported publishing command supplies no completed check and blocks the command.
 Use a readable UTF-8 body file with a direct command in its known execution directory, and keep issue and PR documents on the checked workflow route.
 Use `Why`, `Changes`, and `Validation` when no template exists, and state the actual validation outcome.
-In a personal non-fork repository, draw the change in D2 and run `pr-workflow diagram --repo OWNER/REPO --source FILE.d2 --alt TEXT`.
-Paste the image line it prints into the issue or PR body, because `check`, `create`, `edit`, and the issue commands refuse a body without one.
-Draw the shape that the change has, such as a flow, a sequence, or the structure before and after it.
+Use [diagram-explanations](../diagram-explanations/SKILL.md) proactively to show relationships, state transitions, boundaries, or behavioral differences that readers need to understand.
+Draw the actual change in D2 with `pr-workflow diagram --repo OWNER/REPO --source FILE.d2 --alt TEXT` and include its printed local reference and editable source section in the body.
+The checked publication command attaches local images and verifies the resulting body without creating a storage branch.
+Read [attachments and historical figures](references/attachments.md) when publishing images or migrating stored figures.
+Use prose when a diagram adds no explanatory relationship, such as a spelling correction.
 The command adds the black-and-white theme and refuses colors, transparency, effects, icons, and its own D2 configuration in the source.
 Load `screenshots` for a change that a reader can see on a screen, and attach its captures beside the diagram.
 Rewrite the description around the final change if the scope changed.
@@ -97,7 +103,7 @@ An external project's custom title format requires a repository-scoped title pol
 Confirm validation claims from real command results, and distinguish passing, failing, unavailable, and unrun checks.
 The checker proves neither the claims nor that the issue preceded implementation, so verify those from the work.
 
-Read back the published document and draft state with `gh`, and run the final live-document check.
+Read back the published document and draft state with `gh`, and run the live-document check.
 Its CodeRabbit line reports the selected route and outstanding evidence for the current diff.
 Load `ci-budget` before an authorized push or PR update.
 When `gh` fails, keep its diagnostic and inspect the remote state before retrying an uncertain mutation.

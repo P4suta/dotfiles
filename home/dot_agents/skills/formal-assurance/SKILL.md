@@ -1,77 +1,44 @@
 ---
 name: formal-assurance
 description: >-
-  Require proof-first, source-bound assurance for implementation changes in any language.
-  Prefer a verifier that checks the actual language implementation, and use Lean 4 for general theorems with an explicit implementation refinement.
-  Use for implementation, bug fixes, proof gaps, and verification gates.
+  Use source-bound formal methods when project requirements or the actual correctness question need them.
+  Use for required proofs, model checking, verifier limits, and formal correctness claims.
 metadata:
   tools: "tools.toml"
 ---
 
-# Proof-first assurance
+# Formal assurance
 
-Assess every implementation change and complete the evidence for its affected contract.
-Prove deterministic properties with a machine-checked proof wherever a suitable verifier covers them: bounds, arithmetic, representation invariants, pure decisions, state transitions, automation, and failure handling.
-Scale the obligations to the changed behavior and the dependencies it needs.
-Documentation edits need factual checks, never an artificial theorem.
-Write the harnesses, models, and fuzz targets with the change, and run the affected ones on demand when their answer guides the work.
-The release gate in `ci-budget` runs the full inventory and supplies the required verdict, so commits, pushes, and pull requests never wait for a proof campaign.
-Never declare an implementation complete while an assessed obligation lacks its harness, model, or checked alternative, or a release verified while one lacks a passing result.
-Report a proof that hasn't run as unrun, never as passed.
+Run the project's maintained proof checks when the changed behavior or release stage requires them.
+Choose formal methods when they answer a concrete correctness question.
+Don't impose per-task proof inventories, evidence JSON, signed declarations, or separate completion dossiers.
+Ordinary factual prose needs source checks, not an artificial theorem.
 
-A verdict the project relies on must be the same on any contributor's machine with the project's pinned tools.
-Bound verification by unwinding, input size, fixed run counts, and fixed seeds, never by wall-clock time or machine speed.
-A timeout or stop condition leaves a check inconclusive: missing evidence, never a pass, a failure, or a reason for exemption.
-Keep verdicts independent of a particular host or OS, private services, and owner-local state.
-Use the same pinned verification tools for every contributor.
-
-On owner machines, tools listed in `~/.config/dotfiles/bounded-tools.toml` run only in containers with the policy's memory, swap, CPU, process, and time limits.
-Use a project's bounded container entrypoint when it has one.
-Otherwise use `dotfiles bounded run --image <name@sha256:digest> --project . -- <project command>`.
-The runner applies the policy and reports limit stops as inconclusive.
-Native invocations refuse and name this route.
-This includes tools started by project tasks.
-GitHub Actions keeps native execution.
-
-Read [scoping and alternatives](references/scoping.md) when a property crosses verifier semantics, makes an empirical claim, or resists repeated proof attempts.
-An alternative needs a concrete reason, proofs for the supported core, current substitute evidence, explicit limits, and a reconsideration condition.
-Difficulty, a missing installation, a timeout, or a wish to finish never justifies an exception.
-
-Before implementing, state the observable contract, input domain, invalid-input behavior, transitions, and required properties.
-Trace each property to the production entry point, the harness or theorem, its assumptions, and an actual verification result.
-Distinguish a proof for all admitted inputs from a finite bound or a theorem about an abstract model.
-Use types and validated transitions to rule out invalid states, and separate pure decision cores from external effects.
-For Rust, use `rust-invariants` for the production boundary.
-Use `systematic-fixes` when a counterexample reveals a shared cause.
-
-Prefer a maintained language-native verifier whose semantics cover the production code and the property.
+Identify the property, actual production entry point, input domain, and assumptions before selecting a verifier.
+Prefer a verifier for the implementation language.
 Kani checks executable Rust under its supported semantics and harness assumptions.
-Lean 4 checks a theorem about a formal model, so connect that model to the implementation explicitly.
-Pin the verifier's version and dependencies.
-Skip a second verifier when one establishes the complete property.
+Lean 4 checks a formal model, so justify any claimed correspondence with production code.
+Read [verifier-specific checks](references/verifiers.md) for the applicable verifier.
+Use [scoping and alternatives](references/scoping.md) when a property crosses verifier semantics.
 
-Run proofs on the changed implementation or a justified semantics-preserving translation, and import production functions into harnesses.
-A detached model, typecheck, test suite, differential comparison, or coverage percentage never replaces a required proof.
-State external trust assumptions and prove the adapter's own behavior under them.
-Close gaps by repairing the implementation, strengthening the model link, adding invariants, decomposing the proof, or switching verifiers.
-Never assume the conclusion, drop hard cases, weaken a promised property, or stub the implementation to pass.
-Report an unfinished but achievable proof as unfinished and name the exact obligation.
-Never relabel a failed proof as verified.
+A proof establishes its stated theorem under its assumptions.
+It doesn't establish empirical premises, natural-language interpretation, or decision relevance.
+State bounded coverage accurately and keep semantic and integration checks for external boundaries.
+Never replace a required proof with a detached model, a passing compile, or a coverage percentage.
+Repair counterexamples and failed checks instead of weakening the property to get a pass.
 
-Read [verifier-specific checks](references/verifiers.md) for the Kani, Lean, or independent-reference workflow.
-Treat skipped harnesses and solver failures as missing evidence.
+Use pinned tools and project-owned commands so contributors can reproduce the verdict.
+Bound verification by input sizes, unwinding, run counts, and seeds.
+A timeout, unsupported target, skipped harness, or solver failure is inconclusive.
+Resolve a required inconclusive check or ask the user for the concrete decision needed before claiming completion.
+Confirm successful verification with the actual command and result.
 
-Bind results to the exact source, assumptions, verifier configuration, and target semantics, and reject stale receipts.
-Isolate generated proof models and compiler outputs per checkout and run.
-Add the assessed requirements to the project's release check, with expected proof names, checked alternatives, and completeness checks.
-Prove that the gate rejects a false claim or a broken implementation with the expected failure, not any tool error.
-Keep integration tests and real boundary checks for properties outside the verifier's semantics.
-Statistical claims need null comparisons.
+On owner machines, tools listed in `~/.config/dotfiles/bounded-tools.toml` run only in containers with the configured resource limits.
+Use the project's bounded entrypoint or `dotfiles bounded run --image <name@sha256:digest> --project . -- <project command>`.
+GitHub Actions keeps its documented native execution.
+Use `resource-coordination` before an expensive campaign.
+Verification requirements grant no unbounded resource use.
+Keep heavy campaigns at the stage defined by the project and `ci-budget`.
 
-Never add computation to compensate for an unverified correctness argument.
-Use `resource-coordination` before a proof run or reference campaign likely to occupy a machine for hours.
-Orchestrate them with maintained Rust tooling instead of shell or Python glue.
-Record consequential model and trust-boundary choices in an ADR.
-
-`assure`, `pr-workflow`, `domyjob`, `dotfiles hosts check`, and `storage-scout` are owner-side conveniences.
-They keep per-project settings in the owner's configuration, add no files to a project, and never replace its own checks.
+`assure`, `pr-workflow`, `domyjob`, `dotfiles hosts check`, and `storage-scout` remain optional owner-side conveniences.
+They never replace a project's checks or require private configuration in a project.

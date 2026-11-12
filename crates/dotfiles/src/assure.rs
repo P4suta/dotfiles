@@ -15,6 +15,7 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -24,6 +25,61 @@ pub const CATALOG: &str = ".config/assure/shapes.toml";
 
 /// The tracked repository file read only during migration to the owner's configuration.
 pub const OWNERS: &str = "assure.toml";
+
+/// # Errors
+/// Rejects missing staged evidence, changed publisher bytes, or authored prose findings.
+pub fn tidy_upstream(root: &Path, paths: &[PathBuf]) -> Result<()> {
+    let mut ordinary = Vec::new();
+    for path in paths {
+        let relative = path
+            .to_str()
+            .context("staged source path is not UTF-8")?
+            .replace('\\', "/");
+        let read = |path: &Path| -> Result<Vec<u8>> {
+            let relative = path
+                .to_str()
+                .context("staged evidence path is not UTF-8")?
+                .replace('\\', "/");
+            let output = Tool::Git
+                .command()
+                .current_dir(root)
+                .args(["show", &format!(":{relative}")])
+                .output()?;
+            ensure!(
+                output.status.success(),
+                "staged upstream evidence is missing: {relative}"
+            );
+            Ok(output.stdout)
+        };
+        let Some(original) = platform::upstream::original_with(root, &relative, read)? else {
+            ordinary.push(path);
+            continue;
+        };
+        let current = read(path)?;
+        if current != original {
+            let inputs = prose::upstream_comment_inputs(root, &relative, &original, &current)?;
+            if !inputs.is_empty() {
+                let findings = prose::check_inputs(&prose::Bundle::installed()?, &inputs)?;
+                ensure!(
+                    findings.is_empty(),
+                    "authored upstream comments need correction:\n{}",
+                    prose::render(&findings)
+                );
+            }
+        }
+        println!("Preserved publisher prose in {relative}");
+    }
+    if !ordinary.is_empty() {
+        let status = Tool::Ocomment
+            .command()
+            .current_dir(root)
+            .args(["fix", "--tidy", "--staged", "--"])
+            .args(ordinary)
+            .status()?;
+        ensure!(status.success(), "staged prose tidy failed: {status}");
+    }
+    Ok(())
+}
 const REPOS: &str = "repos";
 const INITIAL_CATALOG_VERSION: u32 = 1;
 const COMPARISON_NAME: &str = "Assure";
@@ -488,7 +544,7 @@ pub fn resolve(root: &Path, name: &str) -> Result<Option<String>> {
 }
 
 /// Every path in `tree`.
-fn paths(root: &Path, tree: &Tree) -> Result<Vec<String>> {
+pub(crate) fn paths(root: &Path, tree: &Tree) -> Result<Vec<String>> {
     Ok(match tree {
         Tree::Commit(None) => Vec::new(),
         Tree::Commit(Some(commit)) => split_nul(&git(
@@ -513,7 +569,11 @@ fn paths(root: &Path, tree: &Tree) -> Result<Vec<String>> {
 }
 
 /// The contents of `wanted` in `tree`, leaving out a path the tree lacks.
-fn contents(root: &Path, tree: &Tree, wanted: &[String]) -> Result<BTreeMap<String, Vec<u8>>> {
+pub(crate) fn contents(
+    root: &Path,
+    tree: &Tree,
+    wanted: &[String],
+) -> Result<BTreeMap<String, Vec<u8>>> {
     let prefix = match tree {
         Tree::Commit(None) => return Ok(BTreeMap::new()),
         Tree::WorkingTree => {
@@ -823,10 +883,126 @@ fn survey_with(
         }
     }
     let files = contents(root, tree, &wanted)?;
+    result.gaps = source_gaps(catalog, &owners, &candidates, &scanned, &files, &all)?;
+    let (originals, original_paths) = upstream_baselines(root, tree, &wanted, &files, &mut result)?;
+    if !original_paths.is_empty() {
+        let original_candidates = candidates
+            .iter()
+            .filter(|path| original_paths.contains(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        let original_scanned = scanned
+            .iter()
+            .filter(|path| original_paths.contains(*path))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut prior = source_gaps(
+            catalog,
+            &owners,
+            &original_candidates,
+            &original_scanned,
+            &originals,
+            &all,
+        )?;
+        prior.retain(|gap| {
+            !matches!(gap.kind, Kind::Shape(_)) || files.get(&gap.path) == originals.get(&gap.path)
+        });
+        let changed = platform::upstream::changed_findings(
+            prior.iter().map(|gap| gap.key.as_slice()),
+            result.gaps.iter().map(|gap| gap.key.as_slice()),
+        )
+        .into_iter()
+        .map(<[u8]>::to_vec)
+        .collect::<BTreeSet<_>>();
+        result.gaps.retain(|gap| changed.contains(&gap.key));
+    }
+    Ok(result)
+}
+
+type SourceFiles = BTreeMap<String, Vec<u8>>;
+fn upstream_baselines(
+    root: &Path,
+    tree: &Tree,
+    wanted: &[String],
+    files: &SourceFiles,
+    result: &mut Survey,
+) -> Result<(SourceFiles, BTreeSet<String>)> {
+    let mut originals = files.clone();
+    let mut original_paths = BTreeSet::new();
+    for source in platform::upstream::sources(root)? {
+        if !wanted
+            .iter()
+            .any(|path| Path::new(path).starts_with(&source.directory))
+        {
+            continue;
+        }
+        let archive = source
+            .archive
+            .to_str()
+            .context("upstream archive path is not UTF-8")?
+            .replace('\\', "/");
+        result.owning.insert(archive.clone());
+        write!(
+            result.owner_input,
+            "; upstream {} sha256={}",
+            source.directory.display(),
+            source.sha256
+        )?;
+        let bytes = contents(root, tree, std::slice::from_ref(&archive))?
+            .remove(&archive)
+            .context("upstream archive is absent from the surveyed snapshot")?;
+        for (path, bytes) in source.originals(&bytes)? {
+            if files.contains_key(&path) {
+                original_paths.insert(path.clone());
+                originals.insert(path, bytes);
+            }
+        }
+    }
+    for source in platform::upstream::preserved_sources(root)? {
+        if !wanted.iter().any(|path| source.files.contains_key(path)) {
+            continue;
+        }
+        let manifest = source
+            .manifest
+            .to_str()
+            .context("preserved manifest path is not UTF-8")?
+            .replace('\\', "/");
+        result.owning.insert(manifest.clone());
+        write!(
+            result.owner_input,
+            "; preserved {} sha256={}",
+            source.directory.display(),
+            source.sha256
+        )?;
+        let bytes = contents(root, tree, std::slice::from_ref(&manifest))?
+            .remove(&manifest)
+            .context("preserved manifest is absent from the surveyed snapshot")?;
+        source.verify_manifest(&bytes)?;
+        for (path, expected) in source.files {
+            if files
+                .get(&path)
+                .is_some_and(|bytes| digest(bytes).eq_ignore_ascii_case(&expected))
+            {
+                original_paths.insert(path);
+            }
+        }
+    }
+    Ok((originals, original_paths))
+}
+
+fn source_gaps(
+    catalog: &Catalog,
+    owners: &Owners,
+    candidates: &[String],
+    scanned: &[String],
+    files: &BTreeMap<String, Vec<u8>>,
+    all: &[String],
+) -> Result<Vec<Gap>> {
+    let mut gaps = Vec::new();
     let corpus_present = |target: &str| {
         corpus_of(target).is_some_and(|corpus| all.iter().any(|path| path.starts_with(&corpus)))
     };
-    for path in &candidates {
+    for path in candidates {
         let Some(bytes) = files.get(path) else {
             continue;
         };
@@ -837,7 +1013,7 @@ fn survey_with(
         let mut seen: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
         for shape in &catalog.shapes {
             let marker = contains(bytes, shape.marker.as_bytes());
-            let owner = owner_of(&owners, shape, path, |by| {
+            let owner = owner_of(owners, shape, path, |by| {
                 files
                     .get(by)
                     .is_some_and(|text| contains(text, shape.marker.as_bytes()))
@@ -862,7 +1038,7 @@ fn survey_with(
                     let occurrence = seen.entry(key.clone()).or_default();
                     *occurrence += 1;
                     key.extend_from_slice(format!("\0{occurrence}").as_bytes());
-                    result.gaps.push(Gap {
+                    gaps.push(Gap {
                         shape: shape.id.clone(),
                         path: path.clone(),
                         line: index + 1,
@@ -876,13 +1052,13 @@ fn survey_with(
     if let Some(anti) = &catalog.anti_patterns
         && !scanned.is_empty()
     {
-        result.gaps.extend(anti_patterns(
+        gaps.extend(anti_patterns(
             &catalog.directory.join(&anti.config),
-            &scanned,
-            &files,
+            scanned,
+            files,
         )?);
     }
-    Ok(result)
+    Ok(gaps)
 }
 
 /// One finding of `ast-grep scan --json=stream`.
@@ -1034,6 +1210,103 @@ pub fn changed(root: &Path, before: &Tree, after: &Tree) -> Result<BTreeSet<Stri
         }
     };
     Ok(listed.into_iter().collect())
+}
+
+fn check_adr_paths(root: &Path, after: &Tree, paths: &BTreeSet<String>) -> Result<()> {
+    let paths: Vec<_> = paths
+        .iter()
+        .filter(|path| prose::adr::is_record(path))
+        .cloned()
+        .collect();
+    if paths.is_empty() {
+        return Ok(());
+    }
+    match prose::standard(root)? {
+        prose::prose_rules::Standard::Skips => return Ok(()),
+        prose::prose_rules::Standard::Applies => {}
+        prose::prose_rules::Standard::Undetermined => {
+            bail!("ADR ownership is undetermined; declare the repository's prose.standard setting")
+        }
+    }
+    let mut findings = Vec::new();
+    for (path, bytes) in contents(root, after, &paths)? {
+        let text = String::from_utf8(bytes).with_context(|| format!("read ADR {path} as UTF-8"))?;
+        findings.extend(prose::adr::check(&path, &text));
+    }
+    if findings.is_empty() {
+        return Ok(());
+    }
+    Err(Refusal::new(
+        "adr.content",
+        "a changed architecture decision record violates the concise record contract",
+        "shorten the record and fill its required content, then rerun the check",
+    )
+    .evidence(prose::render(&findings))
+    .into())
+}
+
+/// Check changed ADRs in their exact index, commit, or working-tree state.
+///
+/// # Errors
+/// Returns an error when Git, ownership, text decoding, or the ADR check fails.
+pub fn check_adrs(root: &Path, before: &Tree, after: &Tree) -> Result<()> {
+    check_adr_paths(root, after, &changed(root, before, after)?)
+}
+
+pub(crate) fn push_adrs(root: &Path, remote: &str, input: &[u8]) -> Result<()> {
+    for line in std::str::from_utf8(input)?.lines() {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        let [_, local, _, theirs] = fields[..] else {
+            bail!("malformed pre-push input: {line}");
+        };
+        ensure!(
+            shape_rules::commit_id(local.as_bytes()) && shape_rules::commit_id(theirs.as_bytes()),
+            "pre-push input needs exact commit IDs"
+        );
+        let zero = |oid: &str| oid.bytes().all(|byte| byte == b'0');
+        if zero(local) {
+            continue;
+        }
+        let after = Tree::Commit(Some(local.to_owned()));
+        if !paths(root, &after)?
+            .iter()
+            .any(|path| prose::adr::is_record(path))
+        {
+            continue;
+        }
+        if prose::standard(root)? == prose::prose_rules::Standard::Skips {
+            continue;
+        }
+        let base = if zero(theirs) {
+            let advertised = remote_git(root, &["ls-remote", remote, "HEAD"])?;
+            if advertised.is_empty() && remote_git(root, &["ls-remote", remote])?.is_empty() {
+                None
+            } else {
+                let advertised = std::str::from_utf8(&advertised)?;
+                let tip = advertised
+                    .strip_suffix("\tHEAD\n")
+                    .filter(|commit| shape_rules::commit_id(commit.as_bytes()))
+                    .context("ADR comparison needs the remote's advertised default commit")?;
+                ensure!(
+                    resolve(root, tip)?.is_some(),
+                    "fetch the remote default commit before checking changed ADRs"
+                );
+                Some(
+                    String::from_utf8(git(root, &["merge-base", local, tip])?)?
+                        .trim()
+                        .to_owned(),
+                )
+            }
+        } else {
+            ensure!(
+                resolve(root, theirs)?.is_some(),
+                "fetch the remote commit before checking changed ADRs"
+            );
+            Some(theirs.to_owned())
+        };
+        check_adrs(root, &Tree::Commit(base), &after)?;
+    }
+    Ok(())
 }
 
 fn renames_from_diff(bytes: &[u8]) -> Result<BTreeMap<String, String>> {
@@ -1717,6 +1990,7 @@ fn decide_with(
             changed.retain(|path| inherited_files.get(path) != current_files.get(path));
         }
     }
+    check_adr_paths(root, after, &changed)?;
     let old_keys: Vec<_> = old
         .keys()
         .into_iter()
@@ -1930,7 +2204,7 @@ pub(crate) struct RequestBaseline {
     pub(crate) commit: String,
 }
 
-fn worktree_snapshot(root: &Path) -> Result<RequestBaseline> {
+pub(crate) fn worktree_snapshot(root: &Path) -> Result<RequestBaseline> {
     let root = platform::paths::canonical(root)?;
     let scope = tempfile::tempdir()?;
     let index = scope.path().join("index");
@@ -2082,7 +2356,7 @@ pub fn start(root: &Path, catalog: &Catalog) -> Result<Option<String>> {
         return Ok(None);
     }
     let mut report = format!(
-        "The owner's local catalog finds {} verification gaps in this repository ({}). Publication refuses new gaps and PR readiness also refuses weakened budgets:\n",
+        "The optional local catalog inspection finds {} verification gaps in this repository ({}):\n",
         outcome.gaps.len(),
         outcome.inputs.description(),
     );
@@ -2130,7 +2404,12 @@ pub fn ready(root: &Path, catalog: &Catalog, base: &str, head: &str) -> Result<(
 pub enum AgentPoint {
     Start,
     Stop,
+    Remind,
+    Reply,
 }
+
+/// The routine verification confirmation shared by managed agents and Git hooks.
+pub const VERIFICATION_REMINDER: &str = "Before completing work and before every push, inspect the diff, affected CI jobs, and project check commands. Run every applicable local check required for that action, fix failures, and rerun affected checks after changes. Confirm completion with a short reason naming actual checks and successful outcomes. Never use an unverified disclaimer to skip required work. If a required check cannot run, repair the environment or use a justified equivalent; if still blocked, ask the user for a concrete decision before claiming completion. Checks assigned to later CI or release stages keep their own timing. Do not create evidence JSON, signed declarations, claim ledgers, or per-answer proofs unless explicitly requested. Existing project checks, release requirements, owner authorization, and push pauses still apply.\n";
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum ReplyLanguage {
@@ -2149,6 +2428,28 @@ impl From<ReplyLanguage> for Language {
     }
 }
 
+fn reply_reasons(reply: &str) -> Result<Vec<String>> {
+    let mut reasons: Vec<_> = prose::house::check("reply.md", reply, prose::Bundle::installed)?
+        .into_iter()
+        .map(|finding| {
+            format!(
+                "Reply line {}: {}: {}",
+                finding.line, finding.rule, finding.message
+            )
+        })
+        .collect();
+    if let Some(root) = repository()
+        && let Err(error) = check_adrs(
+            &root,
+            &Tree::Commit(resolve(&root, "HEAD")?),
+            &Tree::WorkingTree,
+        )
+    {
+        reasons.push(error.downcast::<Refusal>()?.text());
+    }
+    Ok(reasons)
+}
+
 /// The agent hook of `point`: the session start report on standard output, or the stop decision as the client's JSON.
 ///
 /// # Errors
@@ -2156,6 +2457,10 @@ impl From<ReplyLanguage> for Language {
 /// Returns an error when the hook input holds no JSON, the host lacks the catalog, or Git fails.
 pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
     match point {
+        AgentPoint::Remind => {
+            print!("{VERIFICATION_REMINDER}");
+            Ok(())
+        }
         AgentPoint::Start => {
             let Some(root) = repository() else {
                 return Ok(());
@@ -2166,7 +2471,7 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
             }
             Ok(())
         }
-        AgentPoint::Stop => {
+        AgentPoint::Stop | AgentPoint::Reply => {
             let mut input = String::new();
             std::io::stdin().read_to_string(&mut input)?;
             let input = if input.trim().is_empty() {
@@ -2210,7 +2515,14 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                     "The reply prose must be in Japanese. Rewrite your last reply to the user in Japanese; keep code, commands, and outward artifacts as they are.".to_owned(),
                 );
             }
-            if let Some(root) = repository() {
+            if point == AgentPoint::Reply {
+                reasons.extend(reply_reasons(
+                    input.last_assistant_message.as_deref().unwrap_or_default(),
+                )?);
+            }
+            if point == AgentPoint::Stop
+                && let Some(root) = repository()
+            {
                 let catalog = installed()?;
                 let baseline = input
                     .session_id
@@ -2221,10 +2533,17 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                     })
                     .transpose()?
                     .flatten();
-                let outcome = request_stop(&root, &catalog, baseline.as_ref())?;
-                report_inputs(&outcome);
-                if let Some(refusal) = outcome.refusal(&catalog) {
-                    reasons.push(refusal.text());
+                match request_stop(&root, &catalog, baseline.as_ref()) {
+                    Ok(outcome) => {
+                        report_inputs(&outcome);
+                        if let Some(refusal) = outcome.refusal(&catalog) {
+                            reasons.push(refusal.text());
+                        }
+                    }
+                    Err(error) => {
+                        let refusal = error.downcast::<Refusal>()?;
+                        reasons.push(refusal.text());
+                    }
                 }
             }
             let reason = (!reasons.is_empty()).then(|| reasons.join("\n\n"));

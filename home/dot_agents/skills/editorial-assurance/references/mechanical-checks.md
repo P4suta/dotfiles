@@ -6,7 +6,7 @@ The shared house policy also applies to replies, persisted prose, human-readable
 Its native Japanese pass enforces the configured orthography rules and its token pass rejects the defined demonstratives and technical term variants.
 The shared structural pass rejects authored lists and tables in Markdown and rendered HTML while preserving code, metadata, and attributed quotations.
 Representation choice, diagram meaning, and interaction quality still need editorial review.
-`dotfiles answer check` calls the same policy before retaining a successful answer receipt.
+The managed reply hook checks the same house policy without an answer receipt.
 
 ## Editorial candidates
 
@@ -81,5 +81,5 @@ The decision records an editorial judgment rather than proving that the sentence
 Use the repository's existing `prose check` policy for its supported persisted-English channels.
 Use the publication project's own Markdown, metadata, asset, link, build, and preview checks.
 Use the actual compiler, runtime, test suite, or calculator for executable and numeric claims.
-Run `dotfiles answer check` where the owner's answer-evidence contract applies.
+Use `dotfiles answer check` only for explicitly requested detailed answer evidence.
 None of these tools replaces the claim-source comparison, the completed explanation, or inspection of the rendered proof.

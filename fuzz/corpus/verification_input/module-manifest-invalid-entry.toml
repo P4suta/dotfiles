@@ -1,0 +1,4 @@
+[package]
+name = 'fixture'
+[lib]
+path = false

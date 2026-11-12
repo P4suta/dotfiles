@@ -117,15 +117,26 @@ Once run, `pr-workflow start` refuses a personal non-fork repository without a q
 Follow-up F4: nothing stops a direct `gh pr create`.
 Whether a diff fits an issue's scope stays judgment.
 
+> - Use `adr` before consequential architecture choices and when reviewing or replacing a decision.
+
+Judgment: identifying a consequential architecture choice requires interpreting the task.
+The `adr` skill supplies the decision and review criteria.
+
+>   Keep ADRs concise, run the shared gate, and leave a record proposed while material findings remain.
+
+Judgment: materiality and decision acceptance require reviewing the evidence.
+The shared checker at `crates/prose/src/adr.rs` enforces the size budget and nonempty required sections.
+
 > - In personal repositories, use stable descriptive document paths and name new ADRs after the decision with a front-matter date, as the shared `adr` skill describes.
 
-Follow-up F8: the shared `adr` skill states the convention, and `xtask/src/adr.rs` checks the dotfiles collection.
-Other personal repositories have no shared ADR gate.
-Choosing a descriptive name still requires reading the decision.
+Follow-up F8: `xtask/src/adr.rs` checks record identities and the dotfiles index.
+The shared `prose::adr` module checks size and required content in changed personal records through write, completion, and publication gates.
+Choosing a descriptive name and assessing the rationale still require direct review.
 
 >   Preserve existing filenames and references, and regenerate shared indexes from source records when the repository has a generator.
 
-Follow-up F8: the dotfiles index has a generator, but no shared gate checks index drift and historical reference preservation across personal repositories.
+Follow-up F8: the dotfiles generator rejects index drift, and other personal repositories keep their own index commands.
+Historical reference preservation remains a review obligation.
 
 > - Use decision-naming before labeling a plan, design, diagram, branch, API, schema, or file, so names carry the decision or property instead of v1, v2, new, old, final, or next.
 
@@ -145,22 +156,76 @@ The `monochrome-design` skill states the defaults, and a project's browser check
 Judgment: whether a change decides interface structure, controls, accessibility behavior, or copy, and whether a cited page supports that decision, stays a review.
 The `source-bound-interface-design` skill lists the sources, and no gate checks that a proposal or PR cites them.
 
-> - For implementation changes, read the relevant formal-assurance and verification-tools skill instructions directly and meet their verification obligations.
+> - Before implementation edits, read development-assurance, formal-assurance, verification-tools, and the applicable testing skills.
 
-Judgment: selecting relevant skill instructions and checking their verification obligations requires a review of the implementation and its evidence.
+Judgment: the implementation's behavior determines which testing instructions apply.
+
+>   Use the project's maintained commands, run required checks before and after production changes, and complete affected verification before reporting implementation completion.
+
+Judgment: the agent must run the required checks and inspect their actual outcomes.
+
+>   Run the project's required checks before release.
+
+Judgment: the project must identify its complete release inventory and wire its native gate into publication.
+The project's release check requires its full inventory and source coverage.
+Each project's native release gate remains authoritative.
+
+> - Treat applicable recommendations in shared skills and governing primary sources as required completion criteria.
+
+Judgment: the task and source conditions determine applicability.
+
+>   Determine applicability from the task, platform, source conditions, and explicit requirements.
+
+Judgment: applicability needs the actual task and governing source.
+
+>   Apply each relevant rule and verify its result without a separate evidence submission.
+
+Judgment: actual implementation and checks establish whether the agent has applied the rule.
+
+>   Preserve the source's normative status and identify stronger adoption as owner policy.
+
+Judgment: the source's language and the owner's policy determine normative status.
+
+>   Resolve conflicts and justify exclusions explicitly.
+
+Judgment: conflicting requirements need context and authority review.
+
+>   An unresolved applicable rule blocks a completion claim.
+
+Judgment: the agent must resolve the rule or ask the user for a concrete decision.
+
+>   Enforce observable requirements through maintained project gates with rejecting fixtures, and review semantic suitability directly.
+
+Judgment: tests and direct review cover different properties of the actual implementation.
+
+> - Use diagram-explanations proactively when a diagram can explain relationships, mechanisms, changes, or decisions.
+
+Judgment: the explanation determines whether a diagram adds meaning.
+
+> - Proactively use knowledge-to-skills to preserve reusable knowledge from research, implementation, debugging, review, failures, and feedback without waiting for a request.
+
+Judgment: the agent distinguishes reusable guidance from task-specific observations.
 
 > - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
 
 Judgment: the owner controls each machine's opt-in, and verification duties still apply without skill maintenance.
 
-> - Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.
+> - Keep the CodeRabbit CLI and PR review pools separate, and apply capacity checks to explicitly requested reviews.
 
-Follow-up F7: the CodeRabbit CLI has no review allowance, so the guard enforces its local hourly and daily limits for a CLI review in `crates/coderabbit-guard/src/lib.rs`.
-No gate represents the PR review pool or its thresholds, or holds a push on its capacity.
+Judgment: the requested review determines its pool and capacity requirements.
+The CLI guard enforces its local limits in `crates/coderabbit-guard/src/lib.rs`.
 
-> - Never declare a PR complete while supported review findings, required checks, or a review of its current head remain outstanding.
+>   Use automatic incremental PR reviews without requiring manual commands or a full review.
 
-Judgment: whether a finding has support requires checking the code.
+Judgment: automatic review eligibility and completion depend on the provider's actual state.
+
+> - Resolve supported review findings and pass required checks before declaring a PR complete.
+
+Judgment: finding support and applicable checks require review of the current change.
+
+>   Honor an explicit instruction to merge despite an unavailable optional CodeRabbit review, while preserving repository-required reviews and publication holds.
+
+Judgment: the owner's instruction grants merge authority, and repository requirements and publication holds keep their scope.
 
 > - Commit, push, reply to or resolve PR threads, request reviews, and merge only when the owner asks.
 
@@ -176,10 +241,48 @@ The answer checker retrieves the declared source and checks supported conversion
 Judgment: interpreting natural language and selecting a formal model need argument review.
 The answer checker checks declared dependencies, Boolean entailment, comparison axes, and parallel roles in `crates/dotfiles/src/answer.rs`.
 
-> - Before completing a request, check the exact answer draft with `dotfiles answer check` using the request's managed session context.
+> - Before completion and every push, inspect the diff and affected CI jobs, run every applicable local check required for the action, fix failures, and rerun affected checks after changes.
 
-Judgment: client trust and reload determine whether managed hooks run.
-The managed Stop path in `crates/dotfiles/src/answer.rs` refuses an exact draft without completed evidence for its current request.
+Judgment: deciding which checks apply needs the actual diff and project requirements.
+
+>   Confirm completion with a short reason naming actual checks and successful outcomes.
+
+Judgment: the short reason needs the agent's interpretation of actual tool results.
+
+>   Never substitute an unsupported affirmation or an unverified disclaimer for required work.
+
+Judgment: an honest completion claim needs the agent to perform the required work.
+
+>   Repair a blocked environment or use a justified equivalent check.
+
+Judgment: environment repair and equivalent coverage depend on the blocked check.
+
+>   If a required check still can't run, ask the user for the concrete decision needed before claiming completion.
+
+Judgment: the remaining decision depends on the user's authority and the actual blocker.
+
+>   Checks assigned to later CI or release stages keep their own timing.
+
+Judgment: the agent must execute the applicable project checks, resolve failures, and supply a concrete short reason.
+The reminder in `crates/dotfiles/src/assure.rs` asks for confirmation without an evidence submission.
+Required blocked checks need a user decision rather than an unverified completion disclaimer.
+
+> - Don't require detailed agent evidence submissions, evidence JSON, signed declarations, claim ledgers, or per-answer proofs, including for releases, unless the user explicitly requests them.
+
+Judgment: explicit user requests determine whether a detailed submission belongs in the task.
+
+>   Base the short confirmation on actual tool results and source checks.
+
+Judgment: source meaning and the correspondence with tool results need semantic review.
+
+>   Project-owned checks and release artifacts remain required.
+
+Judgment: the project's requirements define the checks and artifacts for its current stage.
+
+>   This reporting policy takes precedence over shared skill instructions that require detailed task evidence.
+
+Judgment: the agent selects the actual checks and distinguishes task evidence from project-owned artifacts.
+Managed client templates remove automatic answer-evidence hooks while retaining project checks and reply prose checks.
 
 > - Keep premise truth, natural-language interpretation, formal entailment, and decision relevance separate, and report unsupported or incomplete checks without claiming verification.
 
@@ -238,9 +341,9 @@ Judgment: a named object's relevance and precision need semantic review.
 
 Judgment: check selection and candidate resolution require context.
 
-> The answer-evidence check and persisted prose gates enforce the same shared policy.
+> The reply and persisted prose gates enforce the same shared policy.
 
-Follow-up F1: `crates/dotfiles/src/answer.rs` and the prose entry points call `crates/prose/src/house.rs`.
+Follow-up F1: `crates/dotfiles/src/assure.rs` and the prose entry points apply the shared house policy.
 
 > Write prose one sentence per line in English and Japanese: break after `。`, `！`, `？`, `.`, `!`, and `?`.
 
@@ -568,7 +671,7 @@ Experimental skill maintenance stays off until the machine's explicit opt-in.
 | Load `ci-budget` before an authorized push or PR update. | Gate and skill | The pre-push dispatcher refuses while `~/.config/git/push-paused` exists in `crates/dotfiles/src/hooks.rs`, and `ci-budget` states the local checks. |
 | Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within its local limits in `crates/coderabbit-guard/src/lib.rs`, and `coderabbit-review` states the trigger. |
 | Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The floored budget in `crates/rules/src/review_rules.rs` applies where a review pool has an allowance, and the CLI pool has none. |
-| Elapsed time alone gives no permission to push. | Merged | Merged into `while review capacity stays unverified`. |
+| Elapsed time alone gives no permission to push. | Merged | Merged into `Commit, push, reply to or resolve PR threads`. |
 | Honor an owner-imposed CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `crates/rules/src/review_rules.rs`, with a Kani proof. |
 | Use `reliability` for intermittent failures. | Skill | `reliability` states the trigger in its description and the rule in its body. |
 | Load `dotfiles` for dotfiles changes. | Skill | `dotfiles` states the trigger and the rule in its description. |
@@ -578,7 +681,7 @@ Experimental skill maintenance stays off until the machine's explicit opt-in.
 | Load `coderabbit-review` on an existing PR or an authorized PR update. | Skill | `coderabbit-review` states the trigger in its description and the inspection in its body. |
 | Wait for the automatic review of the final pushed head. | Skill | `coderabbit-review` states it once. |
 | Explain unsupported findings with concrete evidence. | Skill | `coderabbit-review` states it once. |
-| The PR completion line, before the current wording. | Merged | Reworded as `Never declare a PR complete`. |
+| The PR completion line, before the current wording. | Merged | Reworded as `Resolve supported review findings and pass required checks`. |
 | A passing CodeRabbit check alone doesn't establish a completed review. | Skill | `coderabbit-review` states it once. |
 | Use the existing PR review before requesting a CLI review of the same diff. | Gate and skill | `coderabbit-review` states the order, and the guard enforces the local CLI limits in `crates/coderabbit-guard/src/lib.rs`. |
 | Commit, push, PR replies, thread resolution, manual review triggers, and merge still require authorization. | Merged | Merged into `only when the owner asks`. |
@@ -622,12 +725,6 @@ A repository opts out with `git config guard.commits off` when its own instructi
 ### F4:
 
 The managed agent permission profiles deny `gh pr create`, `gh pr edit`, and `gh pr ready`, and the denial names the matching `pr-workflow` command.
-
-### F7:
-
-The pre-push dispatcher asks the CodeRabbit guard for the PR review pool's capacity before pushing a branch with an open PR.
-It keeps that capacity apart from the CLI pool, with the applicable adaptive threshold.
-It refuses the push when the capacity stays unverified or runs out, and it names the pool and the capacity it found.
 
 ### F8:
 

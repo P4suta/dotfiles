@@ -1,8 +1,11 @@
 {
-  "revision": "195a71464995b26c8e3a751b7c71e48e8d5e2563dd9e6a96f8717518c6cd5d36",
+  "revision": "f9153dc506e5997b5307be6a1365b36fe3c44ac7ccbb7359f10ed8f71e703b39",
   "outcome": "implemented",
-  "reason": "Per-PR CLI reviews cost more time than they returned, so high assessments now select no review and a guarded CLI review runs on an explicit request. The guard restores its pinned runtime when the CLI replaces it.",
+  "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, owner holds, and guarded explicit reviews.",
   "evidence": [
+    "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
+    "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
+    "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",
     "docs/adr/require-no-cli-review-for-high-prs.md",
     "crates/coderabbit-guard/src/lib.rs",

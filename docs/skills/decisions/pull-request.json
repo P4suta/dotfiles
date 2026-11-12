@@ -1,8 +1,11 @@
 {
-  "revision": "95b388b4f9d677ad83fc0758eb0042982d14275381a7621f353e81dd76ddd69d",
+  "revision": "cb15cf787fb042125671cf0cea59566fd3029ddb0048c10ab5ecec3be04f5c30",
   "outcome": "implemented",
-  "reason": "The skill and its importance reference now route low, medium, and high assessments to no CodeRabbit review and keep the PR review for critical ones, as the routing rule does.",
+  "reason": "Use automatic incremental reviews without manual commands or a full-review prerequisite.\nHonor an explicit merge instruction during unavailable optional review through normal GitHub admission.\nPreserve source checks, required reviews, supported findings, and truthful review status.",
   "evidence": [
+    "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
+    "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
+    "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",
     "docs/adr/require-no-cli-review-for-high-prs.md",
     "crates/pr-workflow/src/figure.rs",
@@ -67,12 +70,22 @@
     "fuzz/corpus/github_bodies/arguments",
     "fuzz/corpus/github_bodies/nested-json",
     "docs/adr/require-pr-review-by-repository-policy.md",
-    "crates/pr-workflow/src/evidence.rs"
+    "crates/pr-workflow/src/evidence.rs",
+    "crates/pr-workflow/src/figure_migration.rs",
+    "crates/rules/src/figure_migration_rules.rs",
+    "home/dot_agents/skills/pull-request/references/attachments.md",
+    "home/dot_agents/skills/diagram-explanations/SKILL.md",
+    "docs/adr/attach-figures-without-storage-branches.md",
+    "docs/adr/authorize-verified-figure-retirement.md",
+    "crates/dotguard/src/figure_retirement.rs",
+    "xtask/src/main.rs",
+    "crates/dotguard/src/renovate.rs",
+    "crates/dotguard/tests/push_and_signing.rs"
   ],
   "revisit": null,
   "size": {
     "outcome": "keep",
-    "reason": "One sentence changed its route list, so the skill keeps its size.",
+    "reason": "Keep service configuration and source assessment details in focused references.\nThe executable workflow owns metadata parsing and realistic regression fixtures.",
     "revisit": null
   }
 }

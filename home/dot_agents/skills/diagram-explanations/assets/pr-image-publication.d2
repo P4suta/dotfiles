@@ -1,0 +1,40 @@
+direction: down
+
+title: "PR image publication\nStorage flow" {
+  shape: text
+  near: top-center
+  style.font-size: 28
+}
+
+key: {
+  shape: text
+  near: bottom-center
+  label: "Key\nBoxes name concrete objects and their roles.\nArrows label transfers of files or text.\nContainers separate storage designs."
+}
+
+branch_storage: {
+  label: "Branch storage (before)"
+  direction: down
+  source: "D2 file\nEditable diagram source"
+  renderer: "pr-workflow diagram\nRender SVG"
+  storage: "Repository diagrams branch\nStore SVG and D2 files"
+  body: "PR or issue body\nReference a branch image URL"
+  source -> renderer: Read diagram source
+  renderer -> storage: Commit SVG and D2 source
+  storage -> body: Serve SVG through the branch URL
+}
+
+direct_attachment: {
+  label: "Direct attachments (after)"
+  direction: down
+  source: "D2 file\nEditable diagram source"
+  renderer: "pr-workflow diagram\nPrepare local SVG and Markdown"
+  publisher: "pr-workflow create or edit\nCheck the document and attach images"
+  storage: "GitHub attachment storage\nStore the uploaded SVG"
+  body: "PR or issue body\nShow the attachment and editable source"
+  source -> renderer: Read diagram source
+  renderer -> publisher: Provide local image reference and D2 source
+  publisher -> storage: Upload SVG with --attach
+  storage -> body: Serve SVG through the attachment URL
+  publisher -> body: Publish Markdown and D2 source
+}

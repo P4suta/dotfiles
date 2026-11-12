@@ -54,6 +54,11 @@ impl Wrapper {
         let scope = temporary.join(format!("dotguard-wrapper-{}-{name}", std::process::id()));
         platform::cleanup::remove_dir_all(&scope);
         std::fs::create_dir_all(scope.join("repository")).unwrap();
+        std::fs::write(
+            scope.join("gitconfig"),
+            "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
+        )
+        .unwrap();
         let wrapper = Self {
             scope,
             git,
@@ -71,6 +76,15 @@ impl Wrapper {
     /// The wrapper drops bypasses from the calling shell, such as the one a force push sets for its hooks, so they never decide a refusal.
     fn run(&self, arguments: &[&str], input: Option<&[u8]>) -> Output {
         self.run_with(arguments, input, &[])
+    }
+
+    fn run_successfully(&self, arguments: &[&str]) {
+        let output = self.run(arguments, None);
+        assert!(
+            output.status.success(),
+            "git {arguments:?}: {}",
+            text(&output.stderr)
+        );
     }
 
     fn run_with(&self, arguments: &[&str], input: Option<&[u8]>, bypasses: &[&str]) -> Output {
@@ -122,6 +136,114 @@ impl Wrapper {
 
 fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn install_history_hook(repository: &Path) {
+    let binary = env!("CARGO_BIN_EXE_dotguard")
+        .replace('\\', "/")
+        .replace('\'', "'\\''");
+    let hook = repository.join(".git/hooks/pre-push");
+    std::fs::write(
+        &hook,
+        format!("#!/bin/sh\nexec '{binary}' pre-push \"$1\"\n"),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+}
+
+#[test]
+fn verified_figure_retirement_binds_the_exact_deletion_and_keeps_the_git_lease() {
+    let wrapper = Wrapper::new("figure-retirement");
+    install_history_hook(&wrapper.scope.join("repository"));
+    let remote = wrapper.scope.join("archive.git");
+    let remote = remote.to_str().unwrap();
+    for arguments in [
+        vec!["init", "--bare", "-q", remote],
+        vec![
+            "commit",
+            "--allow-empty",
+            "-m",
+            "test: preserve historical figures",
+        ],
+        vec!["push", remote, "HEAD:refs/heads/diagrams"],
+    ] {
+        wrapper.run_successfully(&arguments);
+    }
+    let original = text(&wrapper.run(&["rev-parse", "HEAD"], None).stdout)
+        .trim()
+        .to_owned();
+    let permit = wrapper
+        .scope
+        .join("repository/.git/dotguard-figure-retirement.json");
+    let record = |oid: &str| {
+        serde_json::to_vec(&serde_json::json!({
+            "token":"fixture-retirement-token", "remote":remote,
+            "branch":"diagrams", "oid":oid
+        }))
+        .unwrap()
+    };
+    std::fs::write(&permit, record(&original)).unwrap();
+    let lease = format!("--force-with-lease=refs/heads/diagrams:{original}");
+    let deletion = ["push", &lease, remote, ":refs/heads/diagrams"];
+    let context = [("DOTGUARD_FIGURE_RETIREMENT", "fixture-retirement-token")];
+    assert_eq!(last_record(&wrapper.run(&deletion, None)).rule, "git.force");
+    for arguments in [
+        vec!["push", &lease, remote, "HEAD:refs/heads/diagrams"],
+        vec!["push", &lease, remote, ":refs/heads/screenshots"],
+        vec!["push", "--force", remote, ":refs/heads/diagrams"],
+    ] {
+        assert_eq!(
+            last_record(&wrapper.run_env(&arguments, None, &context)).rule,
+            "git.force"
+        );
+    }
+    wrapper.run_successfully(&[
+        "commit",
+        "--allow-empty",
+        "-m",
+        "test: advance historical figures",
+    ]);
+    wrapper.run_successfully(&["push", remote, "HEAD:refs/heads/diagrams"]);
+    let output = wrapper.run_env(&deletion, None, &context);
+    assert!(!output.status.success());
+    assert!(
+        text(&output.stderr).contains("stale info"),
+        "{}",
+        text(&output.stderr)
+    );
+    let current = text(&wrapper.run(&["rev-parse", "HEAD"], None).stdout)
+        .trim()
+        .to_owned();
+    assert!(
+        text(
+            &wrapper
+                .run(&["ls-remote", remote, "refs/heads/diagrams"], None)
+                .stdout
+        )
+        .contains(&current)
+    );
+    std::fs::write(&permit, record(&current)).unwrap();
+    let lease = format!("--force-with-lease=refs/heads/diagrams:{current}");
+    let output = wrapper.run_env(
+        &["push", &lease, remote, ":refs/heads/diagrams"],
+        None,
+        &context,
+    );
+    assert!(output.status.success(), "{}", text(&output.stderr));
+    let references = wrapper
+        .run(&["ls-remote", remote, "refs/heads/diagrams"], None)
+        .stdout;
+    assert_eq!(references.as_slice(), b"");
+    assert!(
+        wrapper
+            .run(&["cat-file", "-e", &original], None)
+            .status
+            .success()
+    );
 }
 
 #[test]
@@ -324,11 +446,6 @@ fn lefthook_drops_its_own_backup_stash_and_other_drops_stay_refused() {
 #[test]
 fn a_forced_checkout_that_only_restores_deleted_files_passes() {
     let wrapper = Wrapper::new("force-restore");
-    std::fs::write(
-        wrapper.scope.join("gitconfig"),
-        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n",
-    )
-    .unwrap();
     let repository = wrapper.scope.join("repository");
     let succeeds = |arguments: &[&str]| {
         let output = wrapper.run(arguments, None);

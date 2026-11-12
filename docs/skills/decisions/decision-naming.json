@@ -1,7 +1,7 @@
 {
-  "revision": "fc491d461c0ab850d640cb7ee7c3d35ab0c5c96ea2ead12a55c44e2a2fc08a25",
+  "revision": "3010d40adc936d633015ce8999e7556936a23d0c4bd8a66d12e2be957915dadc",
   "outcome": "implemented",
-  "reason": "An unreleased project received v1 and v2 labels in its plan, diagram, and briefs, and Japanese replies used a translated metaphor and a Chinese term; the owner rejected both and asked for mechanical enforcement that does not depend on a list of known mistakes. This skill names designs by their distinguishing decision, keeps one living document with ADR supersession as history, and confines version numbers to released contracts and persisted formats. The agent policy references the skill next to the ADR rule. The prose checker refuses bare version labels in English documents, the assurance catalog refuses versioned identifier segments in Rust and TypeScript with fixtures, and the Stop hook and answer check refuse any Han character outside JIS X 0208 and JIS X 0213 in Japanese replies from a Unihan-derived table. The Stop hook and answer check now also apply every word rule of japanese.toml to Japanese replies, so the skill no longer says that those compounds rely on review.",
+  "reason": "Keep descriptive names and Japanese reply checks while making answer evidence optional and describing the post-display correction boundary accurately.",
   "evidence": [
     "home/dot_agents/skills/decision-naming/SKILL.md",
     "home/dot_claude/skills/symlink_decision-naming",

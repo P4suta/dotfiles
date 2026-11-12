@@ -65,7 +65,7 @@ pub struct Real {
 }
 
 impl Real {
-    /// A runner for `home` whose `PATH` puts the managed tool directories before the inherited `PATH`.
+    /// A runner for `home` whose `PATH` preserves managed installations and active tool selection.
     ///
     /// # Errors
     ///

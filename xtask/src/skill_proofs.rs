@@ -33,6 +33,25 @@ const KANI_SUBJECT_TESTS: [&str; 3] = [
 ];
 const MUTATION_CAMPAIGN_CASES: usize = 2;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KaniScope {
+    All,
+    Selected,
+}
+
+fn run_kani_checks(
+    scope: KaniScope,
+    driver: impl FnOnce() -> Result<()>,
+    regressions: impl FnOnce() -> Result<()>,
+    subjects: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    if scope == KaniScope::All {
+        driver()?;
+        regressions()?;
+    }
+    subjects()
+}
+
 /// Run native checks and the family's required campaign or measurement budgets.
 ///
 /// # Errors
@@ -1177,7 +1196,7 @@ pub fn verify_sources(root: &Path, sources: &[String]) -> Result<()> {
                     || verify_container_measured(root, ProofCampaign::Ci, sources),
                 )
             } else {
-                verify_kani(root, &manifest)
+                verify_selected_kani(root, &manifest)
             }
         })
     })
@@ -1356,6 +1375,23 @@ pub(crate) fn verify_kani(root: &Path, manifest: &obligations::Manifest) -> Resu
     })
 }
 
+fn verify_selected_kani(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
+    kani_environment_version(root)?;
+    crate::phase_evidence::run(
+        root,
+        "selected Kani subjects",
+        manifest.obligations.len(),
+        || {
+            run_kani_checks(
+                KaniScope::Selected,
+                || verify_kani_driver(root),
+                || verify_kani_subject_regressions(root),
+                || verify_kani_subjects(root, manifest),
+            )
+        },
+    )
+}
+
 /// Verify the answer gate's registered subjects under the installed or explicitly selected bounded policy.
 ///
 /// # Errors
@@ -1444,8 +1480,15 @@ fn verify_answer_container(root: &Path, policy: &dotfiles::bounded::Policy) -> R
 
 fn verify_kani_measured(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     kani_environment_version(root)?;
-    verify_kani_driver(root)?;
-    verify_kani_subject_regressions(root)?;
+    run_kani_checks(
+        KaniScope::All,
+        || verify_kani_driver(root),
+        || verify_kani_subject_regressions(root),
+        || verify_kani_subjects(root, manifest),
+    )
+}
+
+fn verify_kani_subjects(root: &Path, manifest: &obligations::Manifest) -> Result<()> {
     let verifier_hash = crate::phase_evidence::verifier_digest(&installed_kani_directory()?)?;
     let engine_hash = crate::phase_evidence::engine_digest(root)?;
     let (verified, rejected) = run_rule_subjects(
@@ -2082,107 +2125,9 @@ fn lines(text: &str) -> u64 {
     text.lines().filter(|line| !line.trim().is_empty()).count() as u64
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct MutationIdentity {
-    name: String,
-    package: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-enum MutationScenario {
-    Baseline,
-    Mutant(MutationIdentity),
-}
-
-#[derive(Debug, serde::Deserialize)]
-enum MutationStage {
-    Build,
-    Test,
-}
-
-#[derive(Debug, serde::Deserialize)]
-enum MutationStatus {
-    Success,
-    Failure(i32),
-    Timeout,
-}
-
-impl MutationStatus {
-    fn phase(&self) -> Result<proof_budget_rules::MutationPhase> {
-        use proof_budget_rules::MutationPhase;
-        match self {
-            Self::Success => Ok(MutationPhase::Passed),
-            Self::Failure(code) if *code != 0 => Ok(MutationPhase::Failed),
-            Self::Timeout => Ok(MutationPhase::TimedOut),
-            Self::Failure(_) => {
-                anyhow::bail!("a mutation phase claims failure with exit code zero")
-            }
-        }
-    }
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct MutationPhaseReceipt {
-    phase: MutationStage,
-    process_status: MutationStatus,
-}
-
-#[derive(Clone, Copy, Debug, serde::Deserialize, Eq, PartialEq)]
-enum MutationSummary {
-    Success,
-    Failure,
-    CaughtMutant,
-    MissedMutant,
-    Timeout,
-    Unviable,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct MutationReceipt {
-    scenario: MutationScenario,
-    summary: MutationSummary,
-    phase_results: Vec<MutationPhaseReceipt>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct MutationReport {
-    outcomes: Vec<MutationReceipt>,
-    total_mutants: u64,
-    missed: u64,
-    caught: u64,
-    timeout: u64,
-    unviable: u64,
-    success: u64,
-    end_time: Option<String>,
-    cargo_mutants_version: String,
-}
-
-fn mutation_phases(
-    phases: &[MutationPhaseReceipt],
-) -> Result<(
-    proof_budget_rules::MutationPhase,
-    Option<proof_budget_rules::MutationPhase>,
-)> {
-    match phases {
-        [
-            MutationPhaseReceipt {
-                phase: MutationStage::Build,
-                process_status,
-            },
-        ] => Ok((process_status.phase()?, None)),
-        [
-            MutationPhaseReceipt {
-                phase: MutationStage::Build,
-                process_status: build,
-            },
-            MutationPhaseReceipt {
-                phase: MutationStage::Test,
-                process_status: test,
-            },
-        ] => Ok((build.phase()?, Some(test.phase()?))),
-        _ => anyhow::bail!("mutation phases are missing, duplicated, or out of order"),
-    }
-}
+use dotfiles::verification::mutation::{
+    MutationIdentity, MutationReport, MutationScenario, MutationSummary,
+};
 
 fn validate_mutation_report(
     inventory: &[MutationIdentity],
@@ -2190,91 +2135,13 @@ fn validate_mutation_report(
     status: Option<i32>,
     package: &str,
 ) -> Result<MutationReport> {
-    use proof_budget_rules::{MutationOutcome, MutationPhase, mutation_exit, mutation_outcome};
-    ensure!(
-        report.cargo_mutants_version == MUTANTS_VERSION
-            && report
-                .end_time
-                .as_deref()
-                .is_some_and(|end| !end.is_empty()),
-        "mutation execution is incomplete or its version differs"
-    );
-    let expected: BTreeSet<_> = inventory
-        .iter()
-        .map(|mutant| mutant.name.as_str())
-        .collect();
-    ensure!(
-        !expected.is_empty()
-            && expected.len() == inventory.len()
-            && inventory
-                .iter()
-                .all(|mutant| !mutant.name.is_empty() && mutant.package == package),
-        "mutation inventory is empty, duplicated, or names another package"
-    );
-    let mut actual = BTreeSet::new();
-    let mut counts = [0u64; 4];
-    let mut baseline = false;
-    for outcome in &report.outcomes {
-        let (build, test) = mutation_phases(&outcome.phase_results)?;
-        let MutationScenario::Mutant(mutant) = &outcome.scenario else {
-            ensure!(
-                !baseline
-                    && build == MutationPhase::Passed
-                    && test == Some(MutationPhase::Passed)
-                    && outcome.summary == MutationSummary::Success,
-                "mutation baseline is missing, duplicated, or failed"
-            );
-            baseline = true;
-            continue;
-        };
-        ensure!(
-            baseline,
-            "mutation scenarios precede their successful baseline"
-        );
-        ensure!(
-            mutant.package == package
-                && expected.contains(mutant.name.as_str())
-                && actual.insert(mutant.name.as_str()),
-            "mutation outcome has an unexpected or duplicate identity"
-        );
-        let result = mutation_outcome(build, test)
-            .context("mutation outcome has no completed test or failed build")?;
-        let summary = match result {
-            MutationOutcome::Caught => MutationSummary::CaughtMutant,
-            MutationOutcome::Missed => MutationSummary::MissedMutant,
-            MutationOutcome::TimedOut => MutationSummary::Timeout,
-            MutationOutcome::Unviable => MutationSummary::Unviable,
-        };
-        ensure!(
-            outcome.summary == summary,
-            "mutation summary contradicts its phase results"
-        );
-        let count = counts
-            .get_mut(result as usize)
-            .context("unknown mutation result")?;
-        *count = count.checked_add(1).context("mutation count overflow")?;
-    }
-    ensure!(
-        baseline && actual == expected,
-        "mutation execution omitted its baseline or selected mutants"
-    );
-    ensure!(
-        report.success == 0
-            && [
-                report.caught,
-                report.missed,
-                report.timeout,
-                report.unviable
-            ] == counts,
-        "mutation counters contradict the completed scenarios"
-    );
-    let exit = mutation_exit(report.total_mutants, counts)
-        .context("mutation total disagrees with completed scenarios")?;
-    ensure!(
-        status == Some(exit),
-        "mutation process exit contradicts its complete results"
-    );
-    Ok(report)
+    dotfiles::verification::mutation::validate_mutation_report(
+        inventory,
+        report,
+        status,
+        package,
+        MUTANTS_VERSION,
+    )
 }
 
 fn mutation_names(report: &MutationReport, summary: MutationSummary) -> Vec<String> {
@@ -3223,6 +3090,77 @@ fn execute_rules(prepared: PreparedRules) -> Result<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_proofs_run_their_subjects_without_unrelated_driver_experiments() {
+        use std::cell::Cell;
+        let subjects = Cell::new(false);
+        run_kani_checks(
+            KaniScope::Selected,
+            || anyhow::bail!("an unrelated driver experiment ran"),
+            || anyhow::bail!("an unrelated subject experiment ran"),
+            || {
+                subjects.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(subjects.get());
+        assert!(
+            run_kani_checks(
+                KaniScope::Selected,
+                || Ok(()),
+                || Ok(()),
+                || anyhow::bail!("selected subject failed")
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("selected subject failed")
+        );
+    }
+
+    #[test]
+    fn full_proofs_require_both_driver_controls_before_running_subjects() {
+        use std::cell::{Cell, RefCell};
+        let phases = RefCell::new(Vec::new());
+        run_kani_checks(
+            KaniScope::All,
+            || {
+                phases.borrow_mut().push("driver");
+                Ok(())
+            },
+            || {
+                phases.borrow_mut().push("regressions");
+                Ok(())
+            },
+            || {
+                phases.borrow_mut().push("subjects");
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(*phases.borrow(), ["driver", "regressions", "subjects"]);
+        for driver_fails in [false, true] {
+            let entered = Cell::new(false);
+            assert!(
+                run_kani_checks(
+                    KaniScope::All,
+                    || if driver_fails {
+                        anyhow::bail!("driver failed")
+                    } else {
+                        Ok(())
+                    },
+                    || anyhow::bail!("regression failed"),
+                    || {
+                        entered.set(true);
+                        Ok(())
+                    },
+                )
+                .is_err()
+            );
+            assert!(!entered.get());
+        }
+    }
 
     #[test]
     fn an_incomplete_harness_preserves_every_individual_outcome() {

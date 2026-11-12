@@ -20,6 +20,11 @@ path = "src/bin/ssh-keygen.rs"
 name = "hook_exec_count"
 harness = false
 
+[[test]]
+name = "assurance"
+test = false
+harness = false
+
 [dependencies]
 anyhow = "1.0"
 blake3 = "=1.8.7"
@@ -29,18 +34,25 @@ dotguard = { path = "../dotguard" }
 flate2 = "1.1.10"
 model = { path = "../model" }
 platform = { path = "../platform" }
+percent-encoding = "2.3"
 prose = { path = "../prose" }
+pulldown-cmark = "0.13"
+quote = "1.0.47"
 rules = { path = "../rules" }
 same-file = "=1.0.6"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.11.0"
 skill-ops = { path = "../skill-ops" }
+syn = { version = "2.0.119", features = ["full", "visit-mut"] }
 tempfile = "3.27"
 tar = { version = "0.4.46", default-features = false }
 toml = "1.0"
 url = "2.5"
 yaml-rust2 = "0.13"
+
+[dev-dependencies]
+regex = "=1.13.1"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1.5", features = ["fs"] }

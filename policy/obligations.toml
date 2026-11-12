@@ -6,6 +6,95 @@
 
 [[obligation]]
 verifier = "kani"
+source = "crates/rules/src/third_party_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_inheriting_an_extra_upstream_occurrence() {
+    let mut remaining = 0;
+    assert!(production::consume(&mut remaining));
+}
+#[kani::proof]
+fn reject_accepting_an_escaping_publisher_member() {
+    assert!(production::normalized_relative(b"../escape"));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/verification_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_unresolved_dependency_source() {
+    assert!(production::unresolved_source_requires_production(false, false, true));
+}
+#[kani::proof]
+fn reject_unresolved_verification_source() {
+    assert!(production::unresolved_source_requires_production(true, true, true));
+}
+#[kani::proof]
+fn reject_resolved_production_source() {
+    assert!(production::unresolved_source_requires_production(true, false, false));
+}
+#[kani::proof]
+fn reject_a_module_with_a_production_owner() {
+    assert!(production::verification_module(2, 1, false));
+}
+#[kani::proof]
+fn reject_a_module_without_an_owner() {
+    assert!(production::verification_module(0, 0, false));
+}
+#[kani::proof]
+fn reject_an_empty_native_witness() {
+    assert!(production::native_assertion_witness(1, 1, 0, true));
+}
+#[kani::proof]
+fn reject_failed_checks_as_successful() {
+    assert!(production::native_assertion_witness(1, 0, 1, true));
+}
+#[kani::proof]
+fn reject_configuration_changed_behavior() {
+    assert!(production::configuration_admitted(production::ConfigurationSource::Rust, false));
+}
+#[kani::proof]
+fn reject_untyped_config_source() {
+    assert!(production::configuration_admitted(production::ConfigurationSource::Executable, true));
+}
+#[kani::proof]
+fn reject_a_changed_verifier_definition() {
+    assert!(production::coverage_extension(false, true));
+}
+#[kani::proof]
+fn reject_missing_existing_subjects() {
+    assert!(production::coverage_extension(true, false));
+}
+#[kani::proof]
+fn reject_missing_verification() {
+    assert_eq!(production::completion(1, 0, true, true), production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_stale_results() {
+    assert_eq!(production::completion(1, 1, false, true), production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_missing_tdd_order() {
+    assert_eq!(production::completion(1, 1, true, false), production::Verdict::Admit);
+}
+#[kani::proof]
+fn reject_effects_without_fault_injection() {
+    assert_eq!(production::required(production::Risk::Effects) & production::Method::Fault.bit(), 0);
+}
+#[kani::proof]
+fn reject_aliasing_method_flags() {
+    assert_eq!(production::Method::Test.bit(), production::Method::Proof.bit());
+}
+#[kani::proof]
+fn reject_a_green_run_before_its_required_test_phase() {
+    assert!(production::ordered(production::TestHistory { expected: production::TestOutcome::Failed, actual: production::TestOutcome::Failed, completed: true, matching_source: true, matching_test: true, before: 2, after: 1 }));
+}
+'''
+
+[[obligation]]
+verifier = "kani"
 source = "crates/rules/src/editorial_rules.rs"
 probes = '''
 #[kani::proof]
@@ -777,6 +866,16 @@ fn reject_admitting_a_mise_owned_directory_option() {
 }
 #[kani::proof]
 #[kani::unwind(64)]
+fn reject_refusing_a_supported_mise_exec_option() {
+    assert!(production::mise_prefix(&["x", "--locked", "rust@1.99.0", "--", "cargo", "--version"]) == production::CommandPrefix::Unknown);
+}
+#[kani::proof]
+#[kani::unwind(64)]
+fn reject_admitting_a_directory_option_beside_a_supported_mise_option() {
+    assert!(matches!(production::mise_prefix(&["exec", "--locked", "rust@1.99.0", "--cd=dir", "--", "cargo"]), production::CommandPrefix::Child { .. }));
+}
+#[kani::proof]
+#[kani::unwind(64)]
 fn reject_admitting_an_unknown_wrapper_option() {
     assert!(matches!(production::wrapper_prefix(production::WrapperKind::Env, &["--unknown", "bash", "check.sh"]), production::CommandPrefix::Child { .. }));
 }
@@ -871,6 +970,18 @@ fn reject_an_accepted_record_that_later_records_changed() {
 #[kani::proof]
 fn reject_a_new_record_that_takes_the_next_number() {
     assert!(identity(Some(production::LAST_NUMBERED + 1), false) == Identity::Numbered);
+}
+#[kani::proof]
+fn reject_an_adr_over_its_word_budget() {
+    assert!(production::content_verdict(production::Content { words: production::RECORD_WORD_LIMIT + 1, characters: 0, complete: true }) == production::ContentVerdict::Admit);
+}
+#[kani::proof]
+fn reject_an_adr_over_its_character_budget() {
+    assert!(production::content_verdict(production::Content { words: 0, characters: production::RECORD_CHARACTER_LIMIT + 1, complete: true }) == production::ContentVerdict::Admit);
+}
+#[kani::proof]
+fn reject_an_incomplete_adr() {
+    assert!(production::content_verdict(production::Content { words: 0, characters: 0, complete: false }) == production::ContentVerdict::Admit);
 }
 '''
 
@@ -2121,11 +2232,11 @@ fn reject_marking_a_partial_report_ready() {
 }
 #[kani::proof]
 fn reject_a_report_that_lacks_a_required_check_as_complete() {
-    assert!(report(3, 0, 0, 1) == Report::Complete);
+    assert!(report(0, 0, 1) == Report::Complete);
 }
 #[kani::proof]
 fn reject_a_report_with_an_unfinished_check_as_complete() {
-    assert!(report(3, 1, 0, 0) == Report::Complete);
+    assert!(report(1, 0, 0) == Report::Complete);
 }
 #[kani::proof]
 fn reject_keeping_a_moved_head_ready() {
@@ -2265,40 +2376,28 @@ fn reject_a_filename_prefix_being_registered_as_a_directory() {
     assert!(production::registered_path(b"crates/a", b"crates/another.rs"));
 }
 #[kani::proof]
-fn reject_ready_local_creation() {
-    assert_eq!(production::plan(production::Operation::Create, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Success), Ok(production::Effect::CreateReady));
+fn reject_ready_creation() {
+    assert_ne!(production::plan(production::Operation::Create, true, false, production::IssueGate::Linked, production::Checks::Success), Ok(production::Effect::CreateDraft));
 }
 #[kani::proof]
 fn reject_creation_without_a_personal_issue() {
-    assert!(production::plan(production::Operation::Create, production::Generation::Coderabbit, true, false, production::issue_gate(true, false, false), production::Checks::Success).is_ok());
-}
-#[kani::proof]
-fn reject_unfinished_summary_as_review_exclusion() {
-    assert!(production::coderabbit_body_marker_allowed(false, true, false));
+    assert!(production::plan(production::Operation::Create, true, false, production::issue_gate(true, false, false), production::Checks::Success).is_ok());
 }
 #[kani::proof]
 fn reject_ready_with_unfinished_checks() {
-    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, true, production::IssueGate::Linked, production::Checks::Incomplete), Ok(production::Effect::Ready));
+    assert_eq!(production::plan(production::Operation::Ready, true, true, production::IssueGate::Linked, production::Checks::Incomplete), Ok(production::Effect::Ready));
 }
 #[kani::proof]
 fn reject_blaming_checks_for_a_published_pr() {
-    assert_eq!(production::plan(production::Operation::Ready, production::Generation::Local, true, false, production::IssueGate::Linked, production::Checks::Incomplete), Err(production::Blocker::UnfinishedChecks));
+    assert_eq!(production::plan(production::Operation::Ready, true, false, production::IssueGate::Linked, production::Checks::Incomplete), Err(production::Blocker::UnfinishedChecks));
 }
 #[kani::proof]
 fn reject_paused_review_request() {
-    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Ready, production::Generation::Local, true, false, false)));
-}
-#[kani::proof]
-fn reject_paused_exclusion_removal() {
-    assert!(production::review_request_allowed(true, production::requests_review(production::Operation::Edit, production::Generation::Local, false, true, false)));
+    assert!(production::review_request_allowed(true, true));
 }
 #[kani::proof]
 fn reject_pause_exclusion_as_standing() {
     assert_eq!(production::review_requirement(false, production::exclusion(true, true)), production::ReviewRequirement::Excluded);
-}
-#[kani::proof]
-fn reject_standing_exclusion_when_ready_during_the_pause() {
-    assert!(production::keeps_pause_exclusion(production::Operation::Ready, true, production::Exclusion::None, production::exclusion(true, false)));
 }
 fn state(lifecycle: production::Lifecycle, behind: bool, checks: production::HeadChecks, exclusion: production::Exclusion) -> production::MergeState {
     production::MergeState { lifecycle, conflict: false, behind, checks, clean: true, exclusion }
@@ -2732,8 +2831,8 @@ fn reject_substituting_a_cli_review_for_a_critical_change() {
     assert_eq!(production::route(production::ReviewLevel::Critical), production::ReviewRoute::Cli);
 }
 #[kani::proof]
-fn reject_a_high_change_spending_the_pr_review_pool() {
-    assert_eq!(production::route(production::ReviewLevel::High), production::ReviewRoute::Pr);
+fn reject_skipping_review_for_a_high_change() {
+    assert_eq!(production::route(production::ReviewLevel::High), production::ReviewRoute::None);
 }
 #[kani::proof]
 fn reject_suppressing_review_under_the_repository_pr_policy() {
@@ -4451,3 +4550,37 @@ schema = "schemas/vendor/opencode-theme.schema.json.gz"
 encoded_sha256 = "6fd84b36e5d6dab4823122d5803ecd6f30d8ce4382e3064d14f83efab4f1f37d"
 sha256 = "315b18b00549814b545841c32170d9922127faf307d4e66d62299443268ef244"
 targets = [".config/opencode/themes/tokyonight.json"]
+[[obligation]]
+verifier = "kani"
+source = "crates/rules/src/figure_migration_rules.rs"
+probes = '''
+#[kani::proof]
+fn reject_retirement_without_a_matching_token() {
+    assert!(production::permits_retirement(production::ScopeMatch::Different, production::ScopeMatch::Exact));
+}
+#[kani::proof]
+fn reject_retirement_outside_the_permitted_request() {
+    assert!(production::permits_retirement(production::ScopeMatch::Exact, production::ScopeMatch::Different));
+}
+#[kani::proof]
+fn reject_retiring_a_branch_with_references() {
+    assert!(production::may_retire(production::Mode::Apply, production::Evidence {
+        archive: production::Verification::Complete, inventory: production::Verification::Complete, documents: production::Verification::Complete,
+        remaining_references: 1, branch: production::BranchIdentity::Unchanged,
+    }));
+}
+#[kani::proof]
+fn reject_retiring_without_a_verified_archive() {
+    assert!(production::may_retire(production::Mode::Apply, production::Evidence {
+        archive: production::Verification::Missing, inventory: production::Verification::Complete, documents: production::Verification::Complete,
+        remaining_references: 0, branch: production::BranchIdentity::Unchanged,
+    }));
+}
+#[kani::proof]
+fn reject_read_only_retirement() {
+    assert!(production::may_retire(production::Mode::Plan, production::Evidence {
+        archive: production::Verification::Complete, inventory: production::Verification::Complete, documents: production::Verification::Complete,
+        remaining_references: 0, branch: production::BranchIdentity::Unchanged,
+    }));
+}
+'''

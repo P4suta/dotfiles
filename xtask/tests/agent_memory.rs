@@ -170,6 +170,7 @@ fn render_merged_with_mode(
         ".chezmoitemplates/partials/ps_quote",
         ".chezmoitemplates/partials/codex_runtime_hook",
         ".chezmoitemplates/partials/codex_notify",
+        ".chezmoitemplates/partials/onepassword_mcp_command",
         ".chezmoitemplates/partials/without_skill_ops_hooks",
         ".chezmoitemplates/partials/without_runtime_handlers",
         ".chezmoitemplates/partials/skill_ops_experimental",
@@ -320,7 +321,14 @@ fn claude_application_keeps_existing_preferences_and_enforces_managed_policy() {
         ))
         .unwrap();
         for (key, value) in preferences.as_object().unwrap() {
-            assert_eq!(&rendered[key], value, "{profile}: {key}");
+            let mut actual = rendered[key].clone();
+            if key == "enabledPlugins" {
+                actual
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("1password@1password");
+            }
+            assert_eq!(&actual, value, "{profile}: {key}");
         }
         assert_eq!(rendered["autoMemoryEnabled"], json!(false));
         assert_eq!(rendered["permissions"]["defaultMode"], json!("auto"));
@@ -477,7 +485,7 @@ fn codex_runtime_hooks_have_native_windows_commands() {
             .filter(|hook| hook["command"].as_str().is_some_and(runs_the_runtime))
             .collect();
         // Windows adds the process-start probe at session start.
-        let expected = if profile == "windows" { 10 } else { 9 };
+        let expected = if profile == "windows" { 8 } else { 7 };
         assert_eq!(handlers.len(), expected, "{profile}: {rendered}");
         for handler in handlers {
             assert_eq!(

@@ -49,10 +49,12 @@ fn copy_opencode_templates(destination: &Path) -> Result<()> {
             fs::copy(entry.path(), target.join(entry.file_name()))?;
         }
     }
-    let partial = ".chezmoitemplates/partials/domyjob_mcp";
-    let target = destination.join(partial);
-    fs::create_dir_all(target.parent().context("partial parent is missing")?)?;
-    fs::copy(source().join(partial), target)?;
+    for partial in ["domyjob_mcp", "onepassword_mcp_command"] {
+        let relative = Path::new(".chezmoitemplates/partials").join(partial);
+        let target = destination.join(&relative);
+        fs::create_dir_all(target.parent().context("partial parent is missing")?)?;
+        fs::copy(source().join(relative), target)?;
+    }
     fs::write(destination.join("chezmoi.toml"), "")?;
     Ok(())
 }
@@ -504,16 +506,23 @@ fn opencode_context7_requires_a_local_linux_desktop() -> Result<()> {
     } else {
         "1password"
     });
+    let server = bin.join(if cfg!(windows) {
+        "1password-mcp.exe"
+    } else {
+        "1password-mcp"
+    });
     let app = temporary.path().join("1Password.app");
     let ssh = ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"];
     for native in [false, true] {
         if native {
             fs::create_dir(&app)?;
-            fs::write(&desktop, "")?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&desktop, fs::Permissions::from_mode(0o755))?;
+            for program in [&desktop, &server] {
+                fs::write(program, "")?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(program, fs::Permissions::from_mode(0o755))?;
+                }
             }
         }
         for os in ["linux", "darwin", "windows"] {
@@ -553,6 +562,17 @@ fn opencode_context7_requires_a_local_linux_desktop() -> Result<()> {
                     document.get("plugin"),
                     expected
                         .then(|| serde_json::json!(["@upstash/context7-opencode"]))
+                        .as_ref(),
+                    "os={os}, native={native}, ssh={mask}"
+                );
+                let mcp_available =
+                    matches!(os, "linux" | "darwin") && native && matches!(mask, 0 | 8);
+                assert_eq!(
+                    document.pointer("/mcp/1password"),
+                    mcp_available
+                        .then(|| serde_json::json!({
+                            "type": "local", "command": [server], "enabled": true,
+                        }))
                         .as_ref(),
                     "os={os}, native={native}, ssh={mask}"
                 );

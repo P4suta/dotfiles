@@ -1,70 +1,38 @@
 ---
 name: apple-platform-guidelines
 description: >-
-  Ground every iOS, iPadOS, macOS, watchOS, and visionOS app decision in Apple's primary guidance, cite it, and record deliberate deviations.
-  Use for the design, copy, networking, background work, logging, privacy, and distribution of an Apple-platform app; use apple-signing and apple-notarization for release signing.
+  Ground Apple-platform app decisions in primary guidance and route platform-specific work to the relevant references.
+  Use for shared interface, privacy, networking, diagnostics, and distribution decisions; use macos-platform-guidelines for desktop behavior.
 ---
 
 # Apple platform guidelines
 
-Before a decision about an iOS, iPadOS, macOS, watchOS, or visionOS app, read Apple's primary source for that topic.
-Cite its exact URL in the issue, PR, ADR, or code comment that carries the decision.
-Follow the source unless the owner overrides it, and record a deliberate deviation beside the decision with its reason.
-Mark what the source leaves open as unknown and settle it on a device.
-Apply `monochrome-design` and `source-bound-interface-design` inside these rules, such as Dark Mode that inverts black and white.
+Read Apple's current primary source before choosing app behavior.
+Cite the exact page beside the decision in an issue, PR, design record, or source comment.
+Distinguish platform requirements, Apple recommendations, and project choices.
+Check the deployment target, SDK availability, and distribution channel for each rule.
+Record deliberate departures with their reason and verification limits.
 
-## Read the sources
+For macOS, load [macOS platform guidelines](../macos-platform-guidelines/SKILL.md).
+For iOS, iPadOS, tvOS, watchOS, or visionOS, read [platform behavior](references/platform-behavior.md).
+Read [shared sources](references/shared-sources.md) for feedback, privacy, logging, localization, or networking decisions.
+Read [interface tests on a simulator](references/ui-testing.md) before writing or filtering UI tests.
+For an artifact that takes Apple's system design by explicit choice, load [liquid-glass-design](../liquid-glass-design/SKILL.md).
+Apply `source-bound-interface-design` and the owner's visual preferences within the current artifact's explicit requirements.
+Prefer native system behavior when the artifact calls for standard platform colors, selection, materials, or accessibility accommodations.
+Preserve system-owned chrome and the platform's default control metrics and placement.
+Keep app content enlargement separate from window and navigation controls owned by the system.
 
-The Human Interface Guidelines and the documentation pages render with JavaScript, so a plain fetch returns little more than the title.
-Read the DocC JSON behind a page, and cite the page's own address.
+Apple documentation supports a Markdown view at the page URL with `.md` appended.
+If unavailable, read the DocC JSON at `https://developer.apple.com/tutorials/data/documentation/PATH.json`, or `https://developer.apple.com/tutorials/data/design/human-interface-guidelines/PAGE.json` for a design page.
+Cite the human-readable page URL and report an unread source as unavailable.
 
-| Page | DocC JSON |
-| --- | --- |
-| `https://developer.apple.com/design/human-interface-guidelines/PAGE` | `https://developer.apple.com/tutorials/data/design/human-interface-guidelines/PAGE.json` |
-| `https://developer.apple.com/documentation/PATH` | `https://developer.apple.com/tutorials/data/documentation/PATH.json` |
+When changing platform guidance, compare user outcomes and failure conditions with `android-platform-guidelines` when available.
+Transfer questions about denial, recovery, cancellation, accessibility, and sensitive diagnostics only after reading the destination platform's primary source.
+Keep platform APIs, lifecycle contracts, dimensions, and distribution exceptions with their own platform.
+Record a concrete gap and its supporting sources without requiring a change when existing guidance already covers the outcome.
 
-`xh GET JSON_URL | jaq -r '.. | objects | select(.type? == "text") | .text'` prints the text of a page.
-
-## Ground rules
-
-People expect an action to succeed and need to know when it doesn't.
-Show a message when the person waits and progress has stopped, when something they did failed, or when they can fix the cause.
-Stay silent about a failure that the app recovers from without changing what people see.
-Show status that needs no action passively in its context, never in a modal dialog.
-Say what happened and what the person can do, in plain words without blame or jargon, and never with a bare "Error" title or a code.
-Label the cancel button of a dialog with the platform's own word for Cancel in the app's language.
-
-Respect Dark Mode, scale text and the sizes that should follow it with Dynamic Type and `@ScaledMetric`, and declare a launch screen.
-
-Keep App Transport Security's local-networking exception in development configurations.
-Share a URL session for related tasks instead of one session per request.
-Set `waitsForConnectivity` for a transfer the person started, let an automatic transfer fail fast, and keep automatic transfers off expensive and constrained paths.
-
-Wrap work that must finish in `beginBackgroundTask`, and release file and database locks before the handler that ends the background time returns.
-Schedule a periodic check with `BGAppRefreshTask`.
-
-Log with `Logger` at Apple's levels, and keep interpolated values private in shipped builds.
-Declare each required-reason API in the privacy manifest, or avoid the API.
-Mark intervals worth measuring in Instruments with signposts.
-Decide per app whether it needs a String Catalog, and record the reason when it skips one.
-
-## Sources
-
-| Topic | Source |
-| --- | --- |
-| Feedback | <https://developer.apple.com/design/human-interface-guidelines/feedback> |
-| Alerts | <https://developer.apple.com/design/human-interface-guidelines/alerts> |
-| Writing | <https://developer.apple.com/design/human-interface-guidelines/writing> |
-| Dark Mode | <https://developer.apple.com/design/human-interface-guidelines/dark-mode> |
-| Dynamic Type | <https://developer.apple.com/design/human-interface-guidelines/typography> and <https://developer.apple.com/documentation/swiftui/scaledmetric> |
-| Launch screen | <https://developer.apple.com/documentation/xcode/specifying-your-apps-launch-screen> |
-| Local networking | <https://developer.apple.com/documentation/bundleresources/information-property-list/nsapptransportsecurity/nsallowslocalnetworking> |
-| URL sessions | <https://developer.apple.com/documentation/foundation/urlsession> |
-| Waiting for connectivity | <https://developer.apple.com/documentation/foundation/urlsessionconfiguration/waitsforconnectivity> |
-| Expensive paths | <https://developer.apple.com/documentation/foundation/urlrequest/allowsexpensivenetworkaccess> |
-| Background time | <https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time> and <https://developer.apple.com/documentation/xcode/sigkill> |
-| Background tasks | <https://developer.apple.com/documentation/backgroundtasks/choosing-background-strategies-for-your-app> |
-| Logging | <https://developer.apple.com/documentation/os/generating-log-messages-from-your-code> and <https://developer.apple.com/documentation/os/logger> |
-| Required-reason APIs | <https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api> |
-| Signposts | <https://developer.apple.com/documentation/os/recording-performance-data> |
-| String Catalogs | <https://developer.apple.com/documentation/xcode/localizing-and-varying-text-with-a-string-catalog> |
+Use `formal-assurance` for deterministic properties and `development-assurance` for framework boundaries.
+Distinguish proofs, host tests, simulator observations, and physical-device results.
+Bind empirical evidence to the source, built artifact, OS release, architecture, permission state, and relevant device configuration.
+Missing target-platform acceptance remains missing evidence.

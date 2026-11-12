@@ -1630,6 +1630,152 @@ fn http_backend_report() -> serde_json::Value {
 }
 
 #[test]
+fn renovate_preserves_literal_http_download_sizes() {
+    let (repository, _, initial) = renovate_fixture("renovate-http-size-literals");
+    for size in ["37881954", "\"37881954\"", "\"18446744073709551615\""] {
+        let manifest = format!("{HTTP_MANIFEST}size = {size}\n");
+        let offered = changed_file(&repository, "mise.toml", &manifest, &initial);
+        let output = report_gate(&repository, &initial, &offered, &http_backend_report());
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    for size in [
+        "-1",
+        "\"-1\"",
+        "\"\"",
+        "\"1.5\"",
+        "\"18446744073709551616\"",
+        "true",
+        "[]",
+    ] {
+        let manifest = format!("{HTTP_MANIFEST}size = {size}\n");
+        let offered = changed_file(&repository, "mise.toml", &manifest, &initial);
+        assert_eq!(
+            refusal(&report_gate(
+                &repository,
+                &initial,
+                &offered,
+                &http_backend_report()
+            ))
+            .rule,
+            "push.evidence"
+        );
+    }
+}
+
+const HTTP_TAG_MANIFEST: &str = r#"[tools."http:libwebp"]
+version = "1.6.0"
+version_list_url = "https://api.github.com/repos/webmproject/libwebp/tags"
+version_json_path = ".[].name"
+version_order = "semver"
+strip_components = 1
+bin_path = "bin"
+
+[tools."http:libwebp".platforms.macos-arm64]
+url = "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-{{ version }}-mac-arm64.tar.gz"
+
+[tools."http:libwebp".platforms.windows-x64]
+url = "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-{{ version }}-windows-x64.zip"
+"#;
+
+fn http_tag_report() -> serde_json::Value {
+    let mut report = http_backend_report();
+    let native = &mut report["repositories"]["local"]["packageFiles"]["mise"][0]["deps"][0];
+    native["depName"] = "http:libwebp".into();
+    native["packageName"] = "http:libwebp".into();
+    let counterpart = &mut report["repositories"]["local"]["packageFiles"]["jsonata"][0]["deps"][0];
+    counterpart["depName"] = "http:libwebp".into();
+    counterpart["packageName"] = "webmproject/libwebp".into();
+    counterpart["datasource"] = "github-tags".into();
+    counterpart["currentValue"] = "1.6.0".into();
+    counterpart["currentVersion"] = "v1.6.0".into();
+    report
+}
+
+#[test]
+fn renovate_binds_http_tag_lookups_to_platform_downloads() {
+    let (repository, _, initial) = renovate_fixture("renovate-http-tags");
+    let before = changed_file(
+        &repository,
+        "mise.toml",
+        &HTTP_TAG_MANIFEST.replace("1.6.0", "1.5.0"),
+        &initial,
+    );
+    let offered = changed_file(&repository, "mise.toml", HTTP_TAG_MANIFEST, &before);
+    let mut report = http_tag_report();
+    let output = report_gate(&repository, &before, &offered, &report);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    report["repositories"]["local"]["packageFiles"]["jsonata"][0]["deps"][0]["updates"] =
+        serde_json::json!([{"updateType":"minor","newValue":"1.7.0"}]);
+    assert_eq!(
+        refusal(&report_gate(&repository, &before, &offered, &report)).rule,
+        "push.dependencies"
+    );
+    let comment = changed_file(
+        &repository,
+        "mise.toml",
+        &format!("{HTTP_TAG_MANIFEST}# a comment\n"),
+        &offered,
+    );
+    assert!(
+        report_gate(&repository, &offered, &comment, &report)
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn renovate_refuses_misbound_http_tag_discovery() {
+    let (repository, _, initial) = renovate_fixture("renovate-http-tag-rejections");
+    for manifest in [
+        HTTP_TAG_MANIFEST.replace("api.github.com", "example.invalid"),
+        HTTP_TAG_MANIFEST.replace("repos/webmproject/libwebp", "repos/other/project"),
+        HTTP_TAG_MANIFEST.replace(".[].name", ".[].tag_name"),
+        HTTP_TAG_MANIFEST.replace("version_order = \"semver\"", "version_order = \"lexical\""),
+        HTTP_TAG_MANIFEST.replace("version_order = \"semver\"\n", ""),
+        HTTP_TAG_MANIFEST.replace("strip_components = 1", "strip_components = -1"),
+        HTTP_TAG_MANIFEST.replace("bin_path = \"bin\"", "bin_path = 1"),
+        HTTP_TAG_MANIFEST.replace(".platforms.macos-arm64", ".platforms.unknown"),
+        HTTP_TAG_MANIFEST.replace("url = \"https:", "unknown = \"https:"),
+    ] {
+        let offered = changed_file(&repository, "mise.toml", &manifest, &initial);
+        assert_eq!(
+            refusal(&report_gate(
+                &repository,
+                &initial,
+                &offered,
+                &http_tag_report()
+            ))
+            .rule,
+            "push.evidence"
+        );
+    }
+    let offered = changed_file(&repository, "mise.toml", HTTP_TAG_MANIFEST, &initial);
+    for (field, value) in [
+        ("datasource", serde_json::json!("github-releases")),
+        ("packageName", serde_json::json!("other/project")),
+        ("currentValue", serde_json::json!("1.5.0")),
+        ("currentVersion", serde_json::json!("v1.5.0")),
+        ("warnings", serde_json::json!([{}])),
+        ("skipReason", serde_json::json!("ignored")),
+    ] {
+        let mut report = http_tag_report();
+        report["repositories"]["local"]["packageFiles"]["jsonata"][0]["deps"][0][field] = value;
+        assert_eq!(
+            refusal(&report_gate(&repository, &initial, &offered, &report)).rule,
+            "push.evidence"
+        );
+    }
+}
+
+#[test]
 fn renovate_binds_http_release_lookups_and_still_blocks_changed_table_versions() {
     let (repository, _, initial) = renovate_fixture("renovate-http-release");
     let before = changed_file(
@@ -2883,6 +3029,113 @@ fn a_rewrite_is_refused_with_the_integration_step_and_a_bypass_for_exactly_that_
         refused.bypass.as_deref(),
         Some("ALLOW_FORCE=1 git push --force-with-lease origin refs/heads/main:refs/heads/main")
     );
+}
+
+#[test]
+fn a_figure_retirement_permit_admits_only_its_exact_remote_update() {
+    let (repository, base) = published("figure-retirement");
+    let permit = repository
+        .path()
+        .join(".git/dotguard-figure-retirement.json");
+    std::fs::write(
+        &permit,
+        serde_json::to_vec(&serde_json::json!({
+            "token":"retirement-token", "remote":"origin", "branch":"diagrams", "oid":base,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let deletion = format!("(delete) {ZERO} refs/heads/diagrams {base}\n");
+    let token = [("DOTGUARD_FIGURE_RETIREMENT", "retirement-token")];
+    assert_eq!(
+        refusal(&repository.dotguard(&["pre-push", "origin"], &deletion, &[])).rule,
+        "push.history"
+    );
+    let permitted = repository.dotguard_with(&["pre-push", "origin"], &deletion, &[], &token);
+    assert!(
+        permitted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&permitted.stderr)
+    );
+    for (remote, input) in [
+        ("other", deletion.clone()),
+        (
+            "origin",
+            format!("(delete) {ZERO} refs/heads/screenshots {base}\n"),
+        ),
+        (
+            "origin",
+            format!(
+                "(delete) {ZERO} refs/heads/diagrams {}\n",
+                "a".repeat(ZERO.len())
+            ),
+        ),
+        (
+            "origin",
+            format!("{deletion}(delete) {ZERO} refs/heads/topic {base}\n"),
+        ),
+    ] {
+        assert_eq!(
+            refusal(&repository.dotguard_with(&["pre-push", remote], &input, &[], &token)).rule,
+            "push.history"
+        );
+    }
+    let wrong = [("DOTGUARD_FIGURE_RETIREMENT", "other-token")];
+    assert_eq!(
+        refusal(&repository.dotguard_with(&["pre-push", "origin"], &deletion, &[], &wrong)).rule,
+        "push.history"
+    );
+    std::fs::remove_file(&permit).unwrap();
+    assert_eq!(
+        refusal(&repository.dotguard_with(&["pre-push", "origin"], &deletion, &[], &token)).rule,
+        "push.history"
+    );
+}
+
+#[test]
+fn verified_figure_retirement_requires_no_worktree_or_dependency_lookup() {
+    let (repository, base) = published("figure-retirement-bare-policy");
+    repository.git(&["config", "core.bare", "true"]);
+    std::fs::write(
+        repository
+            .path()
+            .join(".git/dotguard-figure-retirement.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "token":"retirement-token", "remote":"origin", "branch":"diagrams", "oid":base,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let deletion = format!("(delete) {ZERO} refs/heads/diagrams {base}\n");
+    let token = [("DOTGUARD_FIGURE_RETIREMENT", "retirement-token")];
+    let permitted = repository.dotguard_with(&["renovate-gate", "origin"], &deletion, &[], &token);
+    assert!(
+        permitted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&permitted.stderr)
+    );
+    for (remote, input, context) in [
+        ("origin", deletion.clone(), "other-token"),
+        ("other", deletion.clone(), "retirement-token"),
+        (
+            "origin",
+            format!("(delete) {ZERO} refs/heads/screenshots {base}\n"),
+            "retirement-token",
+        ),
+        (
+            "origin",
+            format!("{deletion}(delete) {ZERO} refs/heads/topic {base}\n"),
+            "retirement-token",
+        ),
+    ] {
+        let variables = [("DOTGUARD_FIGURE_RETIREMENT", context)];
+        assert!(
+            !repository
+                .dotguard_with(&["renovate-gate", remote], &input, &[], &variables)
+                .status
+                .success()
+        );
+    }
 }
 
 /// The stack tooling pushes a rewrite while it holds the lease, and never a deletion.

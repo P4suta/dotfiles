@@ -4,6 +4,7 @@ use anyhow::{Context, Result, ensure};
 use dotfiles::assure::{self, Catalog, Kind};
 use dotfiles::refusal::Refusal;
 use dotfiles::shape_rules::{Cause, Verdict};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write as _;
 use std::path::Path;
@@ -18,10 +19,136 @@ mod incident_fixture;
 #[path = "support/catalog.rs"]
 mod hook_catalog;
 
+#[path = "support/configuration.rs"]
+mod configuration;
+
 fn catalog() -> Result<Catalog> {
     assure::catalog(
         &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/assure/shapes.toml"),
     )
+}
+
+#[test]
+fn adr_gates_preserve_untouched_history_and_refuse_an_oversize_change() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let record = "docs/adr/bound-the-retry-queue.md";
+    fixture.write(record, &"Historical detail.\n".repeat(200))?;
+    fixture.commit("historical decision")?;
+    let catalog = fixture.catalog()?;
+    assert!(
+        assure::stop(&fixture.root, &catalog)?
+            .refusal(&catalog)
+            .is_none()
+    );
+    fixture.write(record, &"Changed detail.\n".repeat(201))?;
+    let error = assure::stop(&fixture.root, &catalog).unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<Refusal>()
+            .unwrap()
+            .text()
+            .contains("ADR.WordBudget"),
+        "{error:#}"
+    );
+    fixture.stage()?;
+    let error = assure::commit(&fixture.root, &catalog).unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<Refusal>()
+            .unwrap()
+            .text()
+            .contains("ADR.WordBudget"),
+        "{error:#}"
+    );
+    fixture.commit("changed decision")?;
+    let base = fixture.git(&["rev-parse", "HEAD^"])?;
+    let head = fixture.git(&["rev-parse", "HEAD"])?;
+    let error = assure::ready(&fixture.root, &catalog, &base, &head).unwrap_err();
+    assert!(
+        error
+            .downcast_ref::<Refusal>()
+            .unwrap()
+            .text()
+            .contains("ADR.WordBudget"),
+        "{error:#}"
+    );
+    Ok(())
+}
+
+#[test]
+fn adr_stop_hook_returns_a_block_and_external_repositories_keep_their_rules() -> Result<()> {
+    let fixture = Fixture::new()?;
+    fixture.write("docs/adr/queue.md", &"Unnecessary detail.\n".repeat(201))?;
+    let home = fixture.scope.path().join("home");
+    hook_catalog::install(&home)?;
+    let output = fixture.agent(&home, &["assure", "stop"], &serde_json::json!({}))?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(response["decision"], "block", "{response}");
+    assert!(
+        response["reason"]
+            .as_str()
+            .unwrap()
+            .contains("ADR.WordBudget"),
+        "{response}"
+    );
+    fixture.git(&[
+        "remote",
+        "set-url",
+        "origin",
+        "https://github.com/example/fixture.git",
+    ])?;
+    let output = fixture.agent(&home, &["assure", "stop"], &serde_json::json!({}))?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout)?,
+        serde_json::json!({})
+    );
+    Ok(())
+}
+
+#[test]
+fn managed_reply_retains_adr_content_without_an_optional_catalog_or_request() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let home = fixture.scope.path().join("home");
+    configuration::copy(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/prose"),
+        &home.join(".config/prose"),
+    )?;
+    let path = "docs/adr/bound-the-queue.md";
+    let valid = "# Bound the queue\n\n## Context\nRequests can exhaust memory.\n\n## Decision\nRetain one request.\n\n## Alternatives\nAn unlimited queue can exhaust memory.\n\n## Consequences\nOlder requests are lost.\n\n## Confirmation\nCheck the queue bound.\n";
+    for source in [
+        "Detail.\n".repeat(201),
+        valid.replace("Retain one request.", ""),
+    ] {
+        fixture.write(path, &source)?;
+        let output = fixture.agent(&home, &["assure", "reply"], &serde_json::json!({}))?;
+        ensure!(output.status.success(), "{output:?}");
+        let reply: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(reply["decision"], "block", "{reply}");
+        assert!(
+            reply["reason"].as_str().unwrap().contains("ADR."),
+            "{reply}"
+        );
+    }
+    fixture.write(path, valid)?;
+    let output = fixture.agent(&home, &["assure", "reply"], &serde_json::json!({}))?;
+    ensure!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout)?,
+        serde_json::json!({})
+    );
+    assert!(!home.join(".config/assure").exists());
+    assert!(!home.join(".local/state/dotfiles/answers").exists());
+    Ok(())
 }
 
 struct Fixture {
@@ -163,6 +290,232 @@ const TARGET: &str = "#![no_main]\nlibfuzzer_sys::fuzz_target!(|data: &[u8]| {})
 const OWNERS: &str =
     "[[owner]]\nshape = \"parser\"\npath = \"src/lib.rs\"\nby = \"fuzz/fuzz_targets/parse.rs\"\n";
 
+fn assert_cross_family_overlap_refused(fixture: &Fixture, home: &Path) -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let content = fs::read(fixture.root.join("vendor/publisher/src/lib.rs"))?;
+    let digest = platform::build_inputs::hex(&Sha256::digest(&content));
+    fixture.write(
+        "publisher.sha256",
+        &format!("{digest}  vendor/publisher/src/lib.rs\n"),
+    )?;
+    let registry = home.join(".config/dotfiles/upstream.json");
+    let before = fs::read(&registry)?;
+    let overlapping = fixture.agent(
+        home,
+        &[
+            "upstream",
+            "register-files",
+            "--directory",
+            "vendor/publisher/src",
+            "--manifest",
+            "publisher.sha256",
+            "--origin",
+            "https://example.com/publisher",
+        ],
+        &serde_json::json!({}),
+    )?;
+    assert!(!overlapping.status.success(), "{overlapping:?}");
+    assert!(String::from_utf8_lossy(&overlapping.stderr).contains("overlap"));
+    assert_eq!(fs::read(registry)?, before);
+    Ok(())
+}
+
+fn assert_registered_catalog_keeps_non_git_lint(fixture: &Fixture, home: &Path) -> Result<()> {
+    let root = fixture.scope.path().join("plain project");
+    fs::create_dir(&root)?;
+    fs::create_dir(root.join(".git"))?;
+    fs::write(root.join("ruff.toml"), "line-length = 88\n")?;
+    let event = serde_json::json!({
+        "tool_name": "Write", "cwd": root, "tool_input": {"file_path": "probe.py"}
+    });
+    fs::write(root.join("probe.py"), "import os\n")?;
+    let blocked = fixture.agent(home, &["lint-hook"], &event)?;
+    assert!(
+        String::from_utf8_lossy(&blocked.stdout).contains("F401"),
+        "{blocked:?}"
+    );
+    fs::write(
+        root.join("probe.py"),
+        "# Copyright (c) 2026 Fixture.\n\"\"\"A checked fixture module.\"\"\"\n",
+    )?;
+    let clean = fixture.agent(home, &["lint-hook"], &event)?;
+    assert!(clean.status.success(), "{clean:?}");
+    assert!(
+        !String::from_utf8_lossy(&clean.stdout).contains("block"),
+        "{clean:?}"
+    );
+    Ok(())
+}
+
+fn assert_corrupted_registration_blocks_lint(fixture: &Fixture, home: &Path) -> Result<()> {
+    fs::write(
+        fixture.root.join("vendor/publisher/upstream.crate"),
+        b"changed archive",
+    )?;
+    let event = serde_json::json!({
+        "tool_name": "Write", "cwd": fixture.root,
+        "tool_input": {"file_path": "vendor/publisher/src/lib.rs"}
+    });
+    let corrupted = fixture.agent(home, &["lint-hook"], &event)?;
+    assert!(
+        String::from_utf8_lossy(&corrupted.stdout).contains("upstream archive identity changed"),
+        "{corrupted:?}"
+    );
+    fs::write(
+        home.join(".config/dotfiles/upstream.json"),
+        b"invalid registry",
+    )?;
+    let malformed = fixture.agent(home, &["lint-hook"], &event)?;
+    assert!(
+        String::from_utf8_lossy(&malformed.stdout).contains("block"),
+        "{malformed:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn registered_upstream_preserves_original_findings_but_rejects_local_additions() -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let fixture = Fixture::unborn()?;
+    let home = fixture.scope.path().join("home");
+    hook_catalog::install(&home)?;
+    let original = format!("// Publisher first. Publisher second.\n{PARSER}");
+    fixture.write("vendor/publisher/src/lib.rs", &original)?;
+    let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
+        Vec::new(),
+        flate2::Compression::default(),
+    ));
+    let mut header = tar::Header::new_gnu();
+    header.set_size(u64::try_from(original.len())?);
+    header.set_mode(0o644);
+    header.set_cksum();
+    archive.append_data(
+        &mut header,
+        "publisher-1.0.0/src/lib.rs",
+        original.as_bytes(),
+    )?;
+    let bytes = archive.into_inner()?.finish()?;
+    fs::write(fixture.root.join("vendor/publisher/upstream.crate"), &bytes)?;
+    fixture.stage()?;
+    let denied = fixture.agent(&home, &["assure", "stop"], &serde_json::json!({}))?;
+    assert!(
+        String::from_utf8_lossy(&denied.stdout).contains("parser has no owner"),
+        "{denied:?}"
+    );
+    let digest = platform::build_inputs::hex(&Sha256::digest(&bytes));
+    let registered = fixture.agent(
+        &home,
+        &[
+            "upstream",
+            "register-archive",
+            "--directory",
+            "vendor/publisher",
+            "--archive",
+            "vendor/publisher/upstream.crate",
+            "--prefix",
+            "publisher-1.0.0",
+            "--sha256",
+            &digest,
+            "--origin",
+            "https://crates.io/crates/publisher/1.0.0",
+        ],
+        &serde_json::json!({}),
+    )?;
+    assert!(registered.status.success(), "{registered:?}");
+    assert_registered_catalog_keeps_non_git_lint(&fixture, &home)?;
+    assert_cross_family_overlap_refused(&fixture, &home)?;
+    let admitted = fixture.agent(&home, &["assure", "stop"], &serde_json::json!({}))?;
+    assert!(admitted.status.success(), "{admitted:?}");
+    assert!(
+        !String::from_utf8_lossy(&admitted.stdout).contains("parser has no owner"),
+        "{admitted:?}"
+    );
+    let tidy = fixture.agent(
+        &home,
+        &[
+            "upstream",
+            "tidy",
+            "--staged",
+            "vendor/publisher/src/lib.rs",
+        ],
+        &serde_json::json!({}),
+    )?;
+    assert!(tidy.status.success(), "{tidy:?}");
+    assert_eq!(
+        fs::read_to_string(fixture.root.join("vendor/publisher/src/lib.rs"))?,
+        original
+    );
+    fixture.write(
+        "vendor/publisher/src/lib.rs",
+        &original.replace("text.parse().ok()", "None"),
+    )?;
+    fixture.stage()?;
+    let changed_parser = fixture.agent(&home, &["assure", "stop"], &serde_json::json!({}))?;
+    assert!(
+        String::from_utf8_lossy(&changed_parser.stdout).contains("parser has no owner"),
+        "{changed_parser:?}"
+    );
+    fixture.write(
+        "vendor/publisher/src/lib.rs",
+        &format!(
+            "{original}\n{}",
+            PARSER.replace("pub fn parse", "pub fn decode")
+        ),
+    )?;
+    fixture.stage()?;
+    let denied = fixture.agent(&home, &["assure", "stop"], &serde_json::json!({}))?;
+    assert!(
+        String::from_utf8_lossy(&denied.stdout).contains("parser has no owner"),
+        "{denied:?}"
+    );
+    assert_corrupted_registration_blocks_lint(&fixture, &home)?;
+    Ok(())
+}
+
+#[test]
+fn preserved_members_accept_uppercase_digests_without_admitting_changed_bytes() -> Result<()> {
+    use sha2::{Digest, Sha256};
+    let fixture = Fixture::unborn()?;
+    let home = fixture.scope.path().join("home");
+    hook_catalog::install(&home)?;
+    let path = "vendor/publisher/src/lib.rs";
+    fixture.write(path, PARSER)?;
+    let digest = platform::build_inputs::hex(&Sha256::digest(PARSER.as_bytes()));
+    fixture.write(
+        "publisher.sha256",
+        &format!("{}  {path}\n", digest.to_ascii_uppercase()),
+    )?;
+    fixture.stage()?;
+    let registered = fixture.agent(
+        &home,
+        &[
+            "upstream",
+            "register-files",
+            "--directory",
+            "vendor/publisher",
+            "--manifest",
+            "publisher.sha256",
+            "--origin",
+            "https://example.com/publisher",
+        ],
+        &serde_json::json!({}),
+    )?;
+    assert!(registered.status.success(), "{registered:?}");
+    let admitted = fixture.agent(&home, &["assure", "stop"], &serde_json::json!({}))?;
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&admitted.stdout)?,
+        serde_json::json!({})
+    );
+    fixture.write(path, &PARSER.replace("text.parse().ok()", "None"))?;
+    fixture.stage()?;
+    let changed = fixture.agent(&home, &["assure", "stop"], &serde_json::json!({}))?;
+    assert!(
+        String::from_utf8_lossy(&changed.stdout).contains("parser has no owner"),
+        "{changed:?}"
+    );
+    Ok(())
+}
+
 #[test]
 fn managed_requests_ignore_existing_work_and_still_refuse_changed_gaps() -> Result<()> {
     for unborn in [false, true] {
@@ -219,6 +572,7 @@ fn managed_requests_ignore_existing_work_and_still_refuse_changed_gaps() -> Resu
         assert_eq!(fs::read(&index_path)?, index_bytes);
         assert_eq!(assure::resolve(&fixture.root, "HEAD")?, head);
         assert_eq!(stop("確認しました。")?, serde_json::json!({}));
+        assert_eq!(stop("The work is complete.")?["decision"], "block");
         fixture.write("ignored/extra.rs", &PARSER.replace("parse", "parse_extra"))?;
         fixture.write("README.md", "changed during the request\n")?;
         assert_eq!(stop("確認しました。")?, serde_json::json!({}));
@@ -240,7 +594,6 @@ fn managed_requests_ignore_existing_work_and_still_refuse_changed_gaps() -> Resu
         );
         begin()?;
         assert_eq!(stop("確認しました。")?, serde_json::json!({}));
-        assert_eq!(stop("The work is complete.")?["decision"], "block");
     }
     Ok(())
 }
@@ -408,6 +761,42 @@ fn an_unowned_parser_is_refused_at_every_point_and_admitted_once_its_fuzz_target
 }
 
 const OWNERS_PATH: &str = "assure.toml";
+
+#[test]
+fn owner_inputs_bind_absent_and_local_maps_to_their_current_bytes() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    let absent = BTreeSet::from(["owner map: no owner map; sha256=absent".to_owned()]);
+    assert_eq!(assure::stop(&fixture.root, &catalog)?.inputs.owners, absent);
+
+    let path = fixture.owners("")?;
+    for (text, sha256) in [
+        (
+            "",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        ),
+        (
+            "\n",
+            "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+        ),
+        (
+            "",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        ),
+    ] {
+        fs::write(&path, text)?;
+        let outcome = assure::stop(&fixture.root, &catalog)?;
+        assert_eq!(outcome.verdict, Verdict::Admit);
+        assert_eq!(
+            outcome.inputs.owners,
+            BTreeSet::from([format!("owner map: {}; sha256={sha256}", path.display())])
+        );
+    }
+
+    fs::remove_file(&path)?;
+    assert_eq!(assure::stop(&fixture.root, &catalog)?.inputs.owners, absent);
+    Ok(())
+}
 
 #[test]
 fn an_owner_side_map_takes_precedence_over_every_project_revision() -> Result<()> {

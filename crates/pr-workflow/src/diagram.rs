@@ -1,18 +1,10 @@
-//! Black-and-white D2 diagrams that personal PR and issue bodies show from the repository's `diagrams` branch.
+//! Black-and-white D2 diagrams prepared locally for document attachments.
 
 use crate::figure;
 use anyhow::{Context, Result, ensure};
-use pulldown_cmark::{Event, Tag, TagEnd};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
-
-/// The branch of a personal repository that holds each rendered diagram beside its full source.
-const BRANCH: &str = "diagrams";
-/// The extension of a stored diagram image.
-const IMAGE_EXTENSION: &str = ".svg";
-/// The hexadecimal digits of a diagram name: a SHA-256 digest of its full source.
-const NAME_DIGITS: usize = 64;
 
 /// The configuration that starts every source: the layered layout of the Eclipse Layout Kernel and a theme whose every color is black or white.
 const HEADER: &str = r##"vars: {
@@ -255,64 +247,11 @@ fn svg_gaps(svg: &str) -> Vec<String> {
     gaps
 }
 
-/// Whether an image address names a stored diagram of the repository.
-fn stored_image(repository: &str, address: &str) -> bool {
-    figure::stored_name(repository, BRANCH, address)
-        .and_then(|file| file.strip_suffix(IMAGE_EXTENSION))
-        .is_some_and(|name| {
-            name.len() == NAME_DIGITS
-                && name
-                    .chars()
-                    .all(|digit| digit.is_ascii_digit() || ('a'..='f').contains(&digit))
-        })
-}
-
-/// Whether a body shows, outside comments and code, a described diagram that the repository stores.
-pub(crate) fn shown(repository: &str, body: &str) -> bool {
-    let mut image: Option<(bool, String)> = None;
-    for event in pulldown_cmark::Parser::new(body) {
-        match event {
-            Event::Start(Tag::Image { dest_url, .. }) => {
-                image = Some((stored_image(repository, &dest_url), String::new()));
-            }
-            Event::Text(text) | Event::Code(text) => {
-                if let Some((_, description)) = image.as_mut() {
-                    description.push_str(&text);
-                }
-            }
-            Event::End(TagEnd::Image)
-                if image.take().is_some_and(|(stored, description)| {
-                    stored && !description.trim().is_empty()
-                }) =>
-            {
-                return true;
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
-/// The refusal for a personal body without a stored diagram.
-pub(crate) fn missing(repository: &str) -> crate::Refusal {
-    crate::Refusal::new(
-        "pr.diagram",
-        "a PR or issue in a personal repository shows its change as a black-and-white D2 diagram",
-        format!(
-            "pr-workflow diagram --repo {repository} --source FILE.d2 --alt TEXT, then paste the printed image line into the body"
-        ),
-    )
-    .evidence(format!(
-        "the body shows no described image from {}",
-        figure::prefix(repository, BRANCH)
-    ))
-}
-
-/// Renders a source in black and white, stores it on the repository's `diagrams` branch, and returns the body's image line.
+/// Renders a source in black and white and returns its local reference and editable source.
 ///
 /// # Errors
-/// Returns a refusal for a source or image that leaves black and white, and an error when D2 or GitHub fails.
-pub(crate) fn publish(repository: &str, source_file: &Path, alt: &str) -> Result<String> {
+/// Returns a refusal for a source or image that leaves black and white, and an error when D2 or local storage fails.
+pub(crate) fn prepare(source_file: &Path, alt: &str) -> Result<String> {
     figure::check_alt(alt)?;
     let source = fs::read_to_string(source_file).context("read the UTF-8 D2 source")?;
     let gaps = source_gaps(&source);
@@ -356,55 +295,17 @@ pub(crate) fn publish(repository: &str, source_file: &Path, alt: &str) -> Result
             .fold(refusal, crate::Refusal::evidence)
             .into());
     }
-    let image = format!("{name}.svg");
-    figure::store(
-        repository,
-        BRANCH,
-        &[
-            figure::File {
-                name: image.clone(),
-                content: figure::Content::Text(&svg),
-            },
-            figure::File {
-                name: format!("{name}.d2"),
-                content: figure::Content::Text(&full),
-            },
-        ],
-    )?;
-    Ok(figure::image_line(repository, BRANCH, &image, alt))
+    let image = figure::cache(svg.as_bytes(), "svg")?;
+    Ok(format!(
+        "{}\n\n{}",
+        figure::image_line(&image, alt)?,
+        figure::source_details(&full)
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{HEADER, shown, source_gaps, svg_gaps};
-
-    const NAME: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-    fn line(repository: &str, alt: &str) -> String {
-        format!("![{alt}](https://github.com/{repository}/blob/diagrams/{NAME}.svg?raw=true)")
-    }
-
-    #[test]
-    fn a_body_shows_a_described_diagram_that_its_repository_stores() {
-        let body = format!("## Why\n\n{}\n", line("P4suta/project", "Flow"));
-        assert!(shown("P4suta/project", &body));
-        assert!(shown("p4suta/PROJECT", &body));
-    }
-
-    #[test]
-    fn foreign_undescribed_hidden_or_malformed_images_show_nothing() {
-        let foreign = line("someone/else", "Flow");
-        let bare = line("P4suta/project", "");
-        let commented = format!("<!-- {} -->", line("P4suta/project", "Flow"));
-        let fenced = format!("```\n{}\n```", line("P4suta/project", "Flow"));
-        let short = line("P4suta/project", "Flow").replace(NAME, "0123");
-        let upper = line("P4suta/project", "Flow").replace(NAME, &NAME.to_uppercase());
-        let png = line("P4suta/project", "Flow").replace(".svg", ".png");
-        let link = line("P4suta/project", "Flow").replacen('!', "", 1);
-        for body in [foreign, bare, commented, fenced, short, upper, png, link] {
-            assert!(!shown("P4suta/project", &body), "{body}");
-        }
-    }
+    use super::{HEADER, source_gaps, svg_gaps};
 
     /// D2 0.9.0 paints text, strokes, and connections with these theme colors, in `GetStroke` and `text.GetColor`.
     /// <https://github.com/terrastruct/d2/blob/v0.9.0/d2graph/d2graph.go>

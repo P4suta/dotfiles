@@ -1,13 +1,20 @@
 use serde_json::{Value, json};
+use std::ffi::OsStr;
 use std::io::Write;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 
-#[path = "../../platform/tests/support/fixture_process.rs"]
-mod fixture_process;
+#[path = "../../dotguard/tests/support/fixture_git.rs"]
+mod fixture_git;
+
+use fixture_git::fixture_process;
+
+fn fixture_command(program: impl AsRef<OsStr>, root: &Path) -> Command {
+    fixture_git::command(program, &root.join(".fixture-gitconfig"))
+}
 
 fn hook(root: &Path, command: &str, payload: &Value) -> (bool, String) {
-    let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), root)
+    let mut child = fixture_command(env!("CARGO_BIN_EXE_dotfiles"), root)
         .arg(command)
         .current_dir(root)
         .stdin(Stdio::piped())
@@ -34,6 +41,64 @@ fn hook(root: &Path, command: &str, payload: &Value) -> (bool, String) {
 
 fn write_event(root: &Path, path: &str) -> Value {
     json!({"hook_event_name":"PostToolUse", "cwd":root, "tool_name":"Write", "tool_input":{"file_path":path}})
+}
+
+fn init_repository(root: &Path) {
+    std::fs::create_dir_all(root).unwrap();
+    let output = fixture_git::command("git", &root.join(".fixture-gitconfig"))
+        .args(["init", "--quiet"])
+        .arg(root)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
+const CONCISE_ADR: &str = "---\nstatus: proposed\ndate: 2026-11-06\n---\n# Bound the retry queue\n\n## Context\nAn unavailable server can exhaust memory.\n\n## Decision\nKeep only the latest pending request.\n\n## Alternatives\nAn unlimited queue retains every request but can exhaust memory.\n\n## Consequences\nOlder pending requests are lost.\n\n## Confirmation\nDisconnect the server and verify that only one request remains queued.\n";
+
+#[test]
+fn an_adr_write_blocks_excess_length_and_admits_a_concise_record() {
+    let root = tempfile::tempdir().unwrap();
+    let relative = "docs/adr/bound-the-retry-queue.md";
+    let path = root.path().join(relative);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        format!("{CONCISE_ADR}{}", "More detail.\n".repeat(200)),
+    )
+    .unwrap();
+    let (_, blocked) = hook(
+        root.path(),
+        "lint-hook",
+        &write_event(root.path(), relative),
+    );
+    assert!(blocked.contains("ADR.WordBudget"), "{blocked}");
+    assert!(blocked.contains("\"decision\":\"block\""), "{blocked}");
+    std::fs::write(&path, CONCISE_ADR).unwrap();
+    let (success, clean) = hook(
+        root.path(),
+        "lint-hook",
+        &write_event(root.path(), relative),
+    );
+    assert!(success && !clean.contains("block"), "{clean}");
+}
+
+#[test]
+fn an_adr_write_blocks_empty_required_content() {
+    let root = tempfile::tempdir().unwrap();
+    let relative = "docs/adr/bound-the-retry-queue.md";
+    let path = root.path().join(relative);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        CONCISE_ADR.replace("Keep only the latest pending request.", ""),
+    )
+    .unwrap();
+    let (_, blocked) = hook(
+        root.path(),
+        "lint-hook",
+        &write_event(root.path(), relative),
+    );
+    assert!(blocked.contains("ADR.RequiredContent"), "{blocked}");
 }
 
 #[test]
@@ -86,7 +151,7 @@ fn a_workflow_finding_blocks() {
 #[test]
 fn a_repository_exclusion_is_admitted() {
     let root = tempfile::tempdir().unwrap();
-    std::fs::create_dir(root.path().join(".git")).unwrap();
+    init_repository(root.path());
     std::fs::write(root.path().join("ruff.toml"), "exclude = [\"probe.py\"]\n").unwrap();
     std::fs::write(root.path().join("probe.py"), "import os\n").unwrap();
     let (success, clean) = hook(
@@ -128,6 +193,17 @@ fn scripts_assigned_in_commands_are_linted_and_unresolved_paths_have_a_next_acti
 #[test]
 fn a_wrapped_comment_sentence_blocks_and_one_sentence_per_line_is_admitted() {
     let root = tempfile::tempdir().unwrap();
+    let config = root
+        .path()
+        .join(".fixture-gitconfig")
+        .with_extension("config-home")
+        .join("ocomment/config.toml");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(
+        config,
+        include_str!("../../../home/dot_config/ocomment/config.toml"),
+    )
+    .unwrap();
     let path = root.path().join("probe.rs");
     std::fs::write(
         &path,
@@ -171,7 +247,7 @@ fn unsupported_binary_files_stay_with_existing_gates() {
 #[test]
 fn repository_configs_are_respected_for_biome_taplo_and_shellcheck() {
     let root = tempfile::tempdir().unwrap();
-    std::fs::create_dir(root.path().join(".git")).unwrap();
+    init_repository(root.path());
     for (config, contents, path, source) in [
         (
             "biome.json",
@@ -204,7 +280,7 @@ fn biome_uses_the_project_installation_and_configuration_directory() {
     let scope = tempfile::tempdir().unwrap();
     let root = scope.path().join("project space 日本語");
     let bin = scope.path().join("bin");
-    std::fs::create_dir_all(root.join(".git")).unwrap();
+    init_repository(&root);
     std::fs::create_dir(&bin).unwrap();
     let executable = |name: &str| bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     let native = std::env::split_paths(&std::env::var_os("PATH").unwrap())
@@ -226,7 +302,7 @@ fn biome_uses_the_project_installation_and_configuration_directory() {
         }
         let mut directories = vec![bin.clone()];
         directories.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
-        let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), scope.path())
+        let mut child = fixture_command(env!("CARGO_BIN_EXE_dotfiles"), &root)
             .arg("lint-hook")
             .current_dir(&root)
             .env("PATH", std::env::join_paths(directories).unwrap())
@@ -346,7 +422,7 @@ impl ActionlintFixture<'_> {
         }
         let mut directories = vec![self.bin.to_path_buf()];
         directories.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
-        let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), self.scope)
+        let mut child = fixture_command(env!("CARGO_BIN_EXE_dotfiles"), self.root)
             .arg("lint-hook")
             .current_dir(self.root)
             .env("PATH", std::env::join_paths(directories).unwrap())
@@ -454,8 +530,8 @@ fn actionlint_uses_only_the_declared_project_installation() {
     let bin = scope.path().join("bin");
     let installation = scope.path().join("installed space 日本語");
     let action = root.join(".github/actions/probe/action.yml");
+    init_repository(&root);
     for directory in [
-        root.join(".git"),
         action.parent().unwrap().into(),
         bin.clone(),
         installation.clone(),
@@ -584,6 +660,7 @@ fn assignments_inside_scripts_and_all_invocation_forms_are_inspected() {
 #[test]
 fn configuration_outside_a_repository_cannot_disable_strict_defaults() {
     let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join(".git")).unwrap();
     std::fs::write(
         root.path().join("biome.json"),
         "{\"files\":{\"includes\":[\"**\",\"!probe.js\"]}}",
@@ -599,6 +676,20 @@ fn configuration_outside_a_repository_cannot_disable_strict_defaults() {
 }
 
 #[test]
+fn malformed_git_markers_cannot_select_repository_configuration() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join(".git"), "invalid gitfile\n").unwrap();
+    std::fs::write(root.path().join("probe.py"), "import os\n").unwrap();
+    let (_, blocked) = hook(
+        root.path(),
+        "lint-hook",
+        &write_event(root.path(), "probe.py"),
+    );
+    assert!(blocked.contains("block"), "{blocked}");
+    assert!(blocked.contains("invalid gitfile format"), "{blocked}");
+}
+
+#[test]
 fn opencode_blocks_a_shell_finding_and_admits_its_fix() {
     let root = tempfile::tempdir().unwrap();
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lint-adapter.ts");
@@ -607,7 +698,7 @@ fn opencode_blocks_a_shell_finding_and_admits_its_fix() {
         ("#!/bin/sh\nprintf '%s\\n' 'clean'\n", "clean"),
     ] {
         std::fs::write(root.path().join("probe.sh"), source).unwrap();
-        let output = fixture_process::command(platform::tool::Tool::Bun.executable(), root.path())
+        let output = fixture_command(platform::tool::Tool::Bun.executable(), root.path())
             .arg(&fixture)
             .arg(root.path())
             .arg(env!("CARGO_BIN_EXE_dotfiles"))

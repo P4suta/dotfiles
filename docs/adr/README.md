@@ -133,6 +133,26 @@
 | [2026-11-03 Carry issue contexts through leased restacks](carry-issue-contexts-through-leased-restacks.md) | accepted |  |
 | [2026-11-03 Keep the previous build running after a failed reinstall](keep-the-previous-build-running-after-a-failed-reinstall.md) | accepted |  |
 | [2026-11-03 Give each generated SSH host its own login](per-host-ssh-logins.md) | accepted |  |
-| [2026-11-04 Draw personal PRs and issues as monochrome D2 images](draw-personal-prs-and-issues-as-monochrome-d2-images.md) | accepted |  |
+| [2026-11-04 Draw personal PRs and issues as monochrome D2 images](draw-personal-prs-and-issues-as-monochrome-d2-images.md) | superseded | [2026-11-07](attach-figures-without-storage-branches.md) |
+| [2026-11-04 Preserve active tools behind managed guards](preserve-active-tools-behind-managed-guards.md) | proposed |  |
 | [2026-11-04 Require no CLI review for high PRs](require-no-cli-review-for-high-prs.md) | accepted |  |
+| [2026-11-05 Route desktop decisions through macOS guidance](route-desktop-decisions-through-macos-guidance.md) | accepted |  |
+| [2026-11-06 Admit configuration by unchanged executable tokens](admit-configuration-by-unchanged-executable-tokens.md) | proposed |  |
+| [2026-11-06 Classify Rust modules by every declaration](classify-rust-modules-by-every-declaration.md) | proposed |  |
+| [2026-11-06 Keep project checks authoritative in agent sessions](keep-project-checks-authoritative-in-agent-sessions.md) | proposed |  |
+| [2026-11-06 Read source-bound verifier receipts](read-source-bound-verifier-receipts.md) | proposed |  |
+| [2026-11-06 Enforce concise architecture decision records](require-evidence-before-accepting-architecture-decisions.md) | proposed |  |
+| [2026-11-06 Require verification results before implementation completion](require-verification-results-before-implementation-completion.md) | deprecated |  |
+| [2026-11-06 Verify preserved upstream before reusing findings](verify-preserved-upstream-before-reusing-findings.md) | proposed |  |
+| [2026-11-07 Attach figures without storage branches](attach-figures-without-storage-branches.md) | accepted |  |
+| [2026-11-07 Authorize verified figure retirement](authorize-verified-figure-retirement.md) | accepted |  |
+| [2026-11-07 Capture reusable knowledge as shared skills](capture-reusable-knowledge-as-shared-skills.md) | accepted |  |
+| [2026-11-07 Confirm verification with a short reason](confirm-verification-with-a-short-reason.md) | proposed |  |
+| [2026-11-07 Require applicable recommendations](require-applicable-recommendations.md) | proposed |  |
+| [2026-11-08 Sync stored credentials to protected GitHub environments](sync-stored-credentials-to-protected-github-environments.md) | proposed |  |
+| [2026-11-09 Bind tool lookups to discovery metadata](bind-http-tool-lookups-to-discovery-metadata.md) | proposed |  |
+| [2026-11-09 Use automatic CodeRabbit reviews without command generation](use-automatic-coderabbit-reviews-without-command-generation.md) | accepted |  |
+| [2026-11-09 Use CodeRabbit without importance opt-outs](use-coderabbit-without-importance-opt-outs.md) | accepted |  |
+| [2026-11-10 Bind official tarballs to npm workspace lockfiles](bind-official-tarballs-to-npm-workspace-lockfiles.md) | proposed |  |
+| [2026-11-10 Honor explicit merges during optional review pauses](honor-explicit-merges-during-optional-review-pauses.md) | accepted |  |
 | [2026-11-12 Verify declared `java` versions](verify-mise-java-sdk-pins.md) | proposed |  |

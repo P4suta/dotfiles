@@ -1,0 +1,1 @@
+{"version":1,"contracts":[{"path":"tests","change":"verification","risks":[],"checks":["tests"]}],"checks":[{"id":"tests","method":"test","tool":"dotfiles","arguments":["bounded","run","--image","sha256:5831cd854a776d2ef8ee586b5275111d81a7b94671494ecc1c418f2c3d6a13e0","--","cargo","test"],"report":"libtest","expected":["contract"]}]}

@@ -34,4 +34,4 @@ Reconsider when Renovate supports the declaration directly or the catalog change
 ## Confirmation
 
 Require successful and rejecting report fixtures, a real catalog lookup, and the helper's checked push.
-Owner review and verification remain pending.
+Owner acceptance remains pending.

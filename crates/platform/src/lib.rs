@@ -42,6 +42,8 @@ pub mod signed_git;
 #[cfg(feature = "tools")]
 pub mod source_identity;
 #[cfg(feature = "tools")]
+pub mod upstream;
+#[cfg(feature = "tools")]
 pub use rules::stale_rules;
 #[cfg(feature = "tools")]
 pub mod step;

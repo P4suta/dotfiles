@@ -24,11 +24,15 @@ Read the source and destination changes before applying them, including local ed
 Keep unrelated local work, and resolve a stale source or conflicting profile without resetting the checkout or replacing the host's whole configuration.
 Express shared intent in templates and data, with platform conditions only where the behavior needs them.
 Verify that each host renders its own paths and role.
+Run managed authoring tools from the reviewed checkout.
+An installed tool can delegate to the working copy's build when its embedded source differs, so an older checkout can select older policy.
 
 ## Apply and verify
 
 Use `domyjob run` from the intended checkout for the current source snapshot, and `domyjob on` to inspect the host's existing installation.
 Preview the affected targets in the host's native chezmoi context, and apply only the intended paths and setup actions.
+Name individual files or use `chezmoi diff --recursive` for a directory preview.
+A nonrecursive directory diff can omit changed files.
 Install shared skills through the scoped installer, and verify the canonical files and native client discovery entries on every affected host.
 Keep temporary snapshot paths out of permanent aliases, service configuration, and command entry points.
 Never turn a focused change into a full profile apply, bootstrap, system provisioning, or remote agent dispatch.
@@ -41,5 +45,7 @@ Use owner hosts only as optional caches for project verification.
 Check an authorized configuration rollout on its affected hosts.
 After applying, inspect the installed files and exercise the native command or discovery behavior without spending service allowance.
 Distinguish a rendered preview, a passing build, an applied configuration, and a verified installed runtime in the report.
+When importing a native manifest export, match every base file hash before editing and every rendered hash afterward.
+Keep Unix and Windows exports bound to their native generators.
 Report a failed or unreachable host as pending, and keep durable job identities while resolving it.
 Follow `coderabbit-review` for the final review.

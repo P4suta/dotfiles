@@ -1,13 +1,13 @@
 {
-  "revision": "45030ecc79cfd32b4aeef5246fba88ac3a990f7dc9718be743ad4e9cfca142dc",
+  "revision": "211ae77b699f5b95514598acb422affd883e3f6b3d3af35bd1ebc79e8898f83c",
   "outcome": "implemented",
-  "reason": "Run the fast deterministic gate on every change, and place proofs, Miri, fuzzing, mutation, stress repeats, and macOS and Windows runs at the release gate.\nPer-change selection still ran heavy campaigns on most product pushes and pull requests and stalled daily development.",
+  "reason": "Run applicable local checks before pushing and preserve required hosted gates and publication holds.\nInspect automatic review state without manual commands or a full-review prerequisite.\nHonor explicit merges during unavailable optional CodeRabbit review.",
   "evidence": [
+    "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "home/dot_agents/skills/ci-budget/SKILL.md",
-    "home/dot_agents/skills/ci-budget/references/lean-workflows.md",
-    "docs/adr/run-heavy-verification-at-the-release-gate.md",
-    "crates/dotfiles/src/hosts.rs",
-    "docs/adr/0020-os-family-push-evidence.md"
+    "home/dot_agents/skills/development-assurance/references/verification-contract.md",
+    "crates/dotfiles/src/verification/mod.rs",
+    "docs/adr/keep-project-checks-authoritative-in-agent-sessions.md"
   ],
   "revisit": null
 }

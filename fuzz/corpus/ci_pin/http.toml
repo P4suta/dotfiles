@@ -1,4 +1,8 @@
 [tools."http:winappcli"]
 version = "0.5.0"
+url = "https://github.com/microsoft/winappCli/releases/download/v{{ version }}/winappcli-x64.zip"
+checksum = "sha256:88735ce6c2582ac5fac6200194bf62467fdd72b44b2d230f3a4ed059fa79ee7d"
+size = "37881954"
+os = ["windows/x64"]
 version_list_url = "https://api.github.com/repos/microsoft/winappCli/releases/latest"
 version_json_path = ".tag_name"

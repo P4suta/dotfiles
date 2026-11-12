@@ -1,0 +1,1 @@
+phase=verification name=core-proofs args=["kani", "-p", "device-core"] source_sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

@@ -1,8 +1,13 @@
 {
-  "revision": "daf87162a821b27bfea3d117453260506e31bc1831b71137434182d261b2dd11",
+  "revision": "e76d68571e57da129367af73b72723bb0fd8d4b352808569aa54268e4e7168d1",
   "outcome": "implemented",
-  "reason": "Use signed importance with an optional owner-local repository policy that selects PR review for every level.\nKeep service setup separate from findings and preserve separate pool capacity, adaptive thresholds, billing controls, and owner-controlled pauses.\nThe local policy selects a review route without claiming effective service configuration or allowance.\nThe CodeRabbit CLI has no review allowance, so the guard enforces its local limits and refuses paid reviews without a usage query.",
+  "reason": "Use automatic incremental PR reviews without a full-review prerequisite.\nKeep account, billing, configuration, and capacity work scoped to explicit service tasks.\nHonor explicit merges during unavailable optional review and preserve subscription limits.",
   "evidence": [
+    "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
+    "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
+    "docs/adr/use-coderabbit-without-importance-opt-outs.md",
+    "docs/coderabbit/organization.yaml",
+    "docs/coderabbit/global-overrides.yaml",
     "home/dot_agents/skills/coderabbit/SKILL.md",
     "home/dot_agents/skills/pull-request/references/importance.md",
     "docs/adr/route-coderabbit-by-current-pr-importance.md",

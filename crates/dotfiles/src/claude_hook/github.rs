@@ -1,5 +1,7 @@
 //! Inspects the exact literal arguments of GitHub publication commands.
 
+mod attachments;
+
 use crate::body_rules::{
     EscapeStep, Quote, RestArgument, RestRead, WordStep, escape_step, rest_read, word_step,
 };
@@ -187,6 +189,7 @@ pub(crate) enum Body {
 enum Input {
     Text(String),
     File { path: String, json: bool },
+    Attachment(String),
 }
 
 struct Target<'a> {
@@ -420,7 +423,7 @@ fn target(arguments: &[String]) -> Result<Option<Target<'_>>> {
     if group == "release"
         && arguments
             .get(index)
-            .is_some_and(|verb| matches!(verb.as_str(), "view" | "list"))
+            .is_some_and(|verb| matches!(verb.as_str(), "view" | "list" | "upload" | "download"))
     {
         return Ok(None);
     }
@@ -497,6 +500,7 @@ fn target(arguments: &[String]) -> Result<Option<Target<'_>>> {
 
 enum ArgumentInput {
     Body(Input),
+    Attachment(String),
     Metadata,
     Unmatched,
 }
@@ -559,6 +563,12 @@ fn publication_input(target: &Target<'_>, index: &mut usize) -> Result<ArgumentI
     }
     if let Some(path) = option(target.arguments, index, "--body-file", Some("-F"))? {
         return Ok(ArgumentInput::Body(Input::File { path, json: false }));
+    }
+    if matches!(target.verb, "create" | "edit" | "comment")
+        && let Some(file) = option(target.arguments, index, "--attach", None)?
+    {
+        ensure!(!file.is_empty(), "GitHub attachment option has no file");
+        return Ok(ArgumentInput::Attachment(file));
     }
     if matches!(target.verb, "close" | "reopen")
         && let Some(text) = option(target.arguments, index, "--comment", Some("-c"))?
@@ -629,6 +639,8 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
     let mut found = Vec::new();
     let mut index = 0;
     let mut implicit = matches!(target.verb, "create" | "comment" | "review" | "edit");
+    let mut has_attachments = false;
+    let mut has_body = false;
     let mut review_approval = false;
     let mut review_comment = false;
     while index < target.arguments.len() {
@@ -642,7 +654,13 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
         reject_implicit_source(argument)?;
         match publication_input(target, &mut index)? {
             ArgumentInput::Body(input) => {
+                has_body = true;
                 found.push(input);
+                continue;
+            }
+            ArgumentInput::Attachment(value) => {
+                has_attachments = true;
+                found.push(Input::Attachment(value));
                 continue;
             }
             ArgumentInput::Metadata => continue,
@@ -709,7 +727,7 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
         implicit = !review_approval || review_comment;
     }
     ensure!(
-        !implicit || !found.is_empty(),
+        !(implicit || has_attachments) || has_body,
         "GitHub body depends on interactive or implicit input"
     );
     ensure!(
@@ -753,6 +771,82 @@ fn read_file(path: &str, directory: Option<&Path>) -> Result<String> {
     String::from_utf8(bytes).context("GitHub body input is not UTF-8")
 }
 
+fn resolve_publication(
+    selected: Publication,
+    stdin: Option<&str>,
+    directory: Option<&Path>,
+    files_safe: bool,
+) -> Result<Vec<Body>> {
+    let mut bodies = Vec::new();
+    let mut attachment_arguments = Vec::new();
+    let mut body_file = None;
+    for input in selected.inputs {
+        let (text, json) = match input {
+            Input::Text(text) => (text, false),
+            Input::Attachment(value) => {
+                attachment_arguments.push(value);
+                continue;
+            }
+            Input::File { path, json } if path == "-" => (
+                stdin
+                    .context("GitHub standard input is unavailable")?
+                    .to_owned(),
+                json,
+            ),
+            Input::File { path, json } => {
+                ensure!(
+                    files_safe && selected.direct,
+                    "GitHub file input has an uncertain execution context"
+                );
+                let text = read_file(&path, directory)?;
+                body_file = Some(path);
+                (text, json)
+            }
+        };
+        ensure!(
+            text.len() <= MAX_BODY_INPUT && !text.contains('\0'),
+            "GitHub body is oversized or contains NUL"
+        );
+        let texts = if json {
+            json_bodies(&text)?
+        } else {
+            vec![text]
+        };
+        bodies.extend(texts.into_iter().map(|text| Body::Text {
+            channel: selected.channel,
+            text,
+        }));
+        ensure!(
+            bodies.len() <= MAX_BODIES,
+            "GitHub body inspection exceeds its body-count limit"
+        );
+    }
+    if !attachment_arguments.is_empty() {
+        ensure!(
+            files_safe && selected.direct,
+            "GitHub attachment has an uncertain execution context"
+        );
+        let directory = directory
+            .filter(|path| path.is_absolute())
+            .context("GitHub attachment has no known execution directory")?;
+        let [Body::Text { text, .. }] = bodies.as_mut_slice() else {
+            anyhow::bail!("GitHub attachments require one explicit body");
+        };
+        let projected =
+            attachments::project(&attachment_arguments, text, body_file.as_deref(), directory)?;
+        ensure!(
+            projected.len() <= MAX_BODY_INPUT && !projected.contains('\0'),
+            "GitHub body is oversized or contains NUL"
+        );
+        *text = projected;
+        ensure!(
+            bodies.len() <= MAX_BODIES,
+            "GitHub body inspection exceeds its body-count limit"
+        );
+    }
+    Ok(bodies)
+}
+
 pub(crate) fn collect(
     words: &[String],
     spellings: Option<&[&str]>,
@@ -770,43 +864,7 @@ pub(crate) fn collect(
         let spellings = spellings.context("GitHub argument spelling is unavailable")?;
         let selected =
             decode(spellings)?.context("GitHub command identity changed during inspection")?;
-        let mut bodies = Vec::new();
-        for input in selected.inputs {
-            let (text, json) = match input {
-                Input::Text(text) => (text, false),
-                Input::File { path, json } if path == "-" => (
-                    stdin
-                        .context("GitHub standard input is unavailable")?
-                        .to_owned(),
-                    json,
-                ),
-                Input::File { path, json } => {
-                    ensure!(
-                        files_safe && selected.direct,
-                        "GitHub file input has an uncertain execution context"
-                    );
-                    (read_file(&path, directory)?, json)
-                }
-            };
-            ensure!(
-                text.len() <= MAX_BODY_INPUT && !text.contains('\0'),
-                "GitHub body is oversized or contains NUL"
-            );
-            let texts = if json {
-                json_bodies(&text)?
-            } else {
-                vec![text]
-            };
-            bodies.extend(texts.into_iter().map(|text| Body::Text {
-                channel: selected.channel,
-                text,
-            }));
-            ensure!(
-                bodies.len() <= MAX_BODIES,
-                "GitHub body inspection exceeds its body-count limit"
-            );
-        }
-        Ok(bodies)
+        resolve_publication(selected, stdin, directory, files_safe)
     };
     resolve().unwrap_or_else(|error| vec![Body::Unreadable(format!("{error:#}"))])
 }
@@ -926,6 +984,88 @@ mod tests {
             let bodies = collect(&words, None, None, None, false);
             assert!(bodies.is_empty(), "{arguments:?}: {bodies:?}");
         }
+    }
+
+    #[test]
+    fn release_asset_transfers_do_not_require_description_bodies() {
+        for arguments in [
+            vec!["gh", "release", "upload", "v0.1.0", "app.dmg"],
+            vec![
+                "gh",
+                "--repo",
+                "owner/repo",
+                "release",
+                "upload",
+                "v0.1.0",
+                "SHA256SUMS",
+            ],
+            vec![
+                "gh",
+                "release",
+                "--repo",
+                "owner/repo",
+                "download",
+                "v0.1.0",
+            ],
+            vec!["gh", "release", "download", "v0.1.0", "--dir", "download"],
+        ] {
+            let words: Vec<String> = arguments.iter().map(|word| (*word).to_owned()).collect();
+            let bodies = collect(&words, None, None, None, false);
+            assert!(bodies.is_empty(), "{arguments:?}: {bodies:?}");
+        }
+    }
+
+    #[test]
+    fn release_description_changes_and_unknown_operations_remain_refused() {
+        for verb in [
+            "create",
+            "edit",
+            "delete",
+            "delete-asset",
+            "unknown",
+            "Upload",
+            "upload-extra",
+        ] {
+            let words = [
+                "gh",
+                "release",
+                verb,
+                "v0.1.0",
+                "--notes",
+                "'Unchecked text.'",
+            ]
+            .map(str::to_owned);
+            assert!(
+                matches!(
+                    &collect(&words, None, None, None, false)[..],
+                    [Body::Unreadable(detail)] if detail.contains("GitHub command has no supported body contract")
+                ),
+                "{verb}"
+            );
+        }
+    }
+
+    #[test]
+    fn release_rest_descriptions_still_supply_their_prose_to_inspection() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let body = directory.path().join("notes.md");
+        std::fs::write(&body, "The release passed its checks.\n")?;
+        let words = [
+            "gh",
+            "api",
+            "repos/owner/repo/releases",
+            "--method",
+            "POST",
+            "-F",
+            "body=@notes.md",
+        ]
+        .map(str::to_owned);
+        let spellings: Vec<_> = words.iter().map(String::as_str).collect();
+        assert!(matches!(
+            &collect(&words, Some(&spellings), None, Some(directory.path()), true)[..],
+            [Body::Text { text, .. }] if text == "The release passed its checks.\n"
+        ));
+        Ok(())
     }
 
     #[test]
@@ -1249,5 +1389,57 @@ mod tests {
             "comments": (0..=MAX_BODIES).map(|_| serde_json::json!({"body": "Body."})).collect::<Vec<_>>()
         });
         assert!(json_bodies(&too_many.to_string()).is_err());
+    }
+
+    #[test]
+    fn appended_media_cannot_expand_the_body_input_budget() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(
+            directory.path().join("body.md"),
+            "x".repeat(MAX_BODY_INPUT - 10),
+        )?;
+        std::fs::write(directory.path().join("image.png"), b"fixture")?;
+        let spellings = [
+            "gh",
+            "pr",
+            "create",
+            "--body-file",
+            "body.md",
+            "--attach",
+            "image.png",
+        ];
+        let words: Vec<String> = spellings.iter().map(|word| (*word).to_owned()).collect();
+        let bodies = collect(&words, Some(&spellings), None, Some(directory.path()), true);
+        assert!(
+            matches!(&bodies[..], [Body::Unreadable(message)] if message.contains("oversized"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn attachment_files_need_a_known_execution_directory() {
+        let spellings = [
+            "gh",
+            "pr",
+            "create",
+            "--body",
+            "'The check passed.'",
+            "--attach",
+            "image.png",
+        ];
+        let words = [
+            "gh",
+            "pr",
+            "create",
+            "--body",
+            "The check passed.",
+            "--attach",
+            "image.png",
+        ]
+        .map(str::to_owned);
+        let bodies = collect(&words, Some(&spellings), None, None, true);
+        assert!(
+            matches!(&bodies[..], [Body::Unreadable(message)] if message.contains("known execution directory"))
+        );
     }
 }

@@ -19,6 +19,12 @@
 {{- $tool = printf "%s.exe" $tool -}}
 {{- $current = setValueAtPath "features.prefer_mxc" true $current -}}
 {{- end -}}
+{{- $onePassword := includeTemplate "partials/onepassword_mcp_command" . -}}
+{{- if $onePassword -}}
+{{- $current = setValueAtPath "mcp_servers.1password" (dict "command" $onePassword) $current -}}
+{{- else -}}
+{{- with get $current "mcp_servers" -}}{{- $_ := unset . "1password" -}}{{- end -}}
+{{- end -}}
 {{- $previous := dig "notify" (list) $current -}}
 {{- if kindIs "slice" $previous -}}
 {{- $notify := includeTemplate "partials/codex_notify" (dict "tool" $tool "previous" $previous) | fromJson -}}

@@ -291,6 +291,15 @@ fn history_refusal(remote: &str, problems: &[Problem]) -> Refusal {
 }
 
 fn judge(remote: &str, input: &str) -> i32 {
+    if crate::figure_retirement::update_permitted(remote, input) {
+        bypass::record(
+            "FIGURE_RETIREMENT",
+            Rule::Force,
+            "verified figure branch retirement",
+            &std::env::args().collect::<Vec<_>>(),
+        );
+        return 0;
+    }
     let mut problems: Vec<Problem> = Vec::new();
 
     for line in input.lines() {

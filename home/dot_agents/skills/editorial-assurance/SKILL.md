@@ -9,6 +9,8 @@ description: >-
 
 Deliver the requested text with its research and explanations completed.
 Preserve the writer's intended meaning, genre, audience, language, and house style.
+Select information from the recipient's task, existing knowledge, and requested depth.
+Use [product copy and operational notes](references/editorial-review.md#product-copy-and-operational-notes) for interface copy, store descriptions, review notes, and support instructions.
 Apply the owner's shared [Japanese and technical terminology policy](references/japanese-style.md) to replies, documents, comments, and authored artifacts.
 For policy changes, use ideal-specification to derive requirements from governing standards and intended outcomes.
 Keep enforceable requirements separate from examples and regression fixtures.
@@ -31,7 +33,7 @@ Keep necessary technical conditions and evidence-backed limitations.
 Preserve intentional voice in opinion, testimony, narrative, and creative work.
 
 Verify consequential claims using the source passage, its context, date, and applicable version.
-Keep a working claim ledger for research with the claim, source locator, relevant excerpt, and verification result.
+Check consequential claims with their sources without requiring a separate claim ledger.
 Put citations and necessary explanatory content beside the supported claims in the deliverable.
 Distinguish literal quotations, translations, adapted examples, and original observations.
 Use [checked-arguments](../checked-arguments/SKILL.md) for inference and [japanese-lexicon](../japanese-lexicon/SKILL.md) when introducing a reading or romanization.
@@ -42,6 +44,6 @@ Review diagnostics in context, repair real defects, and repeat the checks on the
 Review the finished text for source meaning, attribution, technical concepts, and natural expression even when the mechanical reports contain no findings.
 Inspect the intended rendered output and recheck changes made during proofreading.
 Supply the requested content and resolve material findings before concluding.
-Report a genuinely unavailable check in the delivery record without adding process boilerplate to the article.
+Resolve a required unavailable check or ask the user for the decision needed before claiming completion.
 Report editorial completion only after applying the relevant editorial criteria to the finished text.
 Test counts and clean mechanical reports don't supply an unperformed editorial review.

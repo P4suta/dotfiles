@@ -1,7 +1,7 @@
 {
-  "revision": "254fef764ac9a6ff9fd1a75a39475a95ae87307b62d4a433926f94562a90de03",
+  "revision": "1fecf3e70f6ab3ddc10d2876c3db0cbafb31603a11394c4edd61305044ffe5ff",
   "outcome": "implemented",
-  "reason": "Maintain the shared editorial, terminology, representation, and executable-example standards. Add stable public resource identities grounded in URI persistence and search documentation, with source-scope validation through the maintained publisher and explicit limits on mechanical evidence.",
+  "reason": "Choose product copy and operational notes from reader tasks, preserving exact UI labels in instructions, requested technical depth, and required disclosures.",
   "evidence": [
     "home/dot_agents/skills/editorial-assurance/SKILL.md",
     "home/dot_agents/skills/editorial-assurance/references/editorial-review.md",

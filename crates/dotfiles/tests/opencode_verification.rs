@@ -7,10 +7,58 @@ use std::path::Path;
 #[path = "../../dotguard/tests/support/fixture_git.rs"]
 mod fixture_git;
 
+#[path = "support/configuration.rs"]
+mod configuration;
+
+use configuration::copy as copy_tree;
+
 const PARSER: &str = "pub fn parse(text: &str) -> Option<u8> {\n    text.parse().ok()\n}\n";
 
 #[test]
-fn answer_evidence_reaches_the_native_checker_and_bounds_corrections() -> Result<()> {
+fn installed_opencode_api_registers_the_native_guards_and_preserves_session_boundaries()
+-> Result<()> {
+    let scope = tempfile::tempdir()?;
+    let root = scope.path().join("repository");
+    let home = scope.path().join("home");
+    fs::create_dir_all(&root)?;
+    fs::create_dir(&home)?;
+    copy_tree(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/assure"),
+        &home.join(".config/assure"),
+    )?;
+    copy_tree(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/prose"),
+        &home.join(".config/prose"),
+    )?;
+    let config = scope.path().join("gitconfig");
+    fs::write(
+        &config,
+        "[user]\n\tname = Fixture\n\temail = fixture@example.invalid\n[commit]\n\tgpgsign = false\n",
+    )?;
+    let initialized = fixture_git::command("git", &config)
+        .current_dir(&root)
+        .args(["init", "--quiet"])
+        .output()?;
+    ensure!(initialized.status.success(), "{initialized:?}");
+    let output = fixture_git::command("bun", &config)
+        .arg(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/opencode-native-adapter.ts"),
+        )
+        .arg(&root)
+        .arg(env!("CARGO_BIN_EXE_dotfiles"))
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "native OpenCode adapter failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+#[test]
+fn ordinary_answers_complete_without_evidence_or_correction_requests() -> Result<()> {
     let scope = tempfile::tempdir()?;
     let home = scope.path().join("home");
     let root = scope.path().join("outside-a-repository");
@@ -30,40 +78,20 @@ fn answer_evidence_reaches_the_native_checker_and_bounds_corrections() -> Result
     );
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert!(
-        summary["context"]
-            .to_string()
-            .contains("--session answer-fixture"),
+        summary["context"].to_string().contains("short reason"),
         "{summary}"
     );
     assert_eq!(summary["accepted"], 0, "{summary}");
     let prompts = summary["prompts"].as_array().cloned().unwrap_or_default();
-    assert_eq!(prompts.len(), 1, "{summary}");
-    assert!(
-        prompts[0]
-            .as_str()
-            .is_some_and(|prompt| prompt.contains("stale or incomplete")),
-        "{summary}"
-    );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Stop requirements remain unmet"));
-    Ok(())
-}
-
-fn copy_tree(from: &Path, to: &Path) -> Result<()> {
-    fs::create_dir_all(to)?;
-    for entry in fs::read_dir(from)? {
-        let entry = entry?;
-        let target = to.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_tree(&entry.path(), &target)?;
-        } else {
-            fs::copy(entry.path(), target)?;
-        }
-    }
+    assert!(prompts.is_empty(), "{summary}");
+    assert!(!home.join(".local/state/dotfiles/answers").exists());
+    assert!(!root.join("draft.txt").exists());
+    assert!(!root.join("evidence.json").exists());
     Ok(())
 }
 
 #[test]
-fn a_session_carries_the_start_report_and_a_stop_refusal_returns_once() -> Result<()> {
+fn a_session_reminds_the_agent_without_requiring_owner_metadata() -> Result<()> {
     let scope = tempfile::tempdir()?;
     let home = scope.path().join("home");
     copy_tree(
@@ -116,27 +144,12 @@ fn a_session_carries_the_start_report_and_a_stop_refusal_returns_once() -> Resul
     let summary: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     let system = summary["system"].to_string();
     assert!(
-        system.contains("src/lib.rs:1: parser has no owner"),
+        system.contains("before every push") && system.contains("short reason"),
         "{summary}"
     );
     assert_eq!(summary["repeated"], summary["system"], "{summary}");
-    assert_eq!(summary["afterFirstStop"], 1, "{summary}");
+    assert_eq!(summary["afterFirstStop"], 0, "{summary}");
     let prompts = summary["prompts"].as_array().cloned().unwrap_or_default();
-    assert_eq!(
-        prompts.len(),
-        1,
-        "a second refusal ends the turn: {summary}"
-    );
-    assert!(
-        prompts[0].as_str().is_some_and(
-            |prompt| prompt.starts_with("fixture-session: ") && prompt.contains("src/lib.rs")
-        ),
-        "{summary}"
-    );
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("Stop requirements remain unmet"),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert!(prompts.is_empty(), "{summary}");
     Ok(())
 }

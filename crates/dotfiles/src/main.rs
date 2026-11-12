@@ -7,6 +7,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
+#[command(version)]
 struct Cli {
     #[arg(long, default_value = ".")]
     root: PathBuf,
@@ -16,6 +17,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Record source-bound verification and refuse incomplete implementation contracts.
+    Verify {
+        #[command(subcommand)]
+        action: dotfiles::verification::Action,
+    },
     /// Check sources and formal arguments for the exact answer draft.
     Answer {
         #[command(subcommand)]
@@ -95,12 +101,17 @@ enum Commands {
         #[command(subcommand)]
         action: dotfiles::notifications::Action,
     },
-    /// The agent hooks of the verification gate: the session start report of a repository's gaps, and the stop decision over the files a turn changed.
+    /// Remind agents to verify work, check reply prose, or explicitly inspect repository verification gaps.
     Assure {
         point: dotfiles::assure::AgentPoint,
         /// Check Stop reply prose in this owner-selected language.
         #[arg(long = "reply-language")]
         language: Option<dotfiles::assure::ReplyLanguage>,
+    },
+    /// Preserve verified publisher sources while checking authored changes.
+    Upstream {
+        #[command(subcommand)]
+        request: UpstreamRequest,
     },
     /// Refuses work on a host whose process creation stalls, as it does when the Defender scan engine stops responding.
     Health {
@@ -208,6 +219,78 @@ enum RepositoryRequest {
     },
 }
 
+#[derive(Subcommand)]
+enum UpstreamRequest {
+    RegisterArchive {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        archive: PathBuf,
+        #[arg(long)]
+        prefix: PathBuf,
+        #[arg(long)]
+        sha256: String,
+        #[arg(long)]
+        origin: String,
+    },
+    RegisterFiles {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        origin: String,
+    },
+    Tidy {
+        #[arg(long, required = true)]
+        staged: bool,
+        paths: Vec<PathBuf>,
+    },
+}
+
+fn upstream(request: UpstreamRequest) -> Result<()> {
+    match request {
+        UpstreamRequest::RegisterArchive {
+            root,
+            directory,
+            archive,
+            prefix,
+            sha256,
+            origin,
+        } => {
+            platform::upstream::register(
+                &root,
+                platform::upstream::Source {
+                    repository: platform::upstream::repository(&root)?,
+                    directory,
+                    archive,
+                    prefix,
+                    sha256,
+                    origin,
+                },
+            )?;
+            println!("Registered reviewed upstream archive");
+        }
+        UpstreamRequest::RegisterFiles {
+            root,
+            directory,
+            manifest,
+            origin,
+        } => {
+            platform::upstream::register_preserved(&root, directory, manifest, origin)?;
+            println!("Registered reviewed preserved files");
+        }
+        UpstreamRequest::Tidy { staged: _, paths } => {
+            dotfiles::assure::tidy_upstream(&std::env::current_dir()?, &paths)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 #[derive(Clone, Copy, Subcommand)]
 enum HerdrAction {
@@ -225,6 +308,7 @@ fn run(mut cli: Cli) -> Result<()> {
     cli.root = dotfiles::canonical(&cli.root)?;
     let exit = dotfiles::secrets::exit;
     match cli.command {
+        Commands::Verify { action } => dotfiles::verification::execute(action)?,
         Commands::Answer { action } => dotfiles::answer::execute(action)?,
         Commands::Bounded { action } => dotfiles::bounded::execute(action)?,
         Commands::MiseInstall { arguments } => {
@@ -263,6 +347,7 @@ fn run(mut cli: Cli) -> Result<()> {
         Commands::CodexHooks { request } => std::process::exit(codex_hooks::run(request)?),
         Commands::Notifications { action } => dotfiles::notifications::run(action)?,
         Commands::Assure { point, language } => assure(point, language)?,
+        Commands::Upstream { request } => upstream(request)?,
         Commands::Health { session } => health(session)?,
         Commands::Hook { hook, arguments } => dotfiles::hooks::run(hook, &arguments)?,
         Commands::PostCommitWorker { producer } => {
@@ -372,7 +457,10 @@ fn assure(
     point: dotfiles::assure::AgentPoint,
     reply_language: Option<dotfiles::assure::ReplyLanguage>,
 ) -> Result<()> {
-    if point == dotfiles::assure::AgentPoint::Start {
+    if matches!(
+        point,
+        dotfiles::assure::AgentPoint::Start | dotfiles::assure::AgentPoint::Remind
+    ) {
         dotfiles::hook_failures::session_start();
         #[cfg(unix)]
         if let Some(home) = platform::home::home() {

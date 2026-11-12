@@ -111,7 +111,7 @@ fn apply_profile_command(source: &Path, home: &Path) -> Result<()> {
     Ok(())
 }
 
-fn refuse_catalog_drift(source: &Path, user: &Path, binary: &Path) -> Result<()> {
+fn check_catalog_drift(source: &Path, user: &Path, binary: &Path) -> Result<()> {
     let manifest = user.join(".config/skill-ops/approved.json");
     let approved_bytes = fs::read(&manifest)?;
     let policy = user.join(".config/skill-ops/policy.json");
@@ -144,41 +144,27 @@ fn refuse_catalog_drift(source: &Path, user: &Path, binary: &Path) -> Result<()>
         unmanaged.join("SKILL.md"),
         "---\nname: unmanaged\ndescription: Inspect an unmanaged input.\n---\n# Extra\nKeep this owner skill.\n",
     )?;
+    let previous: skill_ops::Approved = skill_ops::read_json(&manifest)?;
+    let changed = user.join(".agents/skills/example/SKILL.md");
+    let changed_bytes = fs::read(&changed)?;
+    let unmanaged_bytes = fs::read(unmanaged.join("SKILL.md"))?;
     let mut applied = false;
-    let error = pr_workflow::deploy(source, binary, user, |_| {
+    pr_workflow::deploy(source, binary, user, |_| {
         applied = true;
         Ok(())
-    })
-    .unwrap_err();
-    assert_eq!(
-        error.to_string(),
-        "unrelated installed managed skills have changed; preserve and review them before installation"
+    })?;
+    assert!(applied);
+    let installed: skill_ops::Approved = skill_ops::read_json(&manifest)?;
+    assert_eq!(installed.reviewed, previous.reviewed);
+    assert_eq!(installed.policy_hash, previous.policy_hash);
+    assert_eq!(installed.catalog_hash, skill_ops::hash(&installed.catalog)?);
+    assert_ne!(
+        installed.catalog.skills["example"].revision,
+        previous.catalog.skills["example"].revision
     );
-    let refusal = error
-        .downcast_ref::<platform::refusal::Refusal>()
-        .expect("a catalog drift refuses with the changed skills");
-    assert_eq!(refusal.rule, "pr.managed-skills");
-    let skills = user.join(".agents/skills");
-    assert_eq!(
-        refusal.next.as_deref(),
-        Some(
-            platform::refusal::command(&[
-                "chezmoi",
-                "diff",
-                skills.join("example").to_str().expect("UTF-8 fixture path"),
-            ])
-            .as_str()
-        )
-    );
-    let evidence = refusal.evidence.join("\n");
-    assert!(
-        evidence.contains("example: changed since its approved revision")
-            && evidence.contains("unmanaged: added outside the approved catalog")
-            && !evidence.contains("pull-request:"),
-        "{evidence}"
-    );
-    assert!(!applied);
-    assert_eq!(fs::read(&manifest)?, approved_bytes);
+    assert!(!installed.catalog.skills.contains_key("unmanaged"));
+    assert_eq!(fs::read(changed)?, changed_bytes);
+    assert_eq!(fs::read(unmanaged.join("SKILL.md"))?, unmanaged_bytes);
     fs::remove_dir_all(&unmanaged)?;
     Ok(())
 }
@@ -250,7 +236,7 @@ fn profile_apply_records_changed_skills_before_scoped_pr_install_without_enablin
             assert_eq!(approved.reviewed.len(), 2);
             pr_workflow::deploy(source.path(), &binary, user, |_| Ok(()))?;
         }
-        refuse_catalog_drift(source.path(), user, &binary)?;
+        check_catalog_drift(source.path(), user, &binary)?;
         assert!(!platform::incidents::enabled_at(user));
         assert_eq!(fs::read(&history)?, b"preserved history\n");
         assert_eq!(fs::read(hooks)?, previous_hooks);
