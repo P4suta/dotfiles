@@ -54,7 +54,7 @@
     {"mode":"0755","path":".agents/skills/decision-naming","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/decision-naming/SKILL.md","sha256":"6e30f1c8d6c79bcc58a38f2a191778d630cef002dc55e44ba85c2b9dffb782f3","type":"file"},
     {"mode":"0755","path":".agents/skills/delegation","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/delegation/SKILL.md","sha256":"c4f180ed85e5a8a0271ca84d955158c1bb62daa2ebe0c191872e1874e419a085","type":"file"},
+    {"mode":"0644","path":".agents/skills/delegation/SKILL.md","sha256":"f726c60e4b4a66d984132a85014f9fd441171042afbc127f0ab48bd7d84b7a20","type":"file"},
     {"mode":"0755","path":".agents/skills/development-assurance","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/development-assurance/SKILL.md","sha256":"eeadcf50fb7e85662a869c66bd16f8c4db275a4e9318a5f3e71990833b9da228","type":"file"},
     {"mode":"0755","path":".agents/skills/development-assurance/references","sha256":null,"type":"dir"},
@@ -64,7 +64,7 @@
     {"mode":"0755","path":".agents/skills/diagram-explanations/assets","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/diagram-explanations/assets/pr-image-publication.d2","sha256":"d81c6c29b98a9f4e50ee2ac6932a5d43ff7d80456cda26158d168b51ab83826c","type":"file"},
     {"mode":"0755","path":".agents/skills/domyjob","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/domyjob/SKILL.md","sha256":"3c2dfb52941b040542e0f5b0736c83583d326ecafc448401647c37a5d397878f","type":"file"},
+    {"mode":"0644","path":".agents/skills/domyjob/SKILL.md","sha256":"21396d61d4eb8556f52a57563cce19050464f4d46be2cac9061c68ed77456465","type":"file"},
     {"mode":"0644","path":".agents/skills/domyjob/tools.toml","sha256":"d740d2e1178e0666a3e0afd7ae373d98db56f995694dc40a78847fcbf5c41be8","type":"file"},
     {"mode":"0755","path":".agents/skills/doppler","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/doppler/SKILL.md","sha256":"b873d57039bc9db930625c99c8c544401139f3f7e9e21db172e0360d285b8016","type":"file"},
@@ -152,7 +152,7 @@
     {"mode":"0755","path":".agents/skills/monochrome-design","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/monochrome-design/SKILL.md","sha256":"b5617d0ed3d08cee4cbe2ac81940178f7e966509ee848902baea5721ee22bcff","type":"file"},
     {"mode":"0755","path":".agents/skills/multi-machine","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/multi-machine/SKILL.md","sha256":"ec42e48c6a9a245dc3fd29b638cc4f25659b2093d1aabcac0c10bea88d551e40","type":"file"},
+    {"mode":"0644","path":".agents/skills/multi-machine/SKILL.md","sha256":"a124d3f59db0c1c81d63a9f94dcbd9d543e223b074b03c896dd1c491931265d7","type":"file"},
     {"mode":"0755","path":".agents/skills/multi-machine/references","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/multi-machine/references/credential-context.md","sha256":"2dcf46d3827223e7a65de213d1ea5720ae16ec613c3675d164a72fecc3cb2911","type":"file"},
     {"mode":"0755","path":".agents/skills/mutation-testing","sha256":null,"type":"dir"},
@@ -208,7 +208,7 @@
     {"mode":"0755","path":".agents/skills/renovate","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/renovate/SKILL.md","sha256":"d6c096544583b5cff1b71f525ca1f57bdd0ab763f3c3f140bd908230c2712dd1","type":"file"},
     {"mode":"0755","path":".agents/skills/resource-coordination","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/resource-coordination/SKILL.md","sha256":"1ecec5267bb1473842342aa4775cc4dc22b016b519077ab7756d95893efd7ce8","type":"file"},
+    {"mode":"0644","path":".agents/skills/resource-coordination/SKILL.md","sha256":"3f90f23a606f22bfcc7da17a3e891c42ea07ee8403d2da6743c1baf9492e99c2","type":"file"},
     {"mode":"0755","path":".agents/skills/rust-invariants","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/rust-invariants/SKILL.md","sha256":"4d65a586e77550e04d44162f178d813f6f82742a3b2e8296d3677707aeb7adcd","type":"file"},
     {"mode":"0755","path":".agents/skills/rust-release","sha256":null,"type":"dir"},
@@ -696,7 +696,6 @@
     {"condition":"onchange","phase":"after","position":10,"sha256":"432171475113c2fef56db317bd4d49a0c61d283536cf8176507dcce7d0a65cc6","target":".chezmoiscripts/unix/15-ocomment.sh"},
     {"condition":"onchange","phase":"after","position":11,"sha256":"611dc99445a4d5bdff8c7982b096f0d17361f641b0f7268bedf1b4639f5384dd","target":".chezmoiscripts/unix/16-domyjob.sh"},
     {"condition":"onchange","phase":"after","position":12,"sha256":"06b08b37aedcce4e4753955085071ff7b125270dd073467fa992ca871628fbb6","target":".chezmoiscripts/unix/18-retire-tmux.sh"},
-    {"condition":"always","phase":"after","position":13,"sha256":"eb80c48ce88363f921df8cf00bce9274f7b3bd7a5caee83a37237a01f8042299","target":".chezmoiscripts/unix/19-chat.sh"},
-    {"condition":"always","phase":"after","position":14,"sha256":"632d15985bc32da6916abaa22dc65ddc9b48ed965e483142375e608a6b1c4018","target":".chezmoiscripts/unix/20-adapters.sh"}
+    {"condition":"always","phase":"after","position":13,"sha256":"632d15985bc32da6916abaa22dc65ddc9b48ed965e483142375e608a6b1c4018","target":".chezmoiscripts/unix/19-adapters.sh"}
   ]
 }
