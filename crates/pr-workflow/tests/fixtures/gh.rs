@@ -82,6 +82,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GH_FIXTURE_REVIEWS"
         } else if endpoint.contains("/statuses?") {
             "GH_FIXTURE_STATUSES"
+        } else if endpoint.contains("/check-runs?") {
+            "GH_FIXTURE_CHECK_RUNS"
         } else if endpoint == "user" {
             "GH_FIXTURE_USER"
         } else if endpoint.contains("/ssh_signing_keys") {
@@ -150,6 +152,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GH_FIXTURE_BRANCH" => Some("GH_FIXTURE_BRANCHES"),
             "GH_FIXTURE_ISSUE" => Some("GH_FIXTURE_ISSUES"),
             "GH_FIXTURE_COMPARE" => Some("GH_FIXTURE_COMPARISONS"),
+            "GH_FIXTURE_CHECK_RUNS" => Some("GH_FIXTURE_CHECK_RUN_PAGES"),
             _ => None,
         };
         if let Some(responses) = responses
@@ -235,6 +238,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .split(',')
                 .any(|listed| listed == head);
             println!("{{\"behind_by\":{}}}", u8::from(behind));
+        } else if variable == "GH_FIXTURE_CHECK_RUNS" {
+            println!(
+                "{}",
+                std::env::var(variable)
+                    .unwrap_or_else(|_| r#"{"total_count":0,"check_runs":[]}"#.into())
+            );
         } else if [
             "GH_FIXTURE_PULLS",
             "GH_FIXTURE_RULES",

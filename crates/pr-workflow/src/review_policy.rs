@@ -31,6 +31,8 @@ const MAX_PAGES: usize = 20;
 const REVIEW_BOT: &str = "coderabbitai[bot]";
 const GRAPHQL_BOT: &str = "coderabbitai";
 const REVIEW_CONTEXT: &str = "CodeRabbit";
+const REVIEW_APP_ID: u64 = 347_564;
+const CHECK_RUN_COMPLETION: &str = "Result: Success - Review completed";
 const RUN_ID_LENGTH: usize = 36;
 const RUN_ID_SEPARATORS: [usize; 4] = [8, 13, 18, 23];
 const REVIEW_RANGE: &str = "Reviewing files that changed from the base of the PR and between ";
@@ -941,6 +943,36 @@ struct CommitStatus {
 }
 
 #[derive(Deserialize)]
+struct CheckRunPage {
+    total_count: usize,
+    check_runs: Vec<ReviewCheckRun>,
+}
+
+#[derive(Deserialize)]
+struct ReviewCheckRun {
+    id: u64,
+    app: Option<CheckApp>,
+    name: String,
+    head_sha: String,
+    status: String,
+    conclusion: Option<String>,
+    started_at: Option<String>,
+    completed_at: Option<String>,
+    output: Option<CheckOutput>,
+}
+
+#[derive(Deserialize)]
+struct CheckApp {
+    id: u64,
+    slug: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CheckOutput {
+    summary: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct ComparedFile {
     filename: String,
     previous_filename: Option<String>,
@@ -1058,6 +1090,119 @@ fn pages<T: serde::de::DeserializeOwned>(github: &Github, endpoint: &str) -> Res
     anyhow::bail!("review API inventory exceeds its bound; no partial review credit")
 }
 
+fn check_runs(github: &Github, repository: &str, head: &str) -> Result<Vec<ReviewCheckRun>> {
+    let mut all = Vec::new();
+    let mut expected_total = None;
+    for page in 1..=MAX_PAGES {
+        let result: CheckRunPage = github.read(&format!(
+            "repos/{repository}/commits/{head}/check-runs?filter=all&per_page={PAGE_SIZE}&page={page}"
+        ))?;
+        ensure!(
+            result.check_runs.len() <= PAGE_SIZE
+                && result.total_count <= MAX_PAGES * PAGE_SIZE
+                && expected_total.is_none_or(|total| total == result.total_count),
+            "review Check Run inventory is oversized or changed during pagination"
+        );
+        expected_total = Some(result.total_count);
+        let last = result.check_runs.len() < PAGE_SIZE;
+        all.extend(result.check_runs);
+        ensure!(
+            all.len() <= result.total_count,
+            "review Check Run inventory exceeds its reported count"
+        );
+        if last || all.len() == result.total_count {
+            ensure!(
+                all.len() == result.total_count,
+                "review Check Run inventory is incomplete; no partial review credit"
+            );
+            let ids: BTreeSet<_> = all.iter().map(|run| run.id).collect();
+            ensure!(ids.len() == all.len(), "duplicate review Check Run IDs");
+            return Ok(all);
+        }
+    }
+    anyhow::bail!("review Check Run inventory exceeds its bound; no partial review credit")
+}
+
+fn review_timestamp(value: Option<&str>) -> Result<jiff::Timestamp> {
+    value
+        .context("review completion time is missing")?
+        .parse()
+        .context("review completion time is malformed")
+}
+
+fn include_check_runs(
+    statuses: Vec<CommitStatus>,
+    runs: &[ReviewCheckRun],
+    head: &str,
+) -> Result<Vec<CommitStatus>> {
+    let owned: Vec<_> = runs
+        .iter()
+        .filter(|run| {
+            run.name == REVIEW_CONTEXT
+                && run.app.as_ref().is_some_and(|app| {
+                    app.id == REVIEW_APP_ID && app.slug.as_deref() == Some(GRAPHQL_BOT)
+                })
+        })
+        .collect();
+    ensure!(
+        owned.iter().all(|run| run.id != 0 && run.head_sha == head),
+        "CodeRabbit Check Run belongs to another head or has no identity"
+    );
+    let Some(run) = owned.into_iter().max_by_key(|run| run.id) else {
+        return Ok(statuses);
+    };
+    let started = review_timestamp(run.started_at.as_deref())?;
+    let observed = if run.status == "completed" {
+        let completed = review_timestamp(run.completed_at.as_deref())?;
+        ensure!(
+            completed >= started,
+            "CodeRabbit Check Run ends before it starts"
+        );
+        completed
+    } else {
+        started
+    };
+    let complete = run.status == "completed"
+        && run.conclusion.as_deref() == Some("success")
+        && run
+            .output
+            .as_ref()
+            .and_then(|output| output.summary.as_deref())
+            .and_then(|summary| summary.lines().next())
+            == Some(CHECK_RUN_COMPLETION);
+    if let Some(status) = statuses
+        .iter()
+        .filter(|status| status.creator.login == REVIEW_BOT && status.context == REVIEW_CONTEXT)
+        .max_by_key(|status| status.id)
+    {
+        let created = review_timestamp(status.created_at.as_deref())?;
+        if created > observed {
+            return Ok(statuses);
+        }
+        ensure!(
+            created != observed
+                || complete
+                    == (status.state == "success" && status.description == "Review completed"),
+            "CodeRabbit completion formats disagree at the same time"
+        );
+    }
+    Ok(vec![CommitStatus {
+        id: run.id,
+        creator: Bot {
+            login: REVIEW_BOT.into(),
+        },
+        context: REVIEW_CONTEXT.into(),
+        state: if complete { "success" } else { "pending" }.into(),
+        description: if complete {
+            "Review completed"
+        } else {
+            "Review incomplete"
+        }
+        .into(),
+        created_at: run.started_at.clone(),
+    }])
+}
+
 fn require_pr_review(
     github: &Github,
     target: &Target,
@@ -1072,6 +1217,7 @@ fn require_pr_review(
         github,
         &format!("repos/{}/commits/{head}/statuses", target.repo),
     )?;
+    let statuses = include_check_runs(statuses, &check_runs(github, &target.repo, head)?, head)?;
     let summaries: Vec<ReviewSummary> = pages(
         github,
         &format!("repos/{}/issues/{pr}/comments", target.repo),
@@ -1243,6 +1389,8 @@ fn validate_pr_evidence(
                     .is_some_and(|time| !time.is_empty()),
             "empty current-head CodeRabbit review is not a submitted approval"
         );
+        review_timestamp(review.submitted_at.as_deref())?;
+        return Ok(());
     }
     validate_carried_review(reviews, status, binding, assessment, pr, compare)
 }
@@ -2565,6 +2713,151 @@ mod tests {
         }
     }
 
+    fn check_run(id: u64, head: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id":id,"app":{"id":REVIEW_APP_ID,"slug":GRAPHQL_BOT},
+            "name":REVIEW_CONTEXT,"head_sha":head,
+            "status":"completed","conclusion":"success",
+            "started_at":"2026-10-14T00:01:00Z",
+            "completed_at":"2026-10-14T00:02:00Z",
+            "output":{"summary":CHECK_RUN_COMPLETION}
+        })
+    }
+
+    #[test]
+    fn check_runs_require_provider_head_complete_result_and_valid_times() -> Result<()> {
+        let (binding, _, _) = review_fixture()?;
+        for (field, value) in [
+            ("id", serde_json::json!(0)),
+            ("app", serde_json::json!({"id":1,"slug":GRAPHQL_BOT})),
+            (
+                "app",
+                serde_json::json!({"id":REVIEW_APP_ID,"slug":"other"}),
+            ),
+            ("app", serde_json::Value::Null),
+            ("name", serde_json::json!("unrelated check")),
+            ("head_sha", serde_json::json!("f".repeat(40))),
+            ("status", serde_json::json!("in_progress")),
+            ("status", serde_json::json!("queued")),
+            ("status", serde_json::json!("unknown")),
+            ("conclusion", serde_json::Value::Null),
+            ("conclusion", serde_json::json!("failure")),
+            ("conclusion", serde_json::json!("skipped")),
+            ("conclusion", serde_json::json!("neutral")),
+            ("conclusion", serde_json::json!("cancelled")),
+            ("started_at", serde_json::Value::Null),
+            ("started_at", serde_json::json!("unknown")),
+            ("completed_at", serde_json::Value::Null),
+            ("completed_at", serde_json::json!("unknown")),
+            ("completed_at", serde_json::json!("2026-10-14T00:00:00Z")),
+            ("output", serde_json::Value::Null),
+            (
+                "output",
+                serde_json::json!({"summary":"Result: Success - Review skipped"}),
+            ),
+            (
+                "output",
+                serde_json::json!({"summary":"Result: Success - Review partially completed"}),
+            ),
+        ] {
+            let mut run = check_run(1, &binding.head);
+            run[field] = value;
+            if let Ok(statuses) = include_check_runs(
+                vec![],
+                &[serde_json::from_value(run.clone())?],
+                &binding.head,
+            ) {
+                assert!(
+                    completed_pr_status(&statuses, &binding, 17).is_err(),
+                    "{run}"
+                );
+            }
+        }
+        let statuses = include_check_runs(
+            vec![],
+            &[serde_json::from_value(check_run(1, &binding.head))?],
+            &binding.head,
+        )?;
+        completed_pr_status(&statuses, &binding, 17)?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_later_check_run_replaces_success_and_unrelated_apps_cannot_replace_it() -> Result<()> {
+        let (binding, _, _) = review_fixture()?;
+        let mut failed = check_run(2, &binding.head);
+        failed["conclusion"] = serde_json::json!("failure");
+        let statuses = include_check_runs(
+            vec![],
+            &[
+                serde_json::from_value(failed)?,
+                serde_json::from_value(check_run(1, &binding.head))?,
+            ],
+            &binding.head,
+        )?;
+        assert!(completed_pr_status(&statuses, &binding, 17).is_err());
+        let mut unrelated = check_run(3, &binding.head);
+        unrelated["app"]["id"] = serde_json::json!(1);
+        unrelated["status"] = serde_json::json!("in_progress");
+        let statuses = include_check_runs(
+            vec![],
+            &[
+                serde_json::from_value(unrelated)?,
+                serde_json::from_value(check_run(1, &binding.head))?,
+            ],
+            &binding.head,
+        )?;
+        completed_pr_status(&statuses, &binding, 17)?;
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_completion_formats_use_event_times_without_comparing_provider_ids() -> Result<()> {
+        let (binding, _, _) = review_fixture()?;
+        let mut legacy = status(u64::MAX, "pending", "Review in progress");
+        let statuses = include_check_runs(
+            vec![legacy],
+            &[serde_json::from_value(check_run(1, &binding.head))?],
+            &binding.head,
+        )?;
+        completed_pr_status(&statuses, &binding, 17)?;
+        legacy = status(1, "failure", "Review failed");
+        legacy.created_at = Some("2026-10-14T00:03:00Z".into());
+        let statuses = include_check_runs(
+            vec![legacy],
+            &[serde_json::from_value(check_run(u64::MAX, &binding.head))?],
+            &binding.head,
+        )?;
+        assert!(completed_pr_status(&statuses, &binding, 17).is_err());
+        for created in ["2026-10-14T00:02:00Z", "unknown"] {
+            let mut legacy = status(1, "failure", "Review failed");
+            legacy.created_at = Some(created.into());
+            assert!(
+                include_check_runs(
+                    vec![legacy],
+                    &[serde_json::from_value(check_run(1, &binding.head))?],
+                    &binding.head
+                )
+                .is_err()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn carried_check_run_completion_keeps_the_review_start_boundary() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        let mut run = check_run(1, &binding.head);
+        run["started_at"] = serde_json::json!("2026-10-13T23:59:00Z");
+        let statuses = include_check_runs(vec![], &[serde_json::from_value(run)?], &binding.head)?;
+        let error = validate_pr_evidence(&[review], &statuses, &binding, &assessment, 17, |_| {
+            Ok(compared_review(&binding, &[], true))
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("not created after"), "{error:#}");
+        Ok(())
+    }
+
     fn no_comparison(_: &SubmittedReview) -> Result<ComparedReview> {
         anyhow::bail!("a current-head full review must not need a comparison")
     }
@@ -2612,8 +2905,8 @@ mod tests {
     }
 
     #[test]
-    fn empty_current_head_approval_reuses_the_prior_full_review() -> Result<()> {
-        let (binding, assessment, review) = earlier_review_fixture()?;
+    fn empty_current_head_approval_needs_no_prior_review_body() -> Result<()> {
+        let (binding, assessment, _) = earlier_review_fixture()?;
         let approval = SubmittedReview {
             id: 2,
             user: Bot {
@@ -2625,12 +2918,12 @@ mod tests {
             body: String::new(),
         };
         validate_pr_evidence(
-            &[review, approval],
+            &[approval],
             &[status(1, "success", "Review completed")],
             &binding,
             &assessment,
             17,
-            |_| Ok(compared_review(&binding, &["README.md"], false)),
+            no_comparison,
         )
     }
 
