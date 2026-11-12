@@ -75,7 +75,7 @@ impl Notice {
 }
 
 /// # Errors
-/// Rejects malformed owner registrations and unreadable notice files.
+/// Rejects malformed local registrations and unreadable notice files.
 pub fn project<'a>(repository: Option<&str>, body: &'a str) -> Result<Cow<'a, str>> {
     let Some(repository) = repository else {
         return Ok(Cow::Borrowed(body));
@@ -87,7 +87,7 @@ pub fn project<'a>(repository: Option<&str>, body: &'a str) -> Result<Cow<'a, st
 }
 
 /// # Errors
-/// Rejects malformed owner registrations and unreadable notice files.
+/// Rejects malformed local registrations and unreadable notice files.
 pub fn project_in<'a>(home: &Path, repository: &str, body: &'a str) -> Result<Cow<'a, str>> {
     ensure!(
         crate::source_identity::github_slug(&format!("{GITHUB_PREFIX}{repository}")).as_deref()

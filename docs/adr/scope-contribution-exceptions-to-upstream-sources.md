@@ -29,7 +29,7 @@ Manual publication would leave the same conflict for later contributions.
 
 ## Consequences
 
-Registrations require owner review and fail closed when malformed or unavailable.
+Registrations require review and fail closed when malformed or unavailable.
 Reconsider the representation when a destination requires a notice with variable content.
 
 ## Confirmation
