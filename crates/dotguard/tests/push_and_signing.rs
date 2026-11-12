@@ -1528,6 +1528,87 @@ fn regex_counterpart(report: &mut serde_json::Value) -> &mut serde_json::Value {
     &mut report["repositories"]["local"]["packageFiles"]["regex"][0]["deps"][0]
 }
 
+#[test]
+fn renovate_microsoft_java_catalog_must_bind_the_offered_pin_and_origin() {
+    let (repository, _, previous) = renovate_fixture("renovate-microsoft-java");
+    let offered = changed_file(
+        &repository,
+        "mise.toml",
+        "[tools]\njava = \"microsoft-25.0.5.0.2\"\n",
+        &previous,
+    );
+    let mut report = backend_report((
+        "java",
+        "custom.mise-java",
+        "microsoft",
+        "microsoft-25.0.5.0.2",
+    ));
+    regex_counterpart(&mut report)["registryUrl"] =
+        "https://mise-java.jdx.dev/jvm/ga/linux/x86_64.json".into();
+    let output = report_gate(&repository, &previous, &offered, &report);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for (field, value) in [
+        (
+            "registryUrl",
+            serde_json::json!("https://example.invalid/java.json"),
+        ),
+        (
+            "registryUrls",
+            serde_json::json!(["https://example.invalid/java.json"]),
+        ),
+        ("datasource", serde_json::json!("java-version")),
+        ("packageName", serde_json::json!("temurin")),
+        ("currentValue", serde_json::json!("microsoft-25.0.5.0.1")),
+        ("currentVersion", serde_json::json!("microsoft-25.0.5.0.1")),
+        ("skipReason", serde_json::json!("unsupported-datasource")),
+        ("warnings", serde_json::json!([{"message":"lookup failed"}])),
+        ("enabled", serde_json::json!(false)),
+    ] {
+        let mut invalid = report.clone();
+        regex_counterpart(&mut invalid)[field] = value;
+        let output = report_gate(&repository, &previous, &offered, &invalid);
+        assert_eq!(refusal(&output).rule, "push.evidence", "{field}");
+    }
+    let mut missing_origin = report.clone();
+    regex_counterpart(&mut missing_origin)
+        .as_object_mut()
+        .unwrap()
+        .remove("registryUrl");
+    assert_eq!(
+        refusal(&report_gate(
+            &repository,
+            &previous,
+            &offered,
+            &missing_origin
+        ))
+        .rule,
+        "push.evidence"
+    );
+    let mut outdated = report.clone();
+    regex_counterpart(&mut outdated)["updates"] = serde_json::json!([
+        {"updateType":"patch","newValue":"microsoft-25.0.5.0.3"}
+    ]);
+    assert_eq!(
+        refusal(&report_gate(&repository, &previous, &offered, &outdated)).rule,
+        "push.dependencies"
+    );
+    for source in [
+        "[tools]\njava = \"microsoft-25.0.5.0.1\"\n",
+        "[tools]\njava = \"microsoft-25.0.5.0.2\"\n[alias.java]\nbackend = \"asdf:other/java\"\n",
+        "[tools]\njava = { version = \"microsoft-25.0.5.0.2\", release_type = \"ea\" }\n",
+    ] {
+        let altered = changed_file(&repository, "mise.toml", source, &offered);
+        assert_eq!(
+            refusal(&report_gate(&repository, &offered, &altered, &report)).rule,
+            "push.evidence"
+        );
+    }
+}
+
 const HTTP_MANIFEST: &str = r#"[tools."http:winappcli"]
 version = "0.5.0"
 url = "https://github.com/microsoft/winappCli/releases/download/v{{ version }}/winappcli-x64.zip"

@@ -538,6 +538,10 @@ fn covered_backend(records: &[Record], record: &Record, found: Option<&super::Fo
         return counterpart_for(records, "jsonata", &record.file, &dependency.dep_name)
             .is_some_and(|verified| super::mise::http_covers(found, record, verified));
     }
+    if dependency.dep_name == "java" {
+        return counterpart(records, &record.file, "java")
+            .is_some_and(|verified| super::mise::microsoft_java_covers(found, record, verified));
+    }
     let provider = match dependency.dep_name.as_str() {
         "nu" => ("github-releases", "nushell/nushell"),
         "conda:zsh" => ("conda", "conda-forge/zsh"),

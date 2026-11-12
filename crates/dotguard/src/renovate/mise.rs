@@ -7,6 +7,45 @@ const GITHUB_API_REPOSITORIES: &str = "https://api.github.com/repos/";
 const GITHUB_LATEST_RELEASE: &str = "/releases/latest";
 const GITHUB_TAGS: &str = "/tags";
 const GITHUB_REGISTRY: &str = "https://github.com";
+pub(super) const MICROSOFT_JAVA_CATALOG: &str =
+    "https://mise-java.jdx.dev/jvm/ga/linux/x86_64.json";
+const MAX_JAVA_PIN_BYTES: usize = 128;
+const MIN_JAVA_VERSION_COMPONENTS: usize = 3;
+const MAX_JAVA_VERSION_COMPONENTS: usize = 5;
+
+pub(super) fn lookup_environment() -> Vec<String> {
+    let managers = serde_json::json!([{
+        "customType": "regex",
+        "managerFilePatterns": [r"/(^|/)(\.mise|mise)\.toml$/"],
+        "matchStrings": [r#"(?:^|\r?\n)[ \t]*dotnet[ \t]*=[ \t]*[\"'](?<currentValue>\d+\.\d+\.\d+)[\"']"#],
+        "depNameTemplate": "dotnet",
+        "packageNameTemplate": "dotnet-sdk",
+        "datasourceTemplate": "dotnet-version",
+        "versioningTemplate": "semver"
+    }, {
+        "customType": "regex",
+        "managerFilePatterns": [r"/(^|/)(\.mise|mise)\.toml$/"],
+        "matchStrings": [r#"(?:^|\r?\n)[ \t]*java[ \t]*=[ \t]*[\"'](?<currentValue>microsoft-\d+\.\d+\.\d+(?:\.\d+){0,2})[\"']"#],
+        "depNameTemplate": "java",
+        "packageNameTemplate": "microsoft",
+        "datasourceTemplate": "custom.mise-java",
+        "registryUrlTemplate": MICROSOFT_JAVA_CATALOG,
+        "versioningTemplate": r"regex:^microsoft-(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)(?:\.(?<build>\d+))?(?:\.(?<revision>\d+))?$"
+    }]);
+    let datasources = serde_json::json!({
+        "mise-java": {
+            "defaultRegistryUrlTemplate": MICROSOFT_JAVA_CATALOG,
+            "format": "json",
+            "transformTemplates": [r#"{"releases": [$[vendor = "microsoft" and image_type = "jdk" and jvm_impl = "hotspot"].{"version": "microsoft-" & version}]}"#]
+        }
+    });
+    vec![
+        "--env".into(),
+        format!("RENOVATE_CUSTOM_MANAGERS={managers}"),
+        "--env".into(),
+        format!("RENOVATE_CUSTOM_DATASOURCES={datasources}"),
+    ]
+}
 const HTTP_FIELDS: &[&str] = &[
     "version",
     "url",
@@ -57,6 +96,82 @@ pub(super) fn source_matches(
         .and_then(|tools| tools.get(&record.dependency.dep_name))
         .and_then(toml::Value::as_str)
         .is_some_and(|version| verified.current_value.as_deref() == Some(version))
+}
+
+pub(super) fn microsoft_java_covers(
+    found: Option<&Found>,
+    record: &Record,
+    verified: &Dependency,
+) -> bool {
+    let dependency = &record.dependency;
+    let Some(pin) = verified.current_value.as_deref() else {
+        return false;
+    };
+    if pin.len() > MAX_JAVA_PIN_BYTES {
+        return false;
+    }
+    let Some(version) = pin.strip_prefix("microsoft-") else {
+        return false;
+    };
+    let parts: Vec<_> = version.split('.').collect();
+    let origin = |url: &str| url == MICROSOFT_JAVA_CATALOG;
+    if dependency.dep_name != "java"
+        || dependency
+            .package_name
+            .as_deref()
+            .is_some_and(|name| name != "java")
+        || dependency
+            .dep_type
+            .as_deref()
+            .is_some_and(|kind| kind != "tools")
+        || dependency.current_digest.is_some()
+        || dependency
+            .current_value
+            .as_deref()
+            .is_some_and(|value| value != pin)
+        || dependency
+            .current_version
+            .as_deref()
+            .is_some_and(|value| value != pin)
+        || dependency
+            .locked_version
+            .as_deref()
+            .is_some_and(|value| value != pin)
+        || verified.datasource.as_deref() != Some("custom.mise-java")
+        || verified.package_name.as_deref() != Some("microsoft")
+        || !(MIN_JAVA_VERSION_COMPONENTS..=MAX_JAVA_VERSION_COMPONENTS).contains(&parts.len())
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || !part.bytes().all(|byte| byte.is_ascii_digit())
+                || (part.len() > 1 && part.starts_with('0'))
+                || part.parse::<u64>().is_err()
+        })
+        || verified
+            .registry_url
+            .as_deref()
+            .is_some_and(|url| !origin(url))
+        || verified
+            .registry_urls
+            .as_ref()
+            .is_some_and(|urls| match urls.as_slice() {
+                [url] => !origin(url),
+                _ => true,
+            })
+        || (verified.registry_url.is_none() && verified.registry_urls.is_none())
+        || !source_matches(found, record, verified)
+    {
+        return false;
+    }
+    let Some(source) = source(found, &record.file) else {
+        return false;
+    };
+    let Ok(manifest) = toml::from_str::<toml::Table>(&source) else {
+        return false;
+    };
+    manifest
+        .get("alias")
+        .and_then(|aliases| aliases.get("java"))
+        .is_none()
 }
 
 pub(super) fn source(found: Option<&Found>, file: &str) -> Option<String> {

@@ -155,3 +155,4 @@
 | [2026-11-09 Use CodeRabbit without importance opt-outs](use-coderabbit-without-importance-opt-outs.md) | accepted |  |
 | [2026-11-10 Bind official tarballs to npm workspace lockfiles](bind-official-tarballs-to-npm-workspace-lockfiles.md) | proposed |  |
 | [2026-11-10 Honor explicit merges during optional review pauses](honor-explicit-merges-during-optional-review-pauses.md) | accepted |  |
+| [2026-11-12 Verify declared `java` versions](verify-mise-java-sdk-pins.md) | proposed |  |
