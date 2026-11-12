@@ -2,12 +2,12 @@
 name: liquid-glass-design
 description: >-
   Design and build an Apple-platform interface on Apple's system design with Liquid Glass, from Apple's kit in Figma through standard SwiftUI components to source checks and accessibility audits.
-  Use when the owner explicitly chooses Apple's system design for an artifact; monochrome-design remains the default otherwise.
+  Use when the user explicitly chooses Apple's system design for an artifact; monochrome-design remains the default otherwise.
 ---
 
 # Apple system design
 
-Use this design when the owner explicitly chooses Apple's system design for an artifact.
+Use this design when the user explicitly chooses Apple's system design for an artifact.
 The monochrome-design skill states that explicit requirements for the current artifact take precedence, so the choice selects this design for that artifact only.
 Keep monochrome-design for every other visual task.
 Record the choice in the project's instructions and in an ADR, so later work keeps the system design instead of the default.

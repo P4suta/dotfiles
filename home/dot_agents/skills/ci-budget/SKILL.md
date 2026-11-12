@@ -15,7 +15,7 @@ Reuse current results instead of starting duplicate campaigns at commit, push, o
 Use `formal-assurance` for reproducible verdicts and run heavy checks in the project's pinned container or documented hosted runners.
 Required hosted checks and repository-required reviews remain merge gates.
 Use automatic incremental CodeRabbit reviews and follow `pull-request` for an explicit merge instruction during unavailable optional review.
-An active owner-imposed push pause overrides any push authorization until the owner explicitly resumes pushes.
+An explicit push pause overrides any push authorization until the user explicitly resumes pushes.
 
 ## Prepare locally
 

@@ -2463,7 +2463,7 @@ pub enum AgentPoint {
 }
 
 /// The routine verification confirmation shared by managed agents and Git hooks.
-pub const VERIFICATION_REMINDER: &str = "Before completing work and before every push, inspect the diff, affected CI jobs, and project check commands. Run every applicable local check required for that action, fix failures, and rerun affected checks after changes. Confirm completion with a short reason naming actual checks and successful outcomes. Never use an unverified disclaimer to skip required work. If a required check cannot run, repair the environment or use a justified equivalent; if still blocked, ask the user for a concrete decision before claiming completion. Checks assigned to later CI or release stages keep their own timing. Do not create evidence JSON, signed declarations, claim ledgers, or per-answer proofs unless explicitly requested. Existing project checks, release requirements, owner authorization, and push pauses still apply.\n";
+pub const VERIFICATION_REMINDER: &str = "Before completing work and before every push, inspect the diff, affected CI jobs, and project check commands. Run every applicable local check required for that action, fix failures, and rerun affected checks after changes. Confirm completion with a short reason naming actual checks and successful outcomes. Never use an unverified disclaimer to skip required work. If a required check cannot run, repair the environment or use a justified equivalent; if still blocked, ask the user for a concrete decision before claiming completion. Checks assigned to later CI or release stages keep their own timing. Do not create evidence JSON, signed declarations, claim ledgers, or per-answer proofs unless explicitly requested. Existing project checks, release requirements, user authorization, and push pauses still apply.\n";
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum ReplyLanguage {
@@ -2504,6 +2504,40 @@ fn reply_reasons(reply: &str) -> Result<Vec<String>> {
     Ok(reasons)
 }
 
+fn reply_text_reasons(reply: &str, language: Option<Language>) -> Result<Vec<String>> {
+    let mut reasons = Vec::new();
+    if !reply.is_empty() {
+        for finding in prose::check_user_address(&prose::Bundle::installed()?, "reply.md", reply)? {
+            reasons.push(format!(
+                "Reply line {}: {}: {}",
+                finding.line, finding.rule, finding.message
+            ));
+        }
+    }
+    if language.is_some() {
+        for finding in prose::sentence_per_line(&prose::Input::new("reply", reply, false)) {
+            reasons.push(format!("Reply line {}: {}", finding.line, finding.message));
+        }
+    }
+    if matches!(language, Some(Language::Japanese)) {
+        for hit in dotguard::lang::scan(reply, dotguard::lang::Mode::Japanese) {
+            reasons.push(format!(
+                "Reply line {}: {:?} U+{:04X} is {}; write the Japanese form or name the character by its code point.",
+                hit.line, hit.ch, hit.ch as u32, hit.kind
+            ));
+        }
+        reasons.extend(japanese_word_reasons(reply));
+    }
+    if let Some(language) = language
+        && reply_language_rules::check(language, reply) == reply_language_rules::Verdict::Rewrite
+    {
+        reasons.push(
+            "The reply prose must be in Japanese. Rewrite your last reply to the user in Japanese; keep code, commands, and outward artifacts as they are.".to_owned(),
+        );
+    }
+    Ok(reasons)
+}
+
 /// The agent hook of `point`: the session start report on standard output, or the stop decision as the client's JSON.
 ///
 /// # Errors
@@ -2534,41 +2568,10 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                 serde_json::from_str::<StopInput>(&input)
                     .context("the stop hook input is invalid")?
             };
-            let mut reasons = Vec::new();
-            if language.is_some() {
-                let reply = prose::Input::new(
-                    "reply",
-                    input.last_assistant_message.as_deref().unwrap_or_default(),
-                    false,
-                );
-                for finding in prose::sentence_per_line(&reply) {
-                    reasons.push(format!("Reply line {}: {}", finding.line, finding.message));
-                }
-            }
-            if matches!(language, Some(Language::Japanese)) {
-                for hit in dotguard::lang::scan(
-                    input.last_assistant_message.as_deref().unwrap_or_default(),
-                    dotguard::lang::Mode::Japanese,
-                ) {
-                    reasons.push(format!(
-                        "Reply line {}: {:?} U+{:04X} is {}; write the Japanese form or name the character by its code point.",
-                        hit.line, hit.ch, hit.ch as u32, hit.kind
-                    ));
-                }
-                reasons.extend(japanese_word_reasons(
-                    input.last_assistant_message.as_deref().unwrap_or_default(),
-                ));
-            }
-            if let Some(language) = language
-                && reply_language_rules::check(
-                    language,
-                    input.last_assistant_message.as_deref().unwrap_or_default(),
-                ) == reply_language_rules::Verdict::Rewrite
-            {
-                reasons.push(
-                    "The reply prose must be in Japanese. Rewrite your last reply to the user in Japanese; keep code, commands, and outward artifacts as they are.".to_owned(),
-                );
-            }
+            let mut reasons = reply_text_reasons(
+                input.last_assistant_message.as_deref().unwrap_or_default(),
+                language,
+            )?;
             if point == AgentPoint::Reply {
                 reasons.extend(reply_reasons(
                     input.last_assistant_message.as_deref().unwrap_or_default(),

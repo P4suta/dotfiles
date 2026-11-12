@@ -139,9 +139,11 @@ The structured result reports `merged`, `ejected`, `timed_out`, `head_changed`, 
 The head bound to the merge request must match the verified head.
 Both stop on a failed check, conflict, timeout, or missing CodeRabbit review.
 
-## Owner-authorized merges
+<a id="owner-authorized-merges"></a>
 
-The owner can explicitly request a merge despite an unavailable optional CodeRabbit review.
+## Explicit merge requests
+
+The user can explicitly request a merge despite an unavailable optional CodeRabbit review.
 That instruction grants no completed-review claim and changes no repository-required review, check, approval, merge queue, or publication hold.
 Inspect the exact head, required checks, all supported unresolved findings, and the actual review state with `gh`.
 Resolve supported findings and pass the applicable project checks before merging.
@@ -201,7 +203,7 @@ Ready admission waits for unfinished, failed, or missing required checks.
 A repository that reports and requires no checks can accept a ready PR.
 The review that readiness starts can finish afterward.
 Inspect the current head's actual review state and resolve supported findings before completing the authorized PR task.
-Apply [owner-authorized merges](#owner-authorized-merges) when optional analysis is unavailable and the owner explicitly chooses to merge.
+Apply [explicit merge requests](#owner-authorized-merges) when optional analysis is unavailable and the user explicitly chooses to merge.
 
 An owner review pause prohibits starting another review and remains separate from an owner publication hold.
 Keep subscription limits, separate PR and CLI pools, and existing billing controls.

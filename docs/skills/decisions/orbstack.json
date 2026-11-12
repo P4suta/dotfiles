@@ -1,7 +1,7 @@
 {
-  "revision": "65a8f98e42963b65709055b0a1b4479becbc89e217a1c786e0997f1f4d6b1c80",
+  "revision": "7b823189db41c591bc86cf3e1e99377d908b996b5c9926bde30f5d4e6681a257",
   "outcome": "implemented",
-  "reason": "Use the shared bounded runner on OrbStack while preserving project entrypoints and the existing shared-engine and machine-deletion boundaries.",
+  "reason": "Use the shared bounded runner on OrbStack while preserving project entrypoints and the existing shared-engine and machine-deletion boundaries.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "crates/dotfiles/src/bounded.rs",
     "home/dot_agents/skills/orbstack/SKILL.md",

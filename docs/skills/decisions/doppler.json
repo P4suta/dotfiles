@@ -1,7 +1,7 @@
 {
-  "revision": "fb4c203cf764e191a0744e1b2856041988b6f76898c64ffa58e3d474b949a2d2",
+  "revision": "76a55f44f9255f7143744ffd600a64e9392877bc61c7be61496501d81633c36a",
   "outcome": "implemented",
-  "reason": "Confirm provider feature availability before requiring native identity, and honor the owner's scoped token choice.\nKeep provider key scope and lifetime distinct from protected credential delivery.\nPreparation leaves key issuance, registration, and live checks to the owner's pre-release setup while preserving other consumers' verified progress.",
+  "reason": "Confirm provider feature availability before requiring native identity, and honor the user's scoped token choice.\nKeep provider key scope and lifetime distinct from protected credential delivery.\nPreparation leaves key issuance, registration, and live checks to the user's pre-release setup while preserving other consumers' verified progress.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "home/dot_agents/skills/doppler/SKILL.md",
     "home/dot_agents/skills/doppler/tools.toml",

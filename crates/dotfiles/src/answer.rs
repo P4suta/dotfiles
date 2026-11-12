@@ -907,7 +907,9 @@ fn check_at(home: &Path, session: &str, draft: &Path, evidence: &Path, cwd: &Pat
 }
 
 fn check_house_style(draft: &str, bundle: impl FnOnce() -> Result<prose::Bundle>) -> Result<()> {
-    let findings = prose::house::check("answer.md", draft, bundle)?;
+    let bundle = bundle()?;
+    let findings = prose::house::check("answer.md", draft, || Ok(bundle.clone()))?;
+    let address = prose::check_user_address(&bundle, "answer.md", draft)?;
     ensure!(
         findings.is_empty(),
         "answer violates the shared house style:\n{}",
@@ -919,6 +921,11 @@ fn check_house_style(draft: &str, bundle: impl FnOnce() -> Result<prose::Bundle>
             ))
             .collect::<Vec<_>>()
             .join("\n")
+    );
+    ensure!(
+        address.is_empty(),
+        "answer violates the shared house style:\n{}",
+        prose::render(&address)
     );
     Ok(())
 }
@@ -1245,6 +1252,23 @@ pub fn execute(action: Action) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check(home: &Path, session: &str, draft: &Path, evidence: &Path) -> Result<()> {
+        check_at(home, session, draft, evidence, &std::env::current_dir()?)
+    }
+
+    fn check_at(
+        home: &Path,
+        session: &str,
+        draft: &Path,
+        evidence: &Path,
+        cwd: &Path,
+    ) -> Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        check_with_house(home, session, draft, evidence, cwd, || {
+            prose::Bundle::source(&root)
+        })
+    }
     use crate::fixture_git;
     use Formula::{Atom, Implies};
     use serde_json::json;
@@ -1599,6 +1623,10 @@ mod tests {
                 Some("House.Table"),
             ),
             ("提案：methodとinterfaceを使います。", None),
+            (
+                "提案：オーナーの承認を待ちます。",
+                Some("Dotfiles.UserAddress"),
+            ),
         ] {
             fs::write(&draft, text).unwrap();
             fs::write(&evidence, json!({"version":1,"atoms":[],"readings":[],"claims":[{"id":"change","text":text,"basis":{"kind":"proposal","reason":"Proposed implementation"}}]}).to_string()).unwrap();

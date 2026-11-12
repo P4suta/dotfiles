@@ -50,7 +50,7 @@ A project's own instructions take precedence when they conflict.
 - Treat applicable recommendations in shared skills and governing primary sources as required completion criteria.
   Determine applicability from the task, platform, source conditions, and explicit requirements.
   Apply each relevant rule and verify its result without a separate evidence submission.
-  Preserve the source's normative status and identify stronger adoption as owner policy.
+  Preserve the source's normative status and identify stronger adoption as personal policy.
   Resolve conflicts and justify exclusions explicitly.
   An unresolved applicable rule blocks a completion claim.
   Enforce observable requirements through maintained project gates with rejecting fixtures, and review semantic suitability directly.
@@ -62,4 +62,4 @@ A project's own instructions take precedence when they conflict.
   Use automatic incremental PR reviews without requiring manual commands or a full review.
 - Resolve supported review findings and pass required checks before declaring a PR complete.
   Honor an explicit instruction to merge despite an unavailable optional CodeRabbit review, while preserving repository-required reviews and publication holds.
-- Commit, push, reply to or resolve PR threads, request reviews, and merge only when the owner asks.
+- Commit, push, reply to or resolve PR threads, request reviews, and merge only when the user asks.

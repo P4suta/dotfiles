@@ -12,7 +12,7 @@ Read the registry's current official documentation and the project's existing pa
 Prefer supported identity-based publishing when production access is available and it fits the owner's selected operating model.
 Use `doppler` and its credential lifecycle reference for protected inputs, shared references, OIDC delivery, and retirement.
 Check whether native identity has replaced an existing static token before preserving it during a migration.
-When the registry requires a token, use a narrow owner-managed Doppler credential.
+When the registry requires a token, use a narrow user-managed Doppler credential.
 Never invent OIDC support or fall back to a broad static token without saying so.
 Build the candidate without publication credentials, then publish only its verified bytes through an explicitly approved stage.
 

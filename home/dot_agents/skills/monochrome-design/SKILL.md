@@ -31,7 +31,7 @@ Keep browser font preferences, enlargement, and spacing overrides effective.
 Use a unitless body line height of 1.75 and separate adjacent reading paragraphs by at least one and a half line boxes.
 Keep reading measures near 40 full-width Japanese characters or fewer, while distinguishing prose from compact labels and tabular data.
 Use at least 48 by 48 CSS pixels for standalone browser targets.
-The target size and typography defaults are owner preferences.
+The target size and typography defaults are personal preferences.
 Apply the [inline exception](https://www.w3.org/TR/WCAG22/#target-size-minimum) to prose links.
 
 ## Visual language

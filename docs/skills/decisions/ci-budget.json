@@ -1,7 +1,7 @@
 {
-  "revision": "211ae77b699f5b95514598acb422affd883e3f6b3d3af35bd1ebc79e8898f83c",
+  "revision": "927abef1ffcba2d5ffce4f242462e1a6077500b9b71e948e454e5ce38c29f753",
   "outcome": "implemented",
-  "reason": "Run applicable local checks before pushing and preserve required hosted gates and publication holds.\nInspect automatic review state without manual commands or a full-review prerequisite.\nHonor explicit merges during unavailable optional CodeRabbit review.",
+  "reason": "Run applicable local checks before pushing and preserve required hosted gates and publication holds.\nInspect automatic review state without manual commands or a full-review prerequisite.\nHonor explicit merges during unavailable optional CodeRabbit review.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "home/dot_agents/skills/ci-budget/SKILL.md",

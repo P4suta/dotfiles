@@ -1,7 +1,7 @@
 {
-  "revision": "0645085b66809f5d2160c7e20850e0c8e371806bf327b132bc3ea206379e10f8",
+  "revision": "c94592fde4e592c81dff40520ad35581e99079b84ddaa4d615f8f7409868c34b",
   "outcome": "keep",
-  "reason": "Keep shared signing inputs canonical and separate retrieval authority, service operations, and public release authority.\nDeliver only the credentials each signing or completion stage needs.\nUse current native app assessments and distinguish them from fresh installation evidence.",
+  "reason": "Keep shared signing inputs canonical and separate retrieval authority, service operations, and public release authority.\nDeliver only the credentials each signing or completion stage needs.\nUse current native app assessments and distinguish them from fresh installation evidence.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "home/dot_agents/skills/code-signing/SKILL.md",
     "home/dot_agents/skills/code-signing/references/apple.md",

@@ -33,6 +33,10 @@ pub const SOURCE_CONFIG: &str = "home/dot_config/prose";
 const INSTALL: &str = "just install-prose";
 const INSTALLED_TOOLS: &str = "tools.toml";
 const COPYEDIT_TOOLS: &str = "copyedit-tools.toml";
+const USER_ADDRESS_RULE: &str = "Dotfiles.UserAddress";
+const USER_ADDRESS_PATH: &str = "styles/Dotfiles/UserAddress.yml";
+const USER_ADDRESS_SOURCE: &str =
+    include_str!("../../../home/dot_config/prose/styles/Dotfiles/UserAddress.yml");
 
 /// The digest digits that name a cached textlint installation.
 const CACHE_DIGEST_DIGITS: usize = 16;
@@ -557,6 +561,25 @@ fn vale(bundle: &Bundle, inputs: &[Input]) -> Result<Vec<Finding>> {
         }
     }
     Ok(findings)
+}
+
+/// Checks personal address with the same Vale rule as persisted prose.
+///
+/// # Errors
+///
+/// Refuses a missing or changed rule, an invalid configuration, or a failed Vale process.
+pub fn check_user_address(bundle: &Bundle, path: &str, text: &str) -> Result<Vec<Finding>> {
+    let source = fs::read_to_string(bundle.config.join(USER_ADDRESS_PATH))
+        .context("read the shared personal address rule")?;
+    ensure!(
+        source.replace("\r\n", "\n") == USER_ADDRESS_SOURCE.replace("\r\n", "\n"),
+        "the shared personal address rule differs from the compiled policy; run `{INSTALL}` in the dotfiles source"
+    );
+    bundle.verify()?;
+    Ok(vale(bundle, &[Input::new(path, text, true)])?
+        .into_iter()
+        .filter(|finding| finding.rule == USER_ADDRESS_RULE)
+        .collect())
 }
 
 /// Installs the pinned textlint packages into `target` unless the same lockfile already produced it.

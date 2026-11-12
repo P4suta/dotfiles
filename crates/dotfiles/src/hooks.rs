@@ -625,7 +625,7 @@ fn verification(hook: Hook, arguments: &[OsString], input: &[u8]) -> Result<()> 
     }
 }
 
-/// The machine-local push pause, which only an explicit owner instruction lifts, so the refusal names no bypass.
+/// The machine-local push pause, which only an explicit user instruction lifts, so the refusal names no bypass.
 #[must_use]
 pub fn push_paused(marker: &Path) -> Refusal {
     Refusal::new(

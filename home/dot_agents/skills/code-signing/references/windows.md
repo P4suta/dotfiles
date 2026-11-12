@@ -24,7 +24,7 @@ For an enrolled certificate, reuse the secret saved in 1Password.
 Without a saved secret, the owner opens the order's download page, enters the enrollment PIN in the protected UI, and chooses **Show QR Code**.
 The owner saves the persistent secret in 1Password through a protected input.
 Keep the QR code and its secret out of screenshots, logs, and any browser tooling that returns screenshots or DOM snapshots.
-Receive only the owner's confirmation of the save.
+Receive only confirmation that the user saved the credential.
 Never choose **Reset** to inspect the existing code.
 A reset breaks other automation and needs explicit authorization.
 

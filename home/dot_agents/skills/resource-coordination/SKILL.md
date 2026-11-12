@@ -1,7 +1,7 @@
 ---
 name: resource-coordination
 description: >-
-  Plan and coordinate expensive verification on shared development machines with explicit owner permission and bounded resource use.
+  Plan and coordinate expensive verification on shared development machines with explicit user permission and bounded resource use.
   Use for mutation testing, long proofs, fuzzing, benchmarks, and machine contention between agents.
 ---
 

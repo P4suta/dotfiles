@@ -1,7 +1,7 @@
 {
-  "revision": "f9153dc506e5997b5307be6a1365b36fe3c44ac7ccbb7359f10ed8f71e703b39",
+  "revision": "4fe15837fbadf6cb7e569919270fdd6f8057e4dce5eafb05a9e56adbc1f147a6",
   "outcome": "implemented",
-  "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, owner holds, and guarded explicit reviews.",
+  "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, explicit holds, and guarded explicit reviews.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",

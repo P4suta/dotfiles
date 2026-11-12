@@ -27,7 +27,7 @@ Use the commands available on DSM rather than assuming the development hosts' to
 The administrator shell isn't root, and DSM documents interactive escalation through `sudo -i`.
 Read every fact you can without root first, and hand each privileged command to the owner as a one-liner they run with a terminal attached, such as `ssh -t ALIAS sudo COMMAND`.
 Never add a `NOPASSWD` sudoers entry, change the SSH port, or widen the account's groups to avoid a prompt.
-Treat storage pools, shared folders, snapshots, user accounts, and firewall rules as out of scope unless the owner authorized that exact change.
+Treat storage pools, shared folders, snapshots, user accounts, and firewall rules as out of scope unless the user authorized that exact change.
 
 ## Discover the installation
 
@@ -62,7 +62,7 @@ For rollback, remove only the endpoint added by the task with `tailscale serve -
 
 ## Retirement
 
-When the owner requests QuickConnect retirement, inventory every consumer before turning the service off.
+When the user requests QuickConnect retirement, inventory every consumer before turning the service off.
 Include desktop Drive clients on each machine, mobile Drive and Photos apps, and backup or sync tasks keyed to the QuickConnect ID.
 Verify that each intended client can connect through Tailscale before changing its endpoint.
 Check each DSM, Drive, and file share endpoint because the DSM proxy doesn't forward other services' protocols.

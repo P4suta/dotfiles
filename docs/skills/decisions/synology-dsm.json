@@ -1,7 +1,7 @@
 {
-  "revision": "8e0a83c2eca4c3af076e72465569e5871621bce2ad94582140a2212ff7c0383b",
+  "revision": "19a672e83f206f797e1fe9cddbf6f871023b7fa53d1fdce11fb9089d6cba814f",
   "outcome": "implemented",
-  "reason": "Administer the Synology NAS over the tailnet through its own OpenSSH with root kept behind an interactive prompt.\nSeparate from nas (artifact transfers), tailscale (reachability and policy), and multi-machine (development hosts); machine identities stay in the local inventory.",
+  "reason": "Administer the Synology NAS over the tailnet through its own OpenSSH with root kept behind an interactive prompt.\nSeparate from nas (artifact transfers), tailscale (reachability and policy), and multi-machine (development hosts); machine identities stay in the local inventory.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "home/dot_agents/skills/synology-dsm/SKILL.md"
   ],

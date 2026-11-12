@@ -35,10 +35,12 @@ fn begin(home: &Path) -> Result<()> {
 
 fn stop(home: &Path, language: &str, input: &Value) -> Result<Output> {
     begin(home)?;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), home)
         .current_dir(home)
         .env("HOME", home)
         .env("USERPROFILE", home)
+        .env("PROSE_CONFIG", root.join("home/dot_config/prose"))
         .args(["assure", "stop", "--reply-language", language])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -153,6 +155,24 @@ fn a_japanese_reply_follows_the_installed_word_rules() -> Result<()> {
     );
     let past = stop_with_rules("\u{66f8}\u{3044}\u{305f}\u{3060}\u{3051}\u{3067}\u{3059}\u{3002}")?;
     assert_eq!(past["decision"], "block", "{past}");
+    for reply in ["Ownerに確認します。", "オーナーの承認を待ちます。"] {
+        let blocked = stop_with_rules(reply)?;
+        assert_eq!(blocked["decision"], "block", "{reply}: {blocked}");
+        assert!(
+            blocked["reason"]
+                .as_str()
+                .unwrap()
+                .contains("Dotfiles.UserAddress"),
+            "{reply}: {blocked}"
+        );
+    }
+    for reply in [
+        "ファイルの所有者を確認しました。",
+        "`Owner`はAPI名です。",
+        "> オーナーの承認を待ちます。",
+    ] {
+        assert_eq!(stop_with_rules(reply)?, json!({}), "{reply}");
+    }
     Ok(())
 }
 

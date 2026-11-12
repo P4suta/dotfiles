@@ -1,7 +1,7 @@
 {
-  "revision": "cb15cf787fb042125671cf0cea59566fd3029ddb0048c10ab5ecec3be04f5c30",
+  "revision": "9e600fea874fb5502e85a9a064d1d78b8ee5f2190e61d6ed26d7b369168151f1",
   "outcome": "implemented",
-  "reason": "Use automatic incremental reviews without manual commands or a full-review prerequisite.\nHonor an explicit merge instruction during unavailable optional review through normal GitHub admission.\nPreserve source checks, required reviews, supported findings, and truthful review status.",
+  "reason": "Use automatic incremental reviews without manual commands or a full-review prerequisite.\nHonor an explicit merge instruction during unavailable optional review through normal GitHub admission.\nPreserve source checks, required reviews, supported findings, and truthful review status.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",

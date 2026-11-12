@@ -62,7 +62,7 @@ For signing or release verification, add `--no-fallback` so a cached config neve
 ## Import or share credentials
 
 The user manages 1Password, so never access it or ask for its contents.
-For an active owner-managed credential input, create missing keys as empty values with explanatory notes, configure references, and give direct config links.
+For an active user-managed credential input, create missing keys as empty values with explanatory notes, configure references, and give direct config links.
 Preserve unrelated fields, and make consuming commands reject empty values.
 The user fills and saves the prepared fields in Doppler.
 Inspect names and access metadata after registration without retrieving values.

@@ -104,6 +104,73 @@ fn documents_report_the_rule_and_the_offending_sentence() -> Result<()> {
 }
 
 #[test]
+fn personal_address_rejects_user_roles() -> Result<()> {
+    let bundle = source()?;
+    for channel in [
+        Channel::Commit,
+        Channel::Document,
+        Channel::Pr,
+        Channel::Issue,
+    ] {
+        for sentence in [
+            "Owner approval is pending.",
+            "The owner confirmed the transfer.",
+            "Owner authorization is required.",
+            "OWNER ACCEPTANCE is pending.",
+            "Ownerに確認します。",
+            "オーナーの承認を待ちます。",
+            "所有者様の確認を待ちます。",
+        ] {
+            let findings = prose::check(&bundle, channel, "message", sentence)?;
+            assert!(
+                rules(&findings).contains(&"Dotfiles.UserAddress"),
+                "{channel:?}: {sentence}: {findings:?}"
+            );
+        }
+        for sentence in [
+            "Approval is pending.",
+            "The file owner has write access.",
+            "The repository owner can update the ruleset.",
+            "Rust ownership controls when a value is dropped.",
+            "The owner map resolves repository origins.",
+            "The owner-local state directory holds the issue context.",
+            "`Owner` is an API identifier.",
+            "ファイルの所有者を確認します。",
+            "> Owner approval is pending.",
+            "```text\nOwner approval is pending.\n```",
+        ] {
+            let findings = prose::check(&bundle, channel, "message", sentence)?;
+            assert!(
+                !rules(&findings).contains(&"Dotfiles.UserAddress"),
+                "{channel:?}: {sentence}: {findings:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn personal_address_refuses_a_missing_or_weakened_rule() -> Result<()> {
+    let mut bundle = source()?;
+    let rule = "styles/Dotfiles/UserAddress.yml";
+    let original = fs::read_to_string(bundle.config.join(rule))?;
+    let copy = tempfile::tempdir()?;
+    bundle.config = copy.path().to_owned();
+    let missing = prose::check_user_address(&bundle, "reply.md", "Owner approval is pending.")
+        .expect_err("missing address rule");
+    assert!(format!("{missing:#}").contains("read the shared personal address rule"));
+    fs::create_dir_all(bundle.config.join("styles/Dotfiles"))?;
+    fs::write(
+        bundle.config.join(rule),
+        original.replace("owner", "project"),
+    )?;
+    let weakened = prose::check_user_address(&bundle, "reply.md", "Owner approval is pending.")
+        .expect_err("changed address rule");
+    assert!(format!("{weakened:#}").contains("differs from the compiled policy"));
+    Ok(())
+}
+
+#[test]
 fn repository_rules_cover_hedging_comparison_lines_and_language() -> Result<()> {
     let bundle = source()?;
     let document = |text: &str| prose::check(&bundle, Channel::Document, "guide.md", text);

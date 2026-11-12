@@ -113,7 +113,7 @@ The hook and every prose channel share the sentence layout rules in `crates/rule
 They refuse two sentences on one line and a sentence that wraps across adjacent prose lines.
 They report the first line and tell writers to split long sentences when a channel limits line length.
 Headings, labels ending in a colon, lists, tables, code, quotes, and front matter keep their structural line rules.
-Project-owned hooks, required checks, reviews, signatures, and owner authorization remain effective.
+Project-owned hooks, required checks, reviews, signatures, and user authorization remain effective.
 Reply, commit, push, and PR readiness gates check changed personal ADR content without an optional catalog or execution plan.
 The optional catalog checks account for inherited code, as [the change-provenance decision](adr/assurance-follows-change-provenance.md) describes.
 
