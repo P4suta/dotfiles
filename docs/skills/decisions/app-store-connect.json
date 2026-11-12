@@ -1,7 +1,7 @@
 {
-  "revision": "d2213b399b67a38baba49f55c2eeaba18d0e2840e46d42bae57623cef165fb33",
+  "revision": "d7effe0ee54ed1d10364eef61add26f7a727480311f10e3a7686bc80c691b664",
   "outcome": "implemented",
-  "reason": "A focused CLI workflow fills the catalog gap between Apple platform guidance and release automation, with scoped authentication, creative placement states, and an explicit final submission boundary.",
+  "reason": "The CLI workflow preserves final submission authority and binds placement assignment to the returned upload image ID.",
   "evidence": [
     "home/dot_agents/skills/app-store-connect/SKILL.md",
     "home/dot_agents/skills/app-store-connect/references/creative-assets.md"

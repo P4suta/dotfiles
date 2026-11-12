@@ -22,13 +22,13 @@ Read [creative assets](references/creative-assets.md) when preparing headers, se
 Identify the app ID, bundle identifier, platform, version ID, localization IDs, selected build, and current review submission.
 Read server state before changing an existing app.
 Use the project's metadata files and release commands rather than reconstructing their values from screenshots.
-Preserve review contacts and owner-entered settings when changing unrelated fields.
+Preserve review contacts and existing settings when changing unrelated fields.
 
 Distinguish preparing metadata, uploading a build, adding items to a draft, submitting for review, and releasing an approved version.
 Apple's [submission procedure](https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/submit-an-app) separates adding an item for review from submitting the review draft.
-An instruction to leave the final submission button to the owner stops before submission.
+An instruction to leave the final submission button to the user stops before submission.
 For that handoff, verify a ready draft with the intended items and a null submission timestamp.
-Keep the owner's selected release option explicit, because automatic release can publish after approval.
+Keep the selected release option explicit, because automatic release can publish after approval.
 
 ## Authenticate without borrowing the browser session
 
@@ -90,13 +90,13 @@ Keep operational IDs, credentials, private contacts, and project paths out of re
 Read the validator's individual findings rather than treating its exit code as a complete store audit.
 Some checks need a cached Apple web session when using `asc validate --deep`.
 A missing session establishes a coverage gap, not a missing app setting.
-Use an authorized existing web session when available, or batch the remaining checks in the owner's browser.
+Use an authorized existing web session when available, or batch the remaining checks in the selected browser.
 Verify published App Privacy answers, applicable business agreements, and actual device previews where CLI coverage is absent.
 Derive privacy answers from the shipped code and SDKs rather than assuming no collection for every app.
 Check applicability before filling business agreements, monetization details, or category declarations.
 Don't accept legal agreements without the required authorization.
 
-Respect the owner's browser choice and reduce focus changes.
+Use the requested browser and reduce focus changes.
 When the browser connection is unavailable, use an authorized native UI capability or make one concrete handoff for the unsupported work.
 Don't keep retrying focus-stealing automation for an operation the CLI supports.
 
@@ -116,4 +116,4 @@ The convenience workflow can prepare and submit a version: `asc review submit`.
 An existing draft can use `asc review submissions-submit`.
 
 Use submission commands only when submission is within the current authorization.
-Report the verified result and any concrete remaining owner action without claiming that public API validation covers unperformed web checks.
+Report the verified result and any concrete action still required from the user without claiming that public API validation covers unperformed web checks.

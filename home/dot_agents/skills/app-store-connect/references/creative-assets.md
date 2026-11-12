@@ -32,6 +32,14 @@ Recheck installed help and current server behavior before relying on their flags
 
 ```sh
 asc asset-library images upload --library-id "$LIBRARY_ID" --file "$IMAGE_PATH" --reference-name "$ASSET_NAME"
+```
+
+Confirm successful processing in the upload receipt.
+Read the returned image identifier from `imageId`.
+Replace the placeholder below with that value before creating a placement:
+
+```sh
+IMAGE_ID="RETURNED_IMAGE_ID"
 asc localizations placements create --localization-id "$LOCALIZATION_ID" --image-id "$IMAGE_ID" --placement-type PRODUCT_PAGE_HEADER_ASSET
 asc localizations placements list --localization-id "$LOCALIZATION_ID" --placement-type PRODUCT_PAGE_HEADER_ASSET,APP_STORE_SEARCH_RESULTS_ASSET --paginate --include image
 ```
@@ -54,4 +62,4 @@ Preserve the placement group.
 The CLI describes that swap relationship as a live-verified extension, so inspect the result and don't assume an automatic delete fallback.
 Assign the corrected images and add the version back to the draft.
 Read back both placements, embedded artwork states, selected version, and `submittedDate`.
-Leave final submission to the owner when that's the requested handoff.
+Leave final submission to the user when that's the requested handoff.
