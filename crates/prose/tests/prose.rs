@@ -173,6 +173,7 @@ fn personal_address_preserves_qualified_ownership() -> Result<()> {
             "The owner of the file has write access.",
             "The owner of the repository can update the ruleset.",
             "You are the repository owner.",
+            "Rustのオーナーシップは値の有効期間を管理します。",
             "ファイルの所有者の確認が必要です。",
             "ファイル所有者の確認が必要です。",
         ] {

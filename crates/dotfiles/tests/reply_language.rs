@@ -190,6 +190,12 @@ fn reply_gates_distinguish_personal_address_from_qualified_ownership() -> Result
             ("English", "The owner opens the certificate.", true),
             ("English", "The owner saves the certificate.", true),
             ("English", "Repository owner approval is required.", false),
+            ("Japanese", "オーナーの承認を待ちます。", true),
+            (
+                "Japanese",
+                "Rustのオーナーシップは値の有効期間を管理します。",
+                false,
+            ),
             ("Japanese", "ファイルの所有者の確認が必要です。", false),
         ] {
             let checked = answer(&reply_gate(

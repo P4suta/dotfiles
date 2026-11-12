@@ -456,7 +456,7 @@
     {"mode":"0644","path":".config/prose/styles/Dotfiles/Attribution.yml","sha256":"c8545e63d43792817371b6b7f2eae3b551931585909e793f80f7e7800b02849a","type":"file"},
     {"mode":"0644","path":".config/prose/styles/Dotfiles/Comparison.yml","sha256":"f80d96f1195a829e6255b3d7e1ce34180047da80f8819be1fb38175aa4361b8e","type":"file"},
     {"mode":"0644","path":".config/prose/styles/Dotfiles/Hedging.yml","sha256":"81be9a556d78c268882644edbff66b0ad1895cd2380dfcb89ac2c97d8d87049f","type":"file"},
-    {"mode":"0644","path":".config/prose/styles/Dotfiles/UserAddress.yml","sha256":"7c7aa86bc01d574cc1bc8390f3668afd7a6271d25f66d97fc09e891926844caf","type":"file"},
+    {"mode":"0644","path":".config/prose/styles/Dotfiles/UserAddress.yml","sha256":"739085e2a8eab4c7edb4e5e1646f3edb3766a622f43e8bf637defb5d070e7991","type":"file"},
     {"mode":"0644","path":".config/prose/styles/Dotfiles/VersionLabel.yml","sha256":"64ac010cae0df50ca1a1bd9da1cdbdbe4afba99a3db6b8564889dd0b9249e796","type":"file"},
     {"mode":"0755","path":".config/prose/styles/Google","sha256":null,"type":"dir"},
     {"mode":"0644","path":".config/prose/styles/Google/AMPM.yml","sha256":"e729555ac5b50f688958cfa5a28c4070bdd29e762d94b832a5621e602df9cf5b","type":"file"},
