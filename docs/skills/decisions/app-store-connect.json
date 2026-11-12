@@ -1,0 +1,10 @@
+{
+  "revision": "d2213b399b67a38baba49f55c2eeaba18d0e2840e46d42bae57623cef165fb33",
+  "outcome": "implemented",
+  "reason": "A focused CLI workflow fills the catalog gap between Apple platform guidance and release automation, with scoped authentication, creative placement states, and an explicit final submission boundary.",
+  "evidence": [
+    "home/dot_agents/skills/app-store-connect/SKILL.md",
+    "home/dot_agents/skills/app-store-connect/references/creative-assets.md"
+  ],
+  "revisit": null
+}
