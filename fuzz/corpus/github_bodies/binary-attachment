@@ -1,0 +1,11 @@
+gh
+api
+--method
+POST
+'https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123'
+--header
+'Content-Type: application/octet-stream'
+--input
+screenshot.png
+--jq
+.url
