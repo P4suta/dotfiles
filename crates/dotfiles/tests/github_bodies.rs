@@ -69,6 +69,96 @@ fn attachment_files(root: &Path) -> Result<()> {
 }
 
 #[test]
+fn binary_asset_uploads_use_the_attachment_endpoint_contract() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    std::fs::write(root.join("screenshot.png"), b"\x89PNG\r\n\x1a\n")?;
+    check_publications(
+        root,
+        &[
+            (
+                "gh api --method POST 'https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123' --header 'Content-Type: application/octet-stream' --input screenshot.png --jq .url",
+                true,
+                "",
+            ),
+            (
+                "gh api 'https://uploads.github.com/user-attachments/assets?repository_id=123&content_type=image%2Fpng&name=screenshot.png' -XPOST -H'content-type:application/octet-stream' --input=screenshot.png -q.url",
+                true,
+                "",
+            ),
+            (
+                "gh api --hostname github.com 'https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123' --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/octet-stream' --input screenshot.png --silent",
+                true,
+                "",
+            ),
+            (
+                "gh api --method POST 'https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123' --header 'Content-Type: application/octet-stream' --input missing.png",
+                false,
+                "inspect GitHub binary attachment",
+            ),
+            (
+                "gh api --method POST 'https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123' --header 'Content-Type: application/octet-stream' --input .",
+                false,
+                "not a regular file",
+            ),
+        ],
+    )
+}
+
+#[test]
+fn binary_upload_metadata_cannot_exempt_publication_bodies() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    std::fs::write(root.join("screenshot.png"), b"\x89PNG\r\n\x1a\n")?;
+    for endpoint in [
+        "http://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123",
+        "https://uploads.github.com.example.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123",
+        "https://reader@uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123",
+        "https://uploads.github.com/user-attachments/assets/other?name=screenshot.png&content_type=image%2Fpng&repository_id=123",
+        "https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=0",
+        "https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=text%2Fplain&repository_id=123",
+        "https://uploads.github.com/user-attachments/assets?name=screenshot.png&name=other.png&content_type=image%2Fpng&repository_id=123",
+        "https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123&body=Unchecked",
+        "https://api.github.com/repos/owner/repo/issues",
+    ] {
+        let command = format!(
+            "gh api --method POST '{endpoint}' --header 'Content-Type: application/octet-stream' --input screenshot.png"
+        );
+        check_publications(root, &[(&command, false, "not UTF-8")])?;
+    }
+    check_publications(
+        root,
+        &[
+            (
+                "gh api --method PATCH 'https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123' --header 'Content-Type: application/octet-stream' --input screenshot.png",
+                false,
+                "not UTF-8",
+            ),
+            (
+                "gh api --method POST --method POST 'https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123' --header 'Content-Type: application/octet-stream' --input screenshot.png",
+                false,
+                "not UTF-8",
+            ),
+            (
+                "gh api --method POST 'https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123' --header 'Content-Type: application/octet-stream' --header 'Content-Type: application/json' --input screenshot.png",
+                false,
+                "not UTF-8",
+            ),
+            (
+                "gh api --method POST 'https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123' --header 'Content-Type: application/octet-stream' --input screenshot.png -fbody='Unchecked text.'",
+                false,
+                "not UTF-8",
+            ),
+            (
+                "gh api --method POST 'https://uploads.github.com/user-attachments/assets?name=screenshot.png&content_type=image%2Fpng&repository_id=123' --header 'Content-Type: application/octet-stream' -fbody='The check passed. The issue is complete.'",
+                false,
+                "SentencePerLine",
+            ),
+        ],
+    )
+}
+
+#[test]
 fn the_native_hook_checks_publication_inputs_through_the_installed_bundle_adapter() -> Result<()> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
