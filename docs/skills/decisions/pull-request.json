@@ -1,7 +1,7 @@
 {
-  "revision": "cb15cf787fb042125671cf0cea59566fd3029ddb0048c10ab5ecec3be04f5c30",
+  "revision": "2f097710a63bd68e2c8077b0a4d635043ea9c03f3c4fef5fd42e6dd732ba8975",
   "outcome": "implemented",
-  "reason": "Use automatic incremental reviews without manual commands or a full-review prerequisite.\nHonor an explicit merge instruction during unavailable optional review through normal GitHub admission.\nPreserve source checks, required reviews, supported findings, and truthful review status.",
+  "reason": "Use automatic incremental reviews without manual commands or a full-review prerequisite.\nHonor an explicit merge instruction during unavailable optional review through normal GitHub admission.\nPreserve source checks, required reviews, supported findings, and truthful review status.\nAccept CodeRabbit Check Runs bound to the provider and inspected head while preserving review and finding checks.",
   "evidence": [
     "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
