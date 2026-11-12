@@ -8,7 +8,7 @@
     {"mode":"0755","path":".agents/skills/android-platform-guidelines","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/android-platform-guidelines/SKILL.md","sha256":"310bfe3a6fd2f027c6d05e8009ddfc3e88ac7e521e1c88a96d4d73d15a6b7732","type":"file"},
     {"mode":"0755","path":".agents/skills/app-store-connect","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/app-store-connect/SKILL.md","sha256":"83f75793acf035736357f0dd456af6d3a1b4af58e114ccc09493713181f9f1e3","type":"file"},
+    {"mode":"0644","path":".agents/skills/app-store-connect/SKILL.md","sha256":"6a7271c52f1e200859871357ccd3334bdd8133c7ebed2399ff5672ab676792f5","type":"file"},
     {"mode":"0755","path":".agents/skills/app-store-connect/references","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/app-store-connect/references/creative-assets.md","sha256":"363ebcfb10e27af1123107f99f1228d53028aa60355cd3f885fee0bb671f4fc8","type":"file"},
     {"mode":"0755","path":".agents/skills/apple-notarization","sha256":null,"type":"dir"},

@@ -32,11 +32,15 @@ Keep the selected release option explicit, because automatic release can publish
 
 ## Authenticate without borrowing the browser session
 
-Use the existing API key's issuer ID, key ID, and private key through the CLI's supported environment variables.
+Use the existing API key's key ID, key type, and private key through the CLI's supported environment variables.
 Read current authentication help before mapping stored credentials into supported environment variables or an existing key path.
-The issuer ID uses `ASC_ISSUER_ID`.
 The key ID uses `ASC_KEY_ID`.
 The Base64-encoded private key uses `ASC_PRIVATE_KEY_B64`.
+For team keys, choose the key type: `ASC_KEY_TYPE=team`.
+Supply the team issuer ID through `ASC_ISSUER_ID`.
+For individual keys, confirm CLI support.
+Choose the individual key type: `ASC_KEY_TYPE=individual`.
+Unset `ASC_ISSUER_ID`.
 
 Pass credentials through the consuming process environment.
 Keep credentials out of command arguments and plaintext files.
@@ -44,6 +48,31 @@ For release operations, select the existing scoped Doppler project and config.
 Inject credentials with `doppler run`.
 Select required secret names with `--only-secrets`.
 Turn off cached fallback with `--no-fallback`.
+Follow the pinned CLI's [credential resolution](https://github.com/rorkai/App-Store-Connect-CLI/blob/6.6.1/website/src/content/docs/authentication.mdx#credential-resolution).
+For the Base64 environment flow, omit the profile flag: `--profile`.
+An inherited bearer token overrides environment keys: `ASC_BEARER_TOKEN`.
+In the consuming child process, unset inherited selectors and unused private-key variables:
+
+```sh
+unset ASC_PROFILE ASC_BYPASS_KEYCHAIN ASC_CONFIG_PATH ASC_BEARER_TOKEN
+unset ASC_PRIVATE_KEY_PATH ASC_PRIVATE_KEY
+```
+
+Replace inherited key ID, key type, and issuer fields with the selected secret entry's fields.
+Use a complete environment set and enable strict authentication: `ASC_STRICT_AUTH=true`.
+Before mutations, inspect authentication in the same environment:
+
+```sh
+asc auth status --output json
+```
+
+Confirm an empty profile selection.
+Require complete environment credentials: `environmentCredentialsComplete=true`.
+Confirm that environment credentials take precedence in the status note: `environmentNote`.
+Compare the injected key ID, key type, and applicable issuer with the intended secret entry.
+The status command also lists stored keys, so distinguish that inventory from the active environment source.
+Strict mode rejects required fields that mix sources.
+Verify key selection through the environment and status checks.
 Don't change authentication methods or broaden access to repair an unrelated validation failure.
 Preserve configured telemetry opt-outs.
 Supported opt-out variables include `ASC_TELEMETRY_DISABLED`.

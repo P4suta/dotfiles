@@ -1,7 +1,7 @@
 {
-  "revision": "d7effe0ee54ed1d10364eef61add26f7a727480311f10e3a7686bc80c691b664",
+  "revision": "18eb6651967cb6288cea1d0558c8f265e83aa40f0581c1023437ec46bc0973a1",
   "outcome": "implemented",
-  "reason": "The CLI workflow preserves final submission authority and binds placement assignment to the returned upload image ID.",
+  "reason": "The CLI workflow verifies key selection, binds placement to the returned image ID, and preserves final submission authority.",
   "evidence": [
     "home/dot_agents/skills/app-store-connect/SKILL.md",
     "home/dot_agents/skills/app-store-connect/references/creative-assets.md"
