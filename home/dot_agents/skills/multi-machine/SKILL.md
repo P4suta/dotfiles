@@ -41,5 +41,5 @@ Synchronization grants no release permission.
 Never use `--no-verify`, skip variables, unsigned fallback commits, direct protected-branch writes, or ruleset bypass to pass a failed gate.
 Repair the failing gate or run it through the project's documented runner before the authorized push.
 
-Use domyjob chat, fleet, or herdr only for explicitly authorized session work.
+Use fleet or herdr only for explicitly authorized session work.
 Never start sessions automatically, accept a folder-trust prompt, or grant a remote session write access just because another host exists.

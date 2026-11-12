@@ -24,16 +24,6 @@
         "$ref": "#/$defs/ContrastPair"
       }
     },
-    "domyjob": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Domyjob"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
     "herdr_agent": {
       "anyOf": [
         {
@@ -217,21 +207,6 @@
       },
       "additionalProperties": false
     },
-    "Chat": {
-      "type": "object",
-      "properties": {
-        "peers": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "peers"
-      ]
-    },
     "Chord": {
       "description": "A key chord that every shell's line editor can bind.",
       "type": "string",
@@ -292,18 +267,6 @@
         "foreground",
         "background",
         "used"
-      ]
-    },
-    "Domyjob": {
-      "type": "object",
-      "properties": {
-        "chat": {
-          "$ref": "#/$defs/Chat"
-        }
-      },
-      "additionalProperties": false,
-      "required": [
-        "chat"
       ]
     },
     "EditMode": {
