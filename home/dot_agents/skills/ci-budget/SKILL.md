@@ -15,7 +15,7 @@ Reuse current results instead of starting duplicate campaigns at commit, push, o
 Use `formal-assurance` for reproducible verdicts and run heavy checks in the project's pinned container or documented hosted runners.
 Required hosted checks and repository-required reviews remain merge gates.
 Use automatic incremental CodeRabbit reviews and follow `pull-request` for an explicit merge instruction during unavailable optional review.
-An active owner-imposed push pause overrides any push authorization until the owner explicitly resumes pushes.
+An explicit push pause overrides any push authorization until the user explicitly resumes pushes.
 
 ## Prepare locally
 
@@ -27,7 +27,7 @@ Run missing checks and fix failures before answering yes.
 Repair missing tools or services, or use a justified equivalent check.
 If a required local check still can't run, ask the user for the decision needed before pushing.
 An unverified disclaimer grants no exemption.
-The owner's hosts may cache artifacts and exact-source evidence within the owner-side tooling boundary in `formal-assurance`.
+The user's hosts may cache artifacts and exact-source evidence within the user-side tooling boundary in `formal-assurance`.
 Keep hosted-only prerequisites at their proper workflow stage, such as GitHub event permissions, OIDC, environment approval, and publication.
 Local verification grants no signing, publication, paid service calls, or self-hosted runner registration.
 
@@ -41,8 +41,8 @@ Use `reliability` for intermittent failures instead of pushing until CI passes.
 Before every push, inspect the effective hooks and the machine-local pause in [push control](references/push-control.md).
 Honor the marker even where a Git client lacks the hook.
 Never remove a pause, bypass hooks, change CI requirements, or add skip directives to make a push succeed.
-Only the owner's explicit instruction resumes a pause.
-Before a costly hosted run with uncertain allowance, check the owner's [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+Only the user's explicit instruction resumes a pause.
+Before a costly hosted run with uncertain allowance, check the user's [Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
 
 Continue local work, verification, and authorized commits during a pause.
 A local commit implies no push.
@@ -50,6 +50,6 @@ Fetch before publishing, then publish one complete reviewable update and follow 
 Inspect push, `pull_request`, tag, and merge triggers for the hosted effects of one publication.
 
 Inspect the final pushed head's automatic review state without demanding a manual command or full review.
-Wait for active automatic review unless the owner's explicit optional-review merge instruction applies.
+Wait for active automatic review unless the user's explicit optional-review merge instruction applies.
 Report an unresolved hold or hosted gate as pending with the local result and the blocked step.
 [Skipped required workflows stay pending](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs).

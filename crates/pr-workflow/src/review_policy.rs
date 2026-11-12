@@ -717,7 +717,7 @@ pub(super) fn assess(
     )?;
     authenticate(&final_current, &packet, signers.path(), &github.login)?;
     let stored = evidence::store_assessment(
-        &platform::home::home().context("the owner home for the assessment is unavailable")?,
+        &platform::home::home().context("the user's home for the assessment is unavailable")?,
         &statement.binding.repository,
         &statement.binding.head,
         &statement.binding.diff_sha256,
@@ -746,7 +746,7 @@ pub(super) fn paused(checked: &Checked) -> Result<bool> {
 pub(super) fn admit_publication(checked: &Checked) -> Result<()> {
     ensure!(
         rules::pr_rules::review_request_allowed(paused(checked)?, true),
-        "CodeRabbit PR reviews are paused by the owner; wait for the owner to resume reviews"
+        "CodeRabbit PR reviews are paused by the user; wait for the user to resume reviews"
     );
     Ok(())
 }

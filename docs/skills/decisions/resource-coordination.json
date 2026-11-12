@@ -1,7 +1,7 @@
 {
-  "revision": "3e50b64fda2f4c196b975475d16ac85c675f228d0ba512fcff46e97b9175d3b0",
+  "revision": "6c9b82d182abadf403f0ef2db9d8a97a636266f76c574a7f28f35e7dc8285c52",
   "outcome": "implemented",
-  "reason": "Keep scheduling permission separate from the enforced bounded-tool rule and point to the shared runner without repeating its resource limits.",
+  "reason": "Keep scheduling permission separate from the enforced bounded-tool rule and point to the shared runner without repeating its resource limits.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "crates/dotfiles/src/bounded.rs",
     "home/dot_agents/skills/resource-coordination/SKILL.md"

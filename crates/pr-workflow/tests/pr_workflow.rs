@@ -3814,7 +3814,7 @@ fn ordinary_mentions_are_preserved_in_authored_documents() -> Result<()> {
     Ok(())
 }
 
-/// Each pause marker the owner can set, and whether it pauses PR reviews.
+/// Each pause marker the user can set, and whether it pauses PR reviews.
 const PAUSES: [(Option<&str>, bool); 4] = [
     (None, false),
     (Some("paused"), true),
@@ -3966,7 +3966,7 @@ fn repository_pr_policy_blocks_publication_during_a_pr_pause() -> Result<()> {
             });
             let output = command.output()?;
             assert!(!output.status.success());
-            assert!(String::from_utf8_lossy(&output.stderr).contains("paused by the owner"));
+            assert!(String::from_utf8_lossy(&output.stderr).contains("paused by the user"));
         }
         assert_eq!(mutations(&fixture.log()?), [] as [String; 0]);
     }
@@ -6345,7 +6345,7 @@ fn scoped_install_preserves_current_unrelated_content_without_granting_review_cr
     ops::write_json(&manifest, &before, true)?;
     let path = skills.join("base-skill/SKILL.md");
     let current = format!(
-        "{}\nPreserve the owner's existing additions.\n",
+        "{}\nPreserve the user's existing additions.\n",
         fs::read_to_string(&path)?
     );
     fs::write(&path, &current)?;

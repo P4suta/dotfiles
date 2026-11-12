@@ -1,4 +1,4 @@
-# The GitHub settings that the owner applies by hand, since no workflow may change them.
+# The GitHub settings that the user applies by hand, since no workflow may change them.
 # The Rust gate checks that `.github/workflows/ci.yml` provides what they name.
 
 [ruleset.main]

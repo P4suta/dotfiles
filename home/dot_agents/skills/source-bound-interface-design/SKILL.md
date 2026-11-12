@@ -10,7 +10,7 @@ description: >-
 Base each interface decision on a primary source read for the current task.
 Memory and secondary summaries don't count as sources.
 Explicit requirements for the current artifact take precedence, and the sources still guide how to meet them.
-Treat applicable recommendations as required completion criteria under owner policy.
+Treat applicable recommendations as required completion criteria under personal policy.
 Preserve the source's own normative status when describing that adoption.
 
 ## Applicability and completion
@@ -26,7 +26,7 @@ Determine applicability from the audience, platform, task, source conditions, an
 When a source offers alternatives, choose a supported alternative and record why it fits.
 Explain each exclusion or conflict with evidence.
 Convenience, an advisory word, or a passing automated scan doesn't justify omitting an applicable recommendation.
-Never describe informative guidance as a normative source obligation merely because owner policy adopts it.
+Never describe informative guidance as a normative source obligation merely because personal policy adopts it.
 
 For implementation and publication tasks, enforce observable requirements in maintained project checks with representative rejecting fixtures and a valid example.
 For proposals and reviews, describe the needed checks and distinguish performed checks from planned verification without adding unrequested tooling.
@@ -40,7 +40,7 @@ Don't claim an implementation or external process passed without the correspondi
 
 Establish acceptance criteria before the first interface change, covering the complete affected journey, pages, responsive states, and failure outcomes.
 For browser interfaces, read [web interface evaluation](references/web-interface-evaluation.md) to derive measurable criteria and review applicability.
-Keep source minima, stronger owner preferences, empirical observations, and semantic judgments distinct.
+Keep source minima, stronger personal preferences, empirical observations, and semantic judgments distinct.
 Use the project's required records and check output without creating a parallel evidence inventory.
 Use the complete criteria to find omissions before requesting visual feedback.
 When feedback changes the intended experience, update the criteria and affected checks before changing the implementation.

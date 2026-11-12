@@ -1,6 +1,6 @@
 //! Which checkouts need an issue context before an implementation edit.
 
-/// An edit needs an issue context unless its checkout has no remote at all and the owner never opted it in with `pr-workflow local init`.
+/// An edit needs an issue context unless its checkout has no remote at all and the user never opted it in with `pr-workflow local init`.
 /// A scratch repository has nowhere to publish to, so nothing the issue context protects is at stake.
 /// An unknown remote answer keeps the issue context, so a failing Git query never admits an edit.
 #[must_use]

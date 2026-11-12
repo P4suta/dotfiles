@@ -104,7 +104,7 @@ On another machine, declare an existing owned independent PR with `start --indep
 Every listed independent unit names its recorded reason, and a new unit at the cap refuses with the current inventory.
 The flag keeps the issue, signing, review, dependency, and check requirements.
 
-The owner's shared mise tools pin `gh-stack` on every profile.
+The user's shared mise tools pin `gh-stack` on every profile.
 pr-workflow resolves that installation outside the target repository and verifies its version.
 The stack commands run it in a checkout whose `origin` matches the target.
 
@@ -139,15 +139,17 @@ The structured result reports `merged`, `ejected`, `timed_out`, `head_changed`, 
 The head bound to the merge request must match the verified head.
 Both stop on a failed check, conflict, timeout, or missing CodeRabbit review.
 
-## Owner-authorized merges
+<a id="owner-authorized-merges"></a>
 
-The owner can explicitly request a merge despite an unavailable optional CodeRabbit review.
+## Explicit merge requests
+
+The user can explicitly request a merge despite an unavailable optional CodeRabbit review.
 That instruction grants no completed-review claim and changes no repository-required review, check, approval, merge queue, or publication hold.
 Inspect the exact head, required checks, all supported unresolved findings, and the actual review state with `gh`.
 Resolve supported findings and pass the applicable project checks before merging.
 Keep issue scope, source assessment, and document validation through `pr-workflow check --pr`.
 The helper's `--final` and merge commands also require fresh service evidence.
-For the owner's explicit optional-review decision, use normal GitHub admission and a permitted merge strategy:
+For the user's explicit optional-review decision, use normal GitHub admission and a permitted merge strategy:
 
 ```console
 gh pr merge NUMBER --repo OWNER/REPO --squash --match-head-commit VERIFIED_HEAD
@@ -205,9 +207,9 @@ Ready admission waits for unfinished, failed, or missing required checks.
 A repository that reports and requires no checks can accept a ready PR.
 The review that readiness starts can finish afterward.
 Inspect the current head's actual review state and resolve supported findings before completing the authorized PR task.
-Apply [owner-authorized merges](#owner-authorized-merges) when optional analysis is unavailable and the owner explicitly chooses to merge.
+Apply [explicit merge requests](#owner-authorized-merges) when optional analysis is unavailable and the user explicitly chooses to merge.
 
-An owner review pause prohibits starting another review and remains separate from an owner publication hold.
+A user review pause prohibits starting another review and remains separate from a user publication hold.
 Keep subscription limits, separate PR and CLI pools, and existing billing controls.
 Use a guarded CLI review for an explicit local review request.
 

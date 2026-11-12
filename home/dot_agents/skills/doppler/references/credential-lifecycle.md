@@ -7,8 +7,8 @@ Read no secret values for inventory or readiness.
 Record what each consumer needs and whether it uses native workload identity, an active stored credential, a retired credential, or an unresolved input.
 Check production feature availability for the actual account and package before treating native identity as a migration prerequisite.
 Documentation and implementation source establish a supported design, while an available registration path and matching provider configuration establish readiness.
-Record an owner's explicit token choice as the active design, with permission, lifetime, rotation, and delivery requirements.
-Investigate retirement when the owner reports revoking a key.
+Record a user's explicit token choice as the active design, with permission, lifetime, rotation, and delivery requirements.
+Investigate retirement when the user reports revoking a key.
 Keep private values, tokens, local paths, and machine identities out of shared skills and tracked reports.
 
 ## Organize by purpose
@@ -48,7 +48,7 @@ Scope minted App tokens to the current repository and step permissions, and stat
 A config named `release` or approval to fetch credentials authorizes no signing, tag, registry upload, or release.
 Keep authentication verification in a manual workflow with no publishing or signing steps and no downstream publication trigger.
 Keep existing environment protection, and name the workflow and requested operation before any approval.
-Leave a human gate pending when the owner hasn't delegated that exact approval.
+Leave a human gate pending when the user hasn't delegated that exact approval.
 Distinguish metadata, authentication, signing, notarization, and publication results.
 Fetching a nonempty token establishes delivery.
 Provider permissions, lifetime, and revocation need their own evidence.
@@ -75,7 +75,7 @@ Read back each mutation, record partial completion without values, and make reru
 Keep account deletion separate from data and consumer cutover.
 
 For credential replacement, prepare the new protected input, update its consumers, verify the authorized boundary, and retire the old input.
-Revocation, enrollment resets, and replacement issuance need the owner's scope for that operation.
+Revocation, enrollment resets, and replacement issuance need the user's scope for that operation.
 Never make a broad credential or cached value an automatic recovery path.
 
 Use `rust-release` and `registry-publishing` for registry identity and bootstrap requirements.

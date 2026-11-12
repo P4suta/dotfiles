@@ -64,6 +64,10 @@ fn ordinary_answers_complete_without_evidence_or_correction_requests() -> Result
     let root = scope.path().join("outside-a-repository");
     fs::create_dir_all(&home)?;
     fs::create_dir(&root)?;
+    copy_tree(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/prose"),
+        &home.join(".config/prose"),
+    )?;
     let output = platform::process::command("bun")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/answer-adapter.ts"))
         .arg(&root)

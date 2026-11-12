@@ -34,12 +34,18 @@ fn begin(home: &Path) -> Result<()> {
 }
 
 fn stop(home: &Path, language: &str, input: &Value) -> Result<Output> {
+    reply_gate(home, "stop", language, input)
+}
+
+fn reply_gate(home: &Path, point: &str, language: &str, input: &Value) -> Result<Output> {
     begin(home)?;
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), home)
         .current_dir(home)
         .env("HOME", home)
         .env("USERPROFILE", home)
-        .args(["assure", "stop", "--reply-language", language])
+        .env("PROSE_CONFIG", root.join("home/dot_config/prose"))
+        .args(["assure", point, "--reply-language", language])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -153,6 +159,60 @@ fn a_japanese_reply_follows_the_installed_word_rules() -> Result<()> {
     );
     let past = stop_with_rules("\u{66f8}\u{3044}\u{305f}\u{3060}\u{3051}\u{3067}\u{3059}\u{3002}")?;
     assert_eq!(past["decision"], "block", "{past}");
+    for reply in ["Ownerに確認します。", "オーナーの承認を待ちます。"] {
+        let blocked = stop_with_rules(reply)?;
+        assert_eq!(blocked["decision"], "block", "{reply}: {blocked}");
+        assert!(
+            blocked["reason"]
+                .as_str()
+                .unwrap()
+                .contains("Dotfiles.UserAddress"),
+            "{reply}: {blocked}"
+        );
+    }
+    for reply in [
+        "ファイルの所有者を確認しました。",
+        "`Owner`はAPI名です。",
+        "> オーナーの承認を待ちます。",
+    ] {
+        assert_eq!(stop_with_rules(reply)?, json!({}), "{reply}");
+    }
+    Ok(())
+}
+
+#[test]
+fn reply_gates_distinguish_personal_address_from_qualified_ownership() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    for point in ["stop", "reply"] {
+        for (language, reply, rejected) in [
+            ("English", "You are the owner.", true),
+            ("English", "As the owner, you can approve this.", true),
+            ("English", "The owner opens the certificate.", true),
+            ("English", "The owner saves the certificate.", true),
+            ("English", "Repository owner approval is required.", false),
+            ("Japanese", "オーナーの承認を待ちます。", true),
+            (
+                "Japanese",
+                "Rustのオーナーシップは値の有効期間を管理します。",
+                false,
+            ),
+            ("Japanese", "ファイルの所有者の確認が必要です。", false),
+        ] {
+            let checked = answer(&reply_gate(
+                home.path(),
+                point,
+                language,
+                &input("claude", json!(reply), false),
+            )?)?;
+            let address = checked["reason"]
+                .as_str()
+                .is_some_and(|reason| reason.contains("Dotfiles.UserAddress"));
+            assert_eq!(address, rejected, "{point}: {reply}: {checked}");
+            if !rejected {
+                assert_eq!(checked, json!({}), "{point}: {reply}");
+            }
+        }
+    }
     Ok(())
 }
 

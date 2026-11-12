@@ -1,5 +1,5 @@
 {
-  "revision": "1fecf3e70f6ab3ddc10d2876c3db0cbafb31603a11394c4edd61305044ffe5ff",
+  "revision": "75e716d06ad9f9252c7d4edc73d669f961ada489463fc74c1a4816b6a823d715",
   "outcome": "implemented",
   "reason": "Choose product copy and operational notes from reader tasks, preserving exact UI labels in instructions, requested technical depth, and required disclosures.",
   "evidence": [

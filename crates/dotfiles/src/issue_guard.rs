@@ -108,7 +108,7 @@ fn memory(home: &Path, path: &Path) -> bool {
 fn memory_refusal(path: &Path) -> anyhow::Error {
     platform::refusal::Refusal::without_next(
         "agent.memory",
-        "persistent agent memory stays off on every managed client, so no session reads this file; keep the lesson as a check, default, or command in the dotfiles repository, or as a document in the repository it concerns, and propose it to the owner",
+        "persistent agent memory stays off on every managed client, so no session reads this file; keep the lesson as a check, default, or command in the dotfiles repository, or as a document in the repository it concerns, and propose it to the user",
     )
     .evidence(format!("edit path: {}", path.display()))
     .into()

@@ -17,8 +17,8 @@ Published descriptions explain the change and validation without local workflow 
 Inspect CodeRabbit's review of the current head and every unresolved finding.
 Keep supported earlier findings when the diff changes.
 A skipped, stale, failed, incomplete, or paused review supplies no completion credit.
-Follow [owner-authorized merges](workflow.md#owner-authorized-merges) when the owner explicitly chooses to merge despite unavailable optional review.
-Project checks and owner authorization remain necessary.
+Follow [explicit merge requests](workflow.md#owner-authorized-merges) when the user explicitly chooses to merge despite unavailable optional review.
+Project checks and user authorization remain necessary.
 
 Enable automatic reviews for ready PRs and their updates without label filters.
 Keep PR and CLI capacity separate and preserve the subscription's billing limits.

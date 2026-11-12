@@ -13,7 +13,7 @@ pub const LICENSE: &str = "MIT OR Apache-2.0";
 /// The license state the repository already declares or the generator creates.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, JsonSchema, PartialEq, Serialize)]
 pub enum License {
-    /// Generate the owner's existing dual-license files.
+    /// Generate the user's existing dual-license files.
     #[serde(rename = "MIT OR Apache-2.0")]
     MitOrApache,
     /// Preserve the existing Apache-2.0-only license assets.

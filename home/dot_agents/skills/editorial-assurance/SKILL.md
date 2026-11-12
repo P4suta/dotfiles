@@ -11,7 +11,7 @@ Deliver the requested text with its research and explanations completed.
 Preserve the writer's intended meaning, genre, audience, language, and house style.
 Select information from the recipient's task, existing knowledge, and requested depth.
 Use [product copy and operational notes](references/editorial-review.md#product-copy-and-operational-notes) for interface copy, store descriptions, review notes, and support instructions.
-Apply the owner's shared [Japanese and technical terminology policy](references/japanese-style.md) to replies, documents, comments, and authored artifacts.
+Apply the user's shared [Japanese and technical terminology policy](references/japanese-style.md) to replies, documents, comments, and authored artifacts.
 For policy changes, use ideal-specification to derive requirements from governing standards and intended outcomes.
 Keep enforceable requirements separate from examples and regression fixtures.
 Apply the relevant criteria in [editorial review](references/editorial-review.md), including argument structure, participant identity, evidence, explanation, language, translation, and the rendered proof.

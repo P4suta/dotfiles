@@ -104,6 +104,111 @@ fn documents_report_the_rule_and_the_offending_sentence() -> Result<()> {
 }
 
 #[test]
+fn personal_address_rejects_user_roles() -> Result<()> {
+    let bundle = source()?;
+    for channel in [
+        Channel::Commit,
+        Channel::Document,
+        Channel::Pr,
+        Channel::Issue,
+    ] {
+        for sentence in [
+            "Owner approval is pending.",
+            "The owner confirmed the transfer.",
+            "Owner authorization is required.",
+            "OWNER ACCEPTANCE is pending.",
+            "You are the owner.",
+            "As the owner, you can approve this.",
+            "The owner opens the certificate.",
+            "The owner saves the certificate.",
+            "Only the owner clears a review pause.",
+            "The owner's voice guides the reply.",
+            "Repository owner approval is pending; you are the owner.",
+            "Ownerに確認します。",
+            "オーナーの承認を待ちます。",
+            "所有者様の確認を待ちます。",
+        ] {
+            let findings = prose::check(&bundle, channel, "message", sentence)?;
+            assert!(
+                rules(&findings).contains(&"Dotfiles.UserAddress"),
+                "{channel:?}: {sentence}: {findings:?}"
+            );
+        }
+        for sentence in [
+            "Approval is pending.",
+            "The file owner has write access.",
+            "The repository owner can update the ruleset.",
+            "Rust ownership controls when a value is dropped.",
+            "The owner map resolves repository origins.",
+            "The owner-local state directory holds the issue context.",
+            "`Owner` is an API identifier.",
+            "ファイルの所有者を確認します。",
+            "> Owner approval is pending.",
+            "```text\nOwner approval is pending.\n```",
+        ] {
+            let findings = prose::check(&bundle, channel, "message", sentence)?;
+            assert!(
+                !rules(&findings).contains(&"Dotfiles.UserAddress"),
+                "{channel:?}: {sentence}: {findings:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn personal_address_preserves_qualified_ownership() -> Result<()> {
+    let bundle = source()?;
+    for channel in [
+        Channel::Commit,
+        Channel::Document,
+        Channel::Pr,
+        Channel::Issue,
+    ] {
+        for sentence in [
+            "Repository owner approval is required.",
+            "File owner approval is required.",
+            "The file owner's approval is required.",
+            "The directory owner's permission controls access.",
+            "The owner of the file has write access.",
+            "The owner of the repository can update the ruleset.",
+            "You are the repository owner.",
+            "Rustのオーナーシップは値の有効期間を管理します。",
+            "ファイルの所有者の確認が必要です。",
+            "ファイル所有者の確認が必要です。",
+        ] {
+            let findings = prose::check(&bundle, channel, "message", sentence)?;
+            assert!(
+                !rules(&findings).contains(&"Dotfiles.UserAddress"),
+                "{channel:?}: {sentence}: {findings:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn personal_address_refuses_a_missing_or_weakened_rule() -> Result<()> {
+    let mut bundle = source()?;
+    let rule = "styles/Dotfiles/UserAddress.yml";
+    let original = fs::read_to_string(bundle.config.join(rule))?;
+    let copy = tempfile::tempdir()?;
+    bundle.config = copy.path().to_owned();
+    let missing = prose::check_user_address(&bundle, "reply.md", "Owner approval is pending.")
+        .expect_err("missing address rule");
+    assert!(format!("{missing:#}").contains("read the shared personal address rule"));
+    fs::create_dir_all(bundle.config.join("styles/Dotfiles"))?;
+    fs::write(
+        bundle.config.join(rule),
+        original.replace("owner", "project"),
+    )?;
+    let weakened = prose::check_user_address(&bundle, "reply.md", "Owner approval is pending.")
+        .expect_err("changed address rule");
+    assert!(format!("{weakened:#}").contains("differs from the compiled policy"));
+    Ok(())
+}
+
+#[test]
 fn repository_rules_cover_hedging_comparison_lines_and_language() -> Result<()> {
     let bundle = source()?;
     let document = |text: &str| prose::check(&bundle, Channel::Document, "guide.md", text);
@@ -735,7 +840,7 @@ fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-/// The directory holding a stand-in `ocomment`, compiled once, because CI hosts don't install the owner's tool.
+/// The directory holding a stand-in `ocomment`, compiled once, because CI hosts don't install the user's tool.
 fn ocomment_directory() -> Result<&'static Path> {
     static DIRECTORY: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     if let Some(directory) = DIRECTORY.get() {

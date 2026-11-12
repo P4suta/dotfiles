@@ -1,7 +1,7 @@
 {
-  "revision": "604ee57f6bbe562ebdb01919d80dc1c134feb8d2e70087d1789b742b460d9e7c",
+  "revision": "6a912a7db4b7172b8a7faa7b39be881f33a26c3123e7114d1f2f14b7480b05a8",
   "outcome": "implemented",
-  "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, explicit holds, and guarded explicit reviews.\nRead both GitHub completion APIs because a completed review may have no commit status.",
+  "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, explicit holds, and guarded explicit reviews.\nRead both GitHub completion APIs because a completed review may have no commit status.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",

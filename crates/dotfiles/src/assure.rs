@@ -23,7 +23,7 @@ use std::process::Stdio;
 /// The catalog every host receives, relative to the home directory.
 pub const CATALOG: &str = ".config/assure/shapes.toml";
 
-/// The tracked repository file read only during migration to the owner's configuration.
+/// The tracked repository file read only during migration to the user's configuration.
 pub const OWNERS: &str = "assure.toml";
 
 /// # Errors
@@ -234,11 +234,11 @@ pub(crate) fn installed_at(home: &Path) -> Result<Catalog> {
     if !path.is_file() {
         return Err(Refusal::new(
             "assure.catalog",
-            "the owner's local shape catalog is not installed",
+            "the user's local shape catalog is not installed",
             "chezmoi apply",
         )
         .evidence(format!("missing {}", path.display()))
-        .evidence("owner's local catalog version=unavailable sha256=unavailable; base=not surveyed")
+        .evidence("user's local catalog version=unavailable sha256=unavailable; base=not surveyed")
         .into());
     }
     catalog(&path)
@@ -1094,7 +1094,7 @@ fn anti_patterns(
     if !config.is_file() {
         return Err(Refusal::new(
             "assure.catalog",
-            "the owner's local anti-pattern catalog is not installed",
+            "the user's local anti-pattern catalog is not installed",
             "chezmoi apply",
         )
         .evidence(format!("missing {}", config.display()))
@@ -1670,7 +1670,7 @@ impl Inputs {
 
     fn description(&self) -> String {
         let mut description = format!(
-            "owner's local catalog version={} sha256={}; base={}",
+            "user's local catalog version={} sha256={}; base={}",
             self.catalog_version,
             self.catalog_sha256,
             self.base.as_deref().unwrap_or("empty tree"),
@@ -1706,17 +1706,17 @@ impl Outcome {
             Verdict::Admit | Verdict::Report => return None,
             Verdict::Added => (
                 "assure.added",
-                "the owner's local catalog refuses a new unverified code shape or anti-pattern in this change",
+                "the user's local catalog refuses a new unverified code shape or anti-pattern in this change",
                 "apply each gap's next action, then retry",
             ),
             Verdict::Touched => (
                 "assure.touched",
-                "the owner's local catalog refuses an unverified code shape or anti-pattern in a file this turn changed",
+                "the user's local catalog refuses an unverified code shape or anti-pattern in a file this turn changed",
                 "apply each listed gap's next action before finishing",
             ),
             Verdict::Lowered => (
                 "assure.lowered",
-                "the owner's local catalog refuses a weakened verification budget",
+                "the user's local catalog refuses a weakened verification budget",
                 "restore each listed budget in the owner map and meet it",
             ),
         };
@@ -1746,7 +1746,7 @@ pub fn describe(catalog: &Catalog, gap: &Gap) -> String {
     let shape = catalog.shapes.iter().find(|shape| shape.id == gap.shape);
     let cause = match cause {
         Cause::Unowned => "has no owner",
-        Cause::BrokenOwner => "names an owner in the owner's map that lacks its marker or corpus",
+        Cause::BrokenOwner => "names an owner in the user's map that lacks its marker or corpus",
         Cause::MalformedExemption => {
             "carries an exemption without one of semantic-boundary, no-decision, or disproportionate and a justification"
         }
@@ -2130,7 +2130,7 @@ fn report_inputs(outcome: &Outcome) {
         eprintln!("assure: {owner}");
     }
     if let Some(command) = &outcome.migration {
-        eprintln!("assure: migrate the tracked owner map to the owner's configuration: {command}");
+        eprintln!("assure: migrate the tracked owner map to the user's configuration: {command}");
     }
 }
 
@@ -2209,7 +2209,7 @@ fn explicit_base(root: &Path, catalog: &Catalog, remote: &str, base: &str) -> Re
         return Err(inputs
             .refusal(Refusal::new(
                 "assure.base",
-                "the owner's local catalog requires an explicit base commit SHA",
+                "the user's local catalog requires an explicit base commit SHA",
                 "supply the PR base SHA or the merge base with the upstream default branch",
             ))
             .into());
@@ -2218,7 +2218,7 @@ fn explicit_base(root: &Path, catalog: &Catalog, remote: &str, base: &str) -> Re
         inputs
             .refusal(Refusal::new(
                 "assure.base",
-                "the owner's local catalog cannot compare against a base commit missing locally",
+                "the user's local catalog cannot compare against a base commit missing locally",
                 crate::refusal::command(&["git", "fetch", remote, base]),
             ))
             .into()
@@ -2241,9 +2241,9 @@ fn upstream_base(
         .filter(|commit| shape_rules::commit_id(commit.as_bytes()))
     else {
         return Err(Refusal::new(
-            "assure.base", "the owner's local catalog cannot compare a populated remote without an upstream default commit",
+            "assure.base", "the user's local catalog cannot compare a populated remote without an upstream default commit",
             crate::refusal::command(&["git", "ls-remote", remote]),
-        ).evidence(format!("owner's local catalog version={} sha256={}; base=unavailable", catalog.version, catalog.sha256)).into());
+        ).evidence(format!("user's local catalog version={} sha256={}; base=unavailable", catalog.version, catalog.sha256)).into());
     };
     let tip = explicit_base(root, catalog, remote, default)?;
     let base = git(root, &["merge-base", head, &tip])?;
@@ -2434,7 +2434,7 @@ pub fn ready(root: &Path, catalog: &Catalog, base: &str, head: &str) -> Result<(
             .refusal(
                 Refusal::new(
                     "assure.head",
-                    "the owner's local catalog cannot survey a PR head commit missing locally",
+                    "the user's local catalog cannot survey a PR head commit missing locally",
                     crate::refusal::command(&["git", "fetch", "origin"]),
                 )
                 .evidence(format!("missing {head}")),
@@ -2463,7 +2463,7 @@ pub enum AgentPoint {
 }
 
 /// The routine verification confirmation shared by managed agents and Git hooks.
-pub const VERIFICATION_REMINDER: &str = "Before completing work and before every push, inspect the diff, affected CI jobs, and project check commands. Run every applicable local check required for that action, fix failures, and rerun affected checks after changes. Confirm completion with a short reason naming actual checks and successful outcomes. Never use an unverified disclaimer to skip required work. If a required check cannot run, repair the environment or use a justified equivalent; if still blocked, ask the user for a concrete decision before claiming completion. Checks assigned to later CI or release stages keep their own timing. Do not create evidence JSON, signed declarations, claim ledgers, or per-answer proofs unless explicitly requested. Existing project checks, release requirements, owner authorization, and push pauses still apply.\n";
+pub const VERIFICATION_REMINDER: &str = "Before completing work and before every push, inspect the diff, affected CI jobs, and project check commands. Run every applicable local check required for that action, fix failures, and rerun affected checks after changes. Confirm completion with a short reason naming actual checks and successful outcomes. Never use an unverified disclaimer to skip required work. If a required check cannot run, repair the environment or use a justified equivalent; if still blocked, ask the user for a concrete decision before claiming completion. Checks assigned to later CI or release stages keep their own timing. Do not create evidence JSON, signed declarations, claim ledgers, or per-answer proofs unless explicitly requested. Existing project checks, release requirements, user authorization, and push pauses still apply.\n";
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum ReplyLanguage {
@@ -2504,6 +2504,40 @@ fn reply_reasons(reply: &str) -> Result<Vec<String>> {
     Ok(reasons)
 }
 
+fn reply_text_reasons(reply: &str, language: Option<Language>) -> Result<Vec<String>> {
+    let mut reasons = Vec::new();
+    if !reply.is_empty() {
+        for finding in prose::check_user_address(&prose::Bundle::installed()?, "reply.md", reply)? {
+            reasons.push(format!(
+                "Reply line {}: {}: {}",
+                finding.line, finding.rule, finding.message
+            ));
+        }
+    }
+    if language.is_some() {
+        for finding in prose::sentence_per_line(&prose::Input::new("reply", reply, false)) {
+            reasons.push(format!("Reply line {}: {}", finding.line, finding.message));
+        }
+    }
+    if matches!(language, Some(Language::Japanese)) {
+        for hit in dotguard::lang::scan(reply, dotguard::lang::Mode::Japanese) {
+            reasons.push(format!(
+                "Reply line {}: {:?} U+{:04X} is {}; write the Japanese form or name the character by its code point.",
+                hit.line, hit.ch, hit.ch as u32, hit.kind
+            ));
+        }
+        reasons.extend(japanese_word_reasons(reply));
+    }
+    if let Some(language) = language
+        && reply_language_rules::check(language, reply) == reply_language_rules::Verdict::Rewrite
+    {
+        reasons.push(
+            "The reply prose must be in Japanese. Rewrite your last reply to the user in Japanese; keep code, commands, and outward artifacts as they are.".to_owned(),
+        );
+    }
+    Ok(reasons)
+}
+
 /// The agent hook of `point`: the session start report on standard output, or the stop decision as the client's JSON.
 ///
 /// # Errors
@@ -2534,41 +2568,10 @@ pub fn hook(point: AgentPoint, language: Option<Language>) -> Result<()> {
                 serde_json::from_str::<StopInput>(&input)
                     .context("the stop hook input is invalid")?
             };
-            let mut reasons = Vec::new();
-            if language.is_some() {
-                let reply = prose::Input::new(
-                    "reply",
-                    input.last_assistant_message.as_deref().unwrap_or_default(),
-                    false,
-                );
-                for finding in prose::sentence_per_line(&reply) {
-                    reasons.push(format!("Reply line {}: {}", finding.line, finding.message));
-                }
-            }
-            if matches!(language, Some(Language::Japanese)) {
-                for hit in dotguard::lang::scan(
-                    input.last_assistant_message.as_deref().unwrap_or_default(),
-                    dotguard::lang::Mode::Japanese,
-                ) {
-                    reasons.push(format!(
-                        "Reply line {}: {:?} U+{:04X} is {}; write the Japanese form or name the character by its code point.",
-                        hit.line, hit.ch, hit.ch as u32, hit.kind
-                    ));
-                }
-                reasons.extend(japanese_word_reasons(
-                    input.last_assistant_message.as_deref().unwrap_or_default(),
-                ));
-            }
-            if let Some(language) = language
-                && reply_language_rules::check(
-                    language,
-                    input.last_assistant_message.as_deref().unwrap_or_default(),
-                ) == reply_language_rules::Verdict::Rewrite
-            {
-                reasons.push(
-                    "The reply prose must be in Japanese. Rewrite your last reply to the user in Japanese; keep code, commands, and outward artifacts as they are.".to_owned(),
-                );
-            }
+            let mut reasons = reply_text_reasons(
+                input.last_assistant_message.as_deref().unwrap_or_default(),
+                language,
+            )?;
             if point == AgentPoint::Reply {
                 reasons.extend(reply_reasons(
                     input.last_assistant_message.as_deref().unwrap_or_default(),

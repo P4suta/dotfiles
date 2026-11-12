@@ -1683,7 +1683,7 @@ fn destination(github: &Github, repo: &str) -> Result<Destination> {
             || {
                 Refusal::new(
                     "pr.policy",
-                    "a personal owner in the workflow policy no longer matches GitHub's login and id; the owner must review the policy",
+                    "a personal owner in the workflow policy no longer matches GitHub's login and id; the user must review the policy",
                     command(&[
                         "gh",
                         "api",
@@ -2814,7 +2814,7 @@ fn merge_independent(
             }
             Step::Restack => bail!("an independent PR is never restacked"),
             Step::Wait => wait(target, pr, polling, started)?,
-            Step::Exclude => bail!("CodeRabbit PR reviews are paused by the owner"),
+            Step::Exclude => bail!("CodeRabbit PR reviews are paused by the user"),
             Step::Ready => {
                 make_ready(
                     github,
@@ -3244,7 +3244,7 @@ fn merge_stack(
                     wait(target, pr, polling, started)?;
                     continue 'restart;
                 }
-                Step::Exclude => bail!("CodeRabbit PR reviews are paused by the owner"),
+                Step::Exclude => bail!("CodeRabbit PR reviews are paused by the user"),
                 Step::Ready => {
                     make_ready(
                         github,

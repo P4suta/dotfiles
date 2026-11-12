@@ -22,7 +22,7 @@ Stay within the enforced size budget.
 Link evidence and implementation details without moving the rationale into an appendix.
 Remove repetition, generic benefits, progress logs, and ceremonial sections.
 A material evidence gap keeps the record proposed.
-Only the owner's acceptance of the reviewed choice permits accepted status.
+Only the user's acceptance of the reviewed choice permits accepted status.
 Reuse explicit acceptance already given.
 
 In personal repositories, name a new record `docs/adr/<decision>.md` with a front-matter date.
@@ -35,4 +35,4 @@ Agent write and completion gates must reject oversize or incomplete changed reco
 A structural pass proves neither sound reasoning nor factual truth.
 
 [Nygard](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions), [Markdown Architectural Decision Records](https://github.com/adr/madr/blob/4.0.0/template/adr-template.md), and the [Amazon Web Services lifecycle](https://docs.aws.amazon.com/prescriptive-guidance/latest/architectural-decision-records/adr-process.html) supply the record and review foundations.
-The enforced size budget is owner policy.
+The enforced size budget is personal policy.
