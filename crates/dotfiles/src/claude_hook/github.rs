@@ -1,6 +1,7 @@
 //! Inspects the exact literal arguments of GitHub publication commands.
 
 mod attachments;
+mod binary_upload;
 
 use crate::body_rules::{
     EscapeStep, Quote, RestArgument, RestRead, WordStep, escape_step, rest_read, word_step,
@@ -190,6 +191,7 @@ enum Input {
     Text(String),
     File { path: String, json: bool },
     Attachment(String),
+    BinaryAttachment(binary_upload::Upload),
 }
 
 struct Target<'a> {
@@ -636,6 +638,15 @@ fn reject_implicit_source(argument: &str) -> Result<()> {
 }
 
 fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
+    if target.api
+        && let Some(upload) = binary_upload::parse(target.arguments)
+    {
+        return Ok(vec![Input::BinaryAttachment(upload)]);
+    }
+    body_inputs(target)
+}
+
+fn body_inputs(target: &Target<'_>) -> Result<Vec<Input>> {
     let mut found = Vec::new();
     let mut index = 0;
     let mut implicit = matches!(target.verb, "create" | "comment" | "review" | "edit");
@@ -783,6 +794,17 @@ fn resolve_publication(
     for input in selected.inputs {
         let (text, json) = match input {
             Input::Text(text) => (text, false),
+            Input::BinaryAttachment(upload) => {
+                ensure!(
+                    files_safe && selected.direct,
+                    "GitHub binary attachment has an uncertain execution context"
+                );
+                let directory = directory
+                    .filter(|path| path.is_absolute())
+                    .context("GitHub binary attachment has no known execution directory")?;
+                upload.verify(directory)?;
+                continue;
+            }
             Input::Attachment(value) => {
                 attachment_arguments.push(value);
                 continue;
