@@ -212,6 +212,86 @@ fn a_commit_retains_adr_content_without_optional_owner_metadata() -> Result<()> 
 }
 
 #[test]
+fn unchanged_merge_adrs_pass_but_authored_and_unpublished_records_do_not() -> Result<()> {
+    let host = Host::new()?;
+    host.run("git", &["config", "prose.standard", "true"])?;
+    fs::write(host.repository().join("added.txt"), "added\n")?;
+    host.run("git", &["add", "added.txt"])?;
+    host.empty_commit()?;
+    host.run("git", &["switch", "--quiet", "-c", "published"])?;
+    host.run("git", &["switch", "--quiet", "-c", "topic"])?;
+    fs::write(host.repository().join("topic.txt"), "Topic.\n")?;
+    host.run("git", &["add", "topic.txt"])?;
+    host.run("git", &["commit", "--quiet", "-m", "topic"])?;
+    let base = String::from_utf8(host.run("git", &["rev-parse", "HEAD"])?.stdout)?;
+    host.run("git", &["switch", "--quiet", "published"])?;
+    let path = host.repository().join("docs/adr/bound-the-queue.md");
+    fs::create_dir_all(path.parent().unwrap())?;
+    let historical = "Historical detail.\n".repeat(201);
+    fs::write(&path, &historical)?;
+    host.run("git", &["add", "docs/adr/bound-the-queue.md"])?;
+    host.run("git", &["commit", "--quiet", "-m", "historical decision"])?;
+    let upstream = host.scope.path().join("upstream.git");
+    host.run(
+        "git",
+        &[
+            "clone",
+            "--quiet",
+            "--bare",
+            ".",
+            upstream.to_str().unwrap(),
+        ],
+    )?;
+    host.run(
+        "git",
+        &["remote", "add", "origin", upstream.to_str().unwrap()],
+    )?;
+    host.run("git", &["switch", "--quiet", "topic"])?;
+    host.run("git", &["merge", "--no-commit", "--no-ff", "published"])?;
+    let inherited = host.hook(&["pre-commit"])?;
+    ensure!(
+        inherited.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inherited.stderr)
+    );
+    fs::write(&path, format!("{historical}\nEdited during resolution.\n"))?;
+    host.run("git", &["add", "docs/adr/bound-the-queue.md"])?;
+    assert_eq!(refusal(&host.hook(&["pre-commit"])?).rule, "adr.content");
+    fs::write(&path, &historical)?;
+    host.run("git", &["add", "docs/adr/bound-the-queue.md"])?;
+    host.run("git", &["commit", "--quiet", "-m", "merge published main"])?;
+    let published = String::from_utf8(host.run("git", &["rev-parse", "HEAD"])?.stdout)?;
+    let output = host.push(&published, &base)?;
+    ensure!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    host.run("git", &["switch", "--quiet", "-c", "unpublished"])?;
+    fs::write(&path, format!("{historical}\nUnpublished edit.\n"))?;
+    host.run("git", &["add", "docs/adr/bound-the-queue.md"])?;
+    host.run("git", &["commit", "--quiet", "-m", "unpublished decision"])?;
+    host.run("git", &["switch", "--quiet", "topic"])?;
+    host.run(
+        "git",
+        &[
+            "merge",
+            "--no-ff",
+            "--quiet",
+            "unpublished",
+            "-m",
+            "merge unpublished decision",
+        ],
+    )?;
+    let unpublished = String::from_utf8(host.run("git", &["rev-parse", "HEAD"])?.stdout)?;
+    assert_eq!(
+        refusal(&host.push(&unpublished, &base)?).rule,
+        "adr.content"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_push_retains_adr_content_in_the_offered_commit() -> Result<()> {
     let host = Host::new()?;
     host.run("git", &["config", "prose.standard", "true"])?;

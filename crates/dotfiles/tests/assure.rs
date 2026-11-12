@@ -76,6 +76,31 @@ fn adr_gates_preserve_untouched_history_and_refuse_an_oversize_change() -> Resul
 }
 
 #[test]
+fn inherited_merge_adrs_are_unchanged_at_commit_and_stop() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.git(&["switch", "--quiet", "-c", "incoming"])?;
+    let path = "docs/adr/bound-the-queue.md";
+    fixture.write(path, &"Historical detail.\n".repeat(201))?;
+    fixture.commit("historical decision")?;
+    fixture.git(&["switch", "--quiet", "main"])?;
+    fixture.write("README.md", "Topic documentation.\n")?;
+    fixture.commit("topic")?;
+    fixture.git(&["merge", "--no-commit", "--no-ff", "incoming"])?;
+    assert!(assure::commit(&fixture.root, &catalog).is_ok());
+    assert!(
+        assure::stop(&fixture.root, &catalog)?
+            .refusal(&catalog)
+            .is_none()
+    );
+    fixture.write(path, &"Edited historical detail.\n".repeat(201))?;
+    fixture.stage()?;
+    assert!(assure::commit(&fixture.root, &catalog).is_err());
+    assert!(assure::stop(&fixture.root, &catalog).is_err());
+    Ok(())
+}
+
+#[test]
 fn adr_stop_hook_returns_a_block_and_external_repositories_keep_their_rules() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.write("docs/adr/queue.md", &"Unnecessary detail.\n".repeat(201))?;
