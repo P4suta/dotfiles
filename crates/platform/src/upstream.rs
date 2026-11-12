@@ -17,6 +17,11 @@ const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 const MAX_REGISTRY_BYTES: usize = 16 * 1024 * 1024;
 const HTTPS_PREFIX: &str = "https://";
 const HTTPS_SCHEME: &str = "https";
+const ARCHIVE_REGISTRY: &str = ".config/dotfiles/upstream.json";
+const GIT_REGISTRY: &str = ".config/dotfiles/upstream-git.json";
+const GIT_ROOT: &str = ".";
+const GIT_OBJECT_LENGTHS: [usize; 2] = [40, 64];
+const GIT_TREE_METADATA_FIELDS: usize = 3;
 
 fn valid_origin(value: &str) -> bool {
     value.starts_with(HTTPS_PREFIX)
@@ -87,6 +92,29 @@ pub struct Source {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+pub struct GitSource {
+    pub repository: PathBuf,
+    pub directory: PathBuf,
+    pub revision: String,
+    pub origin: String,
+}
+
+impl GitSource {
+    fn validate(&self) -> Result<()> {
+        ensure!(
+            self.repository.is_absolute()
+                && (self.directory == Path::new(GIT_ROOT) || relative(&self.directory))
+                && GIT_OBJECT_LENGTHS.contains(&self.revision.len())
+                && self.revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+                && valid_origin(&self.origin),
+            "Git upstream source requires a repository, directory, immutable commit, and HTTPS origin"
+        );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct Registry {
     version: u32,
     sources: Vec<Source>,
@@ -126,14 +154,50 @@ fn validate_registry(registry: &Registry) -> Result<()> {
         source.validate()?;
         directories.push((&source.repository, &source.directory));
     }
+    refuse_overlaps(directories)
+}
+
+fn refuse_overlaps(mut directories: Vec<(&PathBuf, &PathBuf)>) -> Result<()> {
     directories.sort_unstable();
     for (left, right) in directories.iter().zip(directories.iter().skip(1)) {
         ensure!(
-            left.0 != right.0 || !right.1.starts_with(left.1),
+            left.0 != right.0 || !within(left.1, right.1),
             "upstream source registrations overlap"
         );
     }
     Ok(())
+}
+
+fn within(directory: &Path, member: &Path) -> bool {
+    directory == Path::new(GIT_ROOT) || member.starts_with(directory)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct GitRegistrations {
+    version: u32,
+    sources: Vec<GitSource>,
+}
+
+/// # Errors
+/// Rejects malformed Git registrations and overlapping source directories.
+pub fn parse_git(bytes: &[u8]) -> Result<GitRegistrations> {
+    ensure!(
+        bytes.len() <= MAX_REGISTRY_BYTES,
+        "Git upstream registry exceeds its byte budget"
+    );
+    let registrations: GitRegistrations = serde_json::from_slice(bytes)?;
+    ensure!(
+        registrations.version == FORMAT,
+        "unsupported Git upstream registry format"
+    );
+    let mut directories = Vec::new();
+    for source in &registrations.sources {
+        source.validate()?;
+        directories.push((&source.repository, &source.directory));
+    }
+    refuse_overlaps(directories)?;
+    Ok(registrations)
 }
 
 /// # Errors
@@ -260,7 +324,7 @@ impl Source {
 fn registry_path() -> Result<PathBuf> {
     Ok(crate::home::home()
         .context("upstream registry requires a home directory")?
-        .join(".config/dotfiles/upstream.json"))
+        .join(ARCHIVE_REGISTRY))
 }
 
 /// # Errors
@@ -289,11 +353,14 @@ pub fn sources(root: &Path) -> Result<Vec<Source>> {
 }
 
 fn registry(root: &Path) -> Result<Registry> {
-    let path = registry_path()?;
+    registry_at(root, &registry_path()?)
+}
+
+fn registry_at(root: &Path, path: &Path) -> Result<Registry> {
     if !path.try_exists()? {
         return Ok(Registry::default());
     }
-    let mut registry = parse(&std::fs::read(&path)?)?.0;
+    let mut registry = parse(&std::fs::read(path)?)?.0;
     let Some(identity) = repository_identity(root)? else {
         return Ok(Registry::default());
     };
@@ -306,10 +373,196 @@ fn registry(root: &Path) -> Result<Registry> {
     Ok(registry)
 }
 
+fn git_sources(root: &Path) -> Result<Vec<GitSource>> {
+    let home = crate::home::home().context("Git upstream registry requires a home directory")?;
+    let mut registered = read_git_registry(&home.join(GIT_REGISTRY))?.sources;
+    let Some(identity) = repository_identity(root)? else {
+        return Ok(Vec::new());
+    };
+    registered.retain(|source| source.repository == identity);
+    let legacy = registry(root)?;
+    let directories = legacy
+        .sources
+        .iter()
+        .map(|source| (&source.repository, &source.directory))
+        .chain(
+            legacy
+                .preserved
+                .iter()
+                .map(|source| (&source.repository, &source.directory)),
+        )
+        .chain(
+            registered
+                .iter()
+                .map(|source| (&source.repository, &source.directory)),
+        )
+        .collect();
+    refuse_overlaps(directories)?;
+    Ok(registered)
+}
+
+fn read_git_registry(path: &Path) -> Result<GitRegistrations> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(GitRegistrations {
+                version: FORMAT,
+                sources: Vec::new(),
+            });
+        }
+        Err(error) => return Err(error.into()),
+    };
+    ensure!(
+        metadata.is_file() && metadata.len() <= u64::try_from(MAX_REGISTRY_BYTES)?,
+        "Git upstream registry must be a bounded regular file"
+    );
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(u64::try_from(MAX_REGISTRY_BYTES)? + 1)
+        .read_to_end(&mut bytes)?;
+    parse_git(&bytes)
+}
+
 /// # Errors
 /// Rejects malformed owner registrations or unreadable source identities.
 pub fn preserved_sources(root: &Path) -> Result<Vec<Preserved>> {
     Ok(registry(root)?.preserved)
+}
+
+/// # Errors
+/// Rejects malformed registrations or unreadable repository identities.
+pub fn has_sources(root: &Path) -> Result<bool> {
+    let legacy = registry(root)?;
+    let git = git_sources(root)?;
+    Ok(!legacy.sources.is_empty() || !legacy.preserved.is_empty() || !git.is_empty())
+}
+
+fn git_bytes(root: &Path, arguments: &[&str]) -> Result<Vec<u8>> {
+    let output = crate::tool::Tool::Git
+        .command()
+        .current_dir(root)
+        .arg("--no-replace-objects")
+        .args(arguments)
+        .output()?;
+    ensure!(
+        output.status.success(),
+        "upstream Git object is unavailable: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(output.stdout)
+}
+
+fn verify_git_commit(root: &Path, source: &GitSource) -> Result<()> {
+    source.validate()?;
+    ensure!(
+        source.repository == repository(root)?,
+        "upstream Git source belongs to another repository"
+    );
+    let kind = git_bytes(root, &["cat-file", "-t", &source.revision])?;
+    ensure!(kind == b"commit\n", "upstream Git baseline is not a commit");
+    Ok(())
+}
+
+/// # Errors
+/// Rejects invalid registrations, unavailable commits, and overlapping source directories.
+pub fn register_git(root: &Path, source: GitSource) -> Result<()> {
+    let home = crate::home::home().context("Git upstream registry requires a home directory")?;
+    register_git_in(&home, root, source)
+}
+
+/// # Errors
+/// Rejects invalid Git identities, overlapping ownership, and registry storage failures.
+pub fn register_git_in(home: &Path, root: &Path, source: GitSource) -> Result<()> {
+    verify_git_commit(root, &source)?;
+    let directory = source
+        .directory
+        .to_str()
+        .context("upstream Git directory is not UTF-8")?;
+    let tree = if directory == GIT_ROOT {
+        format!("{}^{{tree}}", source.revision)
+    } else {
+        format!("{}:{directory}", source.revision)
+    };
+    ensure!(
+        git_bytes(root, &["cat-file", "-t", &tree])? == b"tree\n",
+        "upstream Git directory is not a tree"
+    );
+    let path = home.join(GIT_REGISTRY);
+    let parent = path
+        .parent()
+        .context("Git upstream registry has no directory")?;
+    std::fs::create_dir_all(parent)?;
+    let _lock = RegistryLock::acquire(&path)?;
+    let mut registered = read_git_registry(&path)?;
+    registered.sources.retain(|entry| {
+        !(entry.repository == source.repository && entry.directory == source.directory)
+    });
+    registered.sources.push(source);
+    let bytes = serde_json::to_vec_pretty(&registered)?;
+    parse_git(&bytes)?;
+    let legacy = registry_at(root, &home.join(ARCHIVE_REGISTRY))?;
+    let directories = legacy
+        .sources
+        .iter()
+        .map(|source| (&source.repository, &source.directory))
+        .chain(
+            legacy
+                .preserved
+                .iter()
+                .map(|source| (&source.repository, &source.directory)),
+        )
+        .chain(
+            registered
+                .sources
+                .iter()
+                .map(|source| (&source.repository, &source.directory)),
+        )
+        .collect();
+    refuse_overlaps(directories)?;
+    let mut candidate = tempfile::NamedTempFile::new_in(parent)?;
+    candidate.as_file_mut().write_all(&bytes)?;
+    candidate.as_file_mut().write_all(b"\n")?;
+    candidate.as_file().sync_all()?;
+    candidate.persist(path)?;
+    Ok(())
+}
+
+/// # Errors
+/// Rejects unavailable immutable commits, unsafe paths, links, and oversize source objects.
+pub fn git_original(root: &Path, source: &GitSource, path: &str) -> Result<Option<Vec<u8>>> {
+    source.validate()?;
+    ensure!(
+        relative(Path::new(path)),
+        "upstream Git member path is not normalized"
+    );
+    if !within(&source.directory, Path::new(path)) {
+        return Ok(None);
+    }
+    verify_git_commit(root, source)?;
+    let entry = git_bytes(root, &["ls-tree", "-z", &source.revision, "--", path])?;
+    if entry.is_empty() {
+        return Ok(None);
+    }
+    let entry = std::str::from_utf8(&entry)?
+        .strip_suffix('\0')
+        .context("upstream Git tree entry is incomplete")?;
+    let (metadata, member) = entry
+        .split_once('\t')
+        .context("upstream Git tree entry has no path")?;
+    let fields: Vec<_> = metadata.split_whitespace().collect();
+    ensure!(
+        member == path
+            && fields.len() == GIT_TREE_METADATA_FIELDS
+            && matches!(fields[0], "100644" | "100755")
+            && fields[1] == "blob",
+        "upstream Git member is not a regular file"
+    );
+    let size = String::from_utf8(git_bytes(root, &["cat-file", "-s", fields[2]])?)?;
+    ensure!(
+        size.trim().parse::<u64>()? <= MAX_MEMBER_BYTES,
+        "upstream Git member exceeds its byte budget"
+    );
+    Ok(Some(git_bytes(root, &["cat-file", "blob", fields[2]])?))
 }
 
 /// # Errors
@@ -404,6 +657,11 @@ pub fn original_with(
                 "preserved member identity changed: {relative_path}"
             );
             return Ok(Some(bytes));
+        }
+    }
+    for source in git_sources(root)? {
+        if within(&source.directory, Path::new(relative_path)) {
+            return git_original(root, &source, relative_path);
         }
     }
     Ok(None)

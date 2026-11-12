@@ -8,6 +8,8 @@ use std::process::{Output, Stdio};
 mod fixture_process;
 
 fn hook(root: &Path, command: &str, configured: bool) -> Result<Output> {
+    let home = root.join("home");
+    std::fs::create_dir_all(&home)?;
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let config = if configured {
         source.join("home/dot_config/prose")
@@ -17,6 +19,8 @@ fn hook(root: &Path, command: &str, configured: bool) -> Result<Output> {
     let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), root)
         .arg("claude-bash")
         .current_dir(root)
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
         .env("PROSE_CONFIG", config)
         .env("PROSE_RUNTIME", root.join("prose-runtime"))
         .stdin(Stdio::piped())
@@ -156,6 +160,45 @@ fn binary_upload_metadata_cannot_exempt_publication_bodies() -> Result<()> {
             ),
         ],
     )
+}
+
+#[test]
+fn a_required_notice_applies_only_to_its_registered_destination_and_text() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let commands = [
+        "gh issue comment 1 --repo example/project --body-file notice.md",
+        "gh api --method POST repos/example/project/issues/1/comments --field body=@notice.md",
+    ];
+    let body = "The operation completed.\n\nAI generated this contribution.\n";
+    std::fs::write(root.join("notice.md"), body)?;
+    for command in commands {
+        check_publications(root, &[(command, false, "text came about")])?;
+    }
+    let registrations = root.join("home/.config/dotfiles/contribution-notices");
+    std::fs::create_dir_all(&registrations)?;
+    std::fs::write(
+        registrations.join("example__project.json"),
+        include_bytes!("../../../fuzz/corpus/contribution_notice/required-notice"),
+    )?;
+    for command in commands {
+        check_publications(root, &[(command, true, "")])?;
+    }
+    check_publications(
+        root,
+        &[(
+            "gh issue comment 1 --repo example/other --body-file notice.md",
+            false,
+            "text came about",
+        )],
+    )?;
+    std::fs::write(
+        root.join("notice.md"),
+        "AI-assisted unrelated text.\n\nAI generated this contribution.\n",
+    )?;
+    check_publications(root, &[(commands[0], false, "text came about")])?;
+    std::fs::write(root.join("notice.md"), "The operation completed.\n")?;
+    check_publications(root, &[(commands[0], false, "contribution notice")])
 }
 
 #[test]

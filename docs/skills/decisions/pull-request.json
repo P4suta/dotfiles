@@ -1,9 +1,15 @@
 {
-  "revision": "fbbd0d3fbdeeebed3556f4d3d103a1cd7d77adf89eae9a7e78073e4a96f4bf5c",
+  "revision": "b0ad4e357a8c3a35dfcdec280dae29a892fe9b3b703c1754bd07d6948a8cd2d4",
   "outcome": "implemented",
-  "reason": "Use automatic incremental reviews without manual commands or a full-review prerequisite.\nHonor an explicit merge instruction during unavailable optional review through normal GitHub admission.\nPreserve source checks, required reviews, supported findings, and truthful review status.\nAccept CodeRabbit Check Runs bound to the provider and inspected head while preserving review and finding checks.\nPersonal references name the user without changing scope, authorization, or technical ownership.\nUse the standing current-head PR quota exception without another confirmation for already authorized personal non-fork PR merges.\nRetain the installed guidance for concise PR descriptions.",
+  "reason": "Bind required upstream notices to exact repositories and preserve upstream prose through immutable Git baselines.\nKeep contribution requirements in the existing PR workflow and preserve technical ownership terms while addressing the user directly.\nUse the standing current-head PR quota exception without another confirmation for already authorized personal non-fork PR merges.\nPreserve required checks, reviews, supported findings, publication holds, and truthful review status.\nKeep the installed guidance for concise PR descriptions.",
   "evidence": [
     "docs/adr/merge-after-coderabbit-review-limits.md",
+    "docs/adr/scope-contribution-exceptions-to-upstream-sources.md",
+    "crates/platform/src/contribution.rs",
+    "crates/platform/src/upstream.rs",
+    "crates/platform/tests/contribution_notices.rs",
+    "crates/platform/tests/upstream_git.rs",
+    "crates/prose/src/copyedit/nlp.rs",
     "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
     "docs/adr/use-coderabbit-without-importance-opt-outs.md",
@@ -86,7 +92,7 @@
   "revisit": null,
   "size": {
     "outcome": "keep",
-    "reason": "Keep service configuration and source assessment details in focused references.\nThe executable workflow owns metadata parsing and realistic regression fixtures.",
+    "reason": "Keep contribution prerequisites in the entrypoint and registration details in the existing workflow reference.",
     "revisit": null
   }
 }

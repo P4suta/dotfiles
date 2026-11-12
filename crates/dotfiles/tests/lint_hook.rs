@@ -14,9 +14,16 @@ fn fixture_command(program: impl AsRef<OsStr>, root: &Path) -> Command {
 }
 
 fn hook(root: &Path, command: &str, payload: &Value) -> (bool, String) {
-    let mut child = fixture_command(env!("CARGO_BIN_EXE_dotfiles"), root)
-        .arg(command)
-        .current_dir(root)
+    hook_command(
+        fixture_command(env!("CARGO_BIN_EXE_dotfiles"), root)
+            .arg(command)
+            .current_dir(root),
+        payload,
+    )
+}
+
+fn hook_command(command: &mut Command, payload: &Value) -> (bool, String) {
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -51,6 +58,16 @@ fn init_repository(root: &Path) {
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
+}
+
+fn git_output(root: &Path, arguments: &[&str]) -> String {
+    let output = fixture_command("git", root)
+        .current_dir(root)
+        .args(arguments)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
 const CONCISE_ADR: &str = "---\nstatus: proposed\ndate: 2026-11-06\n---\n# Bound the retry queue\n\n## Context\nAn unavailable server can exhaust memory.\n\n## Decision\nKeep only the latest pending request.\n\n## Alternatives\nAn unlimited queue retains every request but can exhaust memory.\n\n## Consequences\nOlder pending requests are lost.\n\n## Confirmation\nDisconnect the server and verify that only one request remains queued.\n";
@@ -230,6 +247,127 @@ fn a_wrapped_comment_sentence_blocks_and_one_sentence_per_line_is_admitted() {
         &write_event(root.path(), "probe.rs"),
     );
     assert!(success && !clean.contains("block"), "{clean}");
+}
+
+fn check_upstream_source(
+    relative: &str,
+    original: &str,
+    edited: &str,
+    authored: &str,
+    violation: &str,
+) {
+    let root = tempfile::tempdir().unwrap();
+    let installed_home = platform::home::home().unwrap();
+    let home = root.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let agent = || {
+        let mut command = fixture_command(env!("CARGO_BIN_EXE_dotfiles"), root.path());
+        command
+            .current_dir(root.path())
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("PROSE_CONFIG", installed_home.join(".config/prose"))
+            .env("PROSE_RUNTIME", installed_home.join(".local/share/prose"));
+        command
+    };
+    init_repository(root.path());
+    let path = root.path().join(relative);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, original).unwrap();
+    let git = |arguments: &[&str]| git_output(root.path(), arguments);
+    git(&["config", "user.name", "Fixture"]);
+    git(&["config", "user.email", "fixture@example.com"]);
+    git(&["add", relative]);
+    git(&["commit", "--quiet", "-m", "Fixture"]);
+    let revision = git(&["rev-parse", "HEAD"]);
+    let registration = agent()
+        .args([
+            "upstream",
+            "register-git",
+            "--directory",
+            "src",
+            "--revision",
+            &revision,
+            "--origin",
+            "https://github.com/example/library",
+        ])
+        .output()
+        .unwrap();
+    assert!(registration.status.success(), "{registration:?}");
+    let registry = home.join(".config/dotfiles/upstream-git.json");
+    let registered = std::fs::read(&registry).unwrap();
+    let missing = "0".repeat(40);
+    for invalid in ["HEAD", &missing] {
+        let rejected = agent()
+            .args([
+                "upstream",
+                "register-git",
+                "--directory",
+                "src",
+                "--revision",
+                invalid,
+                "--origin",
+                "https://github.com/example/library",
+            ])
+            .output()
+            .unwrap();
+        assert!(!rejected.status.success(), "{rejected:?}");
+        assert_eq!(std::fs::read(&registry).unwrap(), registered);
+    }
+
+    std::fs::write(&path, edited).unwrap();
+    let (success, clean) = hook_command(
+        agent().arg("lint-hook"),
+        &write_event(root.path(), relative),
+    );
+    assert!(success && !clean.contains("block"), "{clean}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), edited);
+    git(&["add", relative]);
+    let tidy = agent()
+        .args(["upstream", "tidy", "--staged", relative])
+        .output()
+        .unwrap();
+    assert!(tidy.status.success(), "{tidy:?}");
+    assert_eq!(git(&["show", &format!(":{relative}")]), edited.trim());
+
+    std::fs::write(&path, authored).unwrap();
+    let (success, clean) = hook_command(
+        agent().arg("lint-hook"),
+        &write_event(root.path(), relative),
+    );
+    assert!(success && !clean.contains("block"), "{clean}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), authored);
+    std::fs::write(&path, violation).unwrap();
+    let (_, blocked) = hook_command(
+        agent().arg("lint-hook"),
+        &write_event(root.path(), relative),
+    );
+    assert!(blocked.contains("SentencePerLine"), "{blocked}");
+}
+
+#[test]
+fn a_git_baseline_preserves_xml_comments_and_checks_authored_comments() {
+    let original =
+        "/// <summary> Returns the stored value. </summary>\nclass Library { int Read() => 1; }\n";
+    let edited = original.replace("=> 1", "=> 2");
+    let authored = edited.replace("Returns the stored value.", "Reads the stored value.");
+    let violation = authored.replace(
+        "Reads the stored value.",
+        "Returns a value. Adds another sentence.",
+    );
+    check_upstream_source("src/library.cs", original, &edited, &authored, &violation);
+}
+
+#[test]
+fn a_git_baseline_preserves_markdown_paragraphs_and_checks_authored_prose() {
+    let original = "# Domain setup\n\nExisting text. More existing text.\n\nAn existing sentence\nuses two source lines.\n";
+    let edited = format!("{original}\nNew records need quotation marks.\n");
+    let authored = edited.replace("New records", "Updated records");
+    let violation = authored.replace(
+        "Updated records need quotation marks.",
+        "A record needs quotation marks. Another sentence follows.",
+    );
+    check_upstream_source("src/guide.md", original, &edited, &authored, &violation);
 }
 
 #[test]
