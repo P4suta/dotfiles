@@ -41,7 +41,7 @@ Fetch [commit statuses](https://docs.github.com/en/rest/commits/statuses) and [C
 Check the CodeRabbit app identity and completed successful review output instead of relying on the check's name or conclusion alone.
 Accept an empty current-head `APPROVED` review after verifying its submission time and successful completion.
 An approval alone, a skipped review, `Review rate limited`, a superseded run, or missing commit evidence establishes no fresh completed review.
-Review completion and owner-authorized merge admission are separate decisions.
+Review completion and user-authorized merge admission are separate decisions.
 Use `pull-request` for merge commands when the user explicitly chooses to merge without optional review, including the standing current-head PR quota exception.
 Read the head again before acting when the branch moves.
 

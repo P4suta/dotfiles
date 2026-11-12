@@ -1,5 +1,5 @@
 {
-  "revision": "31cd3c4435a4ea8d38c7581796a097a63aeebe557564f5db08250d1e74d081b7",
+  "revision": "86ad32dd0c13b947c0801fc4ebada99b86a83e8c1ea0bca594d6aa067813b17d",
   "outcome": "keep",
   "reason": "Deliver certificate exports only to their signing stages and keep native identities local.\nKeep notarization completion free of signing exports and passwords.",
   "evidence": [

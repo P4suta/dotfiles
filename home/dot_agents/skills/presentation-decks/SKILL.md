@@ -9,7 +9,7 @@ description: >-
 
 A spoken slide serves the listener, and an appendix serves the reader.
 A listener can either read a slide or listen to the speaker, so a spoken slide carries the words the speaker says.
-Use monochrome-design for the visual style, or github-style-slides when the owner asks for the GitHub look.
+Use monochrome-design for the visual style, or github-style-slides when the user asks for the GitHub look.
 Read [Figma Slides](references/figma-slides.md) when the deck lives in Figma Slides.
 
 ## Brief

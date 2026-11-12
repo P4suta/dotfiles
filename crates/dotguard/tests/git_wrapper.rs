@@ -921,7 +921,7 @@ fn a_forced_branch_deletion_passes_only_under_the_stack_lease() {
     );
 }
 
-/// Codex deletes its own turn refs, and a ref no porcelain command manages loses nothing the owner keeps.
+/// Codex deletes its own turn refs, and a ref no porcelain command manages loses nothing the user keeps.
 #[test]
 fn deleting_a_tool_ref_passes_and_deleting_a_branch_ref_does_not() {
     let wrapper = Wrapper::new("tool-ref");

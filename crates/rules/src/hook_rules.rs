@@ -41,7 +41,7 @@ pub const fn name(hook: Hook) -> &'static str {
 /// One step of a hook.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Gate {
-    /// The machine-local push hold, which only the owner lifts.
+    /// The machine-local push hold, which only the user lifts.
     PushHold,
     /// The host's process-start health check.
     Health,

@@ -270,6 +270,10 @@ impl Fixture {
             .current_dir(&self.root)
             .env("HOME", home)
             .env("USERPROFILE", home)
+            .env(
+                "PROSE_CONFIG",
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/prose"),
+            )
             .args(arguments)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -584,6 +588,11 @@ fn managed_requests_ignore_existing_work_and_still_refuse_changed_gaps() -> Resu
                 &["assure", "stop", "--reply-language", "Japanese"],
                 &input,
             )?;
+            ensure!(
+                output.status.success(),
+                "assure stop failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             Ok(serde_json::from_slice(&output.stdout)?)
         };
         assert!(
@@ -893,7 +902,7 @@ fn ready_uses_the_explicit_commit_even_when_remote_tracking_refs_disagree() -> R
     fixture.git(&["update-ref", "refs/remotes/origin/main", &base])?;
     assert_eq!(first, refuse()?);
     assert_eq!(first.rule, "assure.added");
-    assert!(first.cause.contains("owner's local catalog"));
+    assert!(first.cause.contains("user's local catalog"));
     let evidence = first.evidence.join("\n");
     assert!(evidence.contains(&format!("base={base}")), "{evidence}");
     assert!(

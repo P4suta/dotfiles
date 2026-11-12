@@ -1,5 +1,5 @@
 {
-  "revision": "bfac2ee53ebf962b6abfe6a43c5a3b99bf200df7b3a91cf1373e3827487165bc",
+  "revision": "488d2e0625dcae5abccd96f4357cb0ebdb0c5e25ca14fdba4790033227a608f6",
   "outcome": "keep",
   "reason": "Release-please configuration and recovery need focused guidance without duplicating release authorization and signing procedures.",
   "evidence": [

@@ -1,5 +1,5 @@
 {
-  "revision": "e76d68571e57da129367af73b72723bb0fd8d4b352808569aa54268e4e7168d1",
+  "revision": "437b8a61ad343de0eac05bb497bac89fdfe18e5cd88c83c33411a6606216a5e8",
   "outcome": "implemented",
   "reason": "Use automatic incremental PR reviews without a full-review prerequisite.\nKeep account, billing, configuration, and capacity work scoped to explicit service tasks.\nHonor explicit merges during unavailable optional review and preserve subscription limits.",
   "evidence": [

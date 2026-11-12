@@ -29,7 +29,7 @@ Run `pr-workflow local init`, create an issue with `local create`, and register 
 These commands need no GitHub executable, token, or authentication.
 Run `local check` for the issue prerequisite and the project's normal commands for its required verification.
 Local issue numbers and owner-local records grant no publication authority.
-When publication becomes authorized, link the actual local history with checked remote `start --promote-local` and keep the normal live issue, signing, checks, and owner authorization.
+When publication becomes authorized, link the actual local history with checked remote `start --promote-local` and keep the normal live issue, signing, checks, and user authorization.
 The new remote start supplies no retroactive authority for earlier local edits.
 
 Assess every PR using the [importance criteria](references/importance.md) before publication.
@@ -37,7 +37,7 @@ The checked workflow authenticates the current diff and uses CodeRabbit PR revie
 Importance never skips a review or selects a review opt-in label.
 The workflow keeps its assessments and issue contexts in owner-local state, and published documents and tracked files never carry them.
 Keep severe levels exceptional and explain concrete consequences rather than escalating by filename or diff size.
-Apply service capacity and pause checks when the owner explicitly requests a review or service operation.
+Apply service capacity and pause checks when the user explicitly requests a review or service operation.
 An unavailable optional review supplies no completed-review claim and doesn't override an explicit instruction to merge despite its absence.
 For already authorized personal non-fork PR merges, the user grants standing permission to proceed when the current-head CodeRabbit PR review is rate-limited.
 Use `coderabbit-review` for current-head review and existing supported findings.
@@ -67,7 +67,7 @@ Restack with `pr-workflow stack sync` or `stack rebase`.
 Never use a manual rebase or force push.
 Merge with `pr-workflow merge` or `stack merge`.
 The section [stacks and merging](references/workflow.md#stacks-and-merging) describes both.
-Use [owner-authorized merges](references/workflow.md#owner-authorized-merges) when the owner explicitly chooses to merge despite unavailable optional review.
+Use [explicit merge requests](references/workflow.md#owner-authorized-merges) when the user explicitly chooses to merge despite unavailable optional review.
 
 Use `pr-workflow link-issue --repo OWNER/REPO --pr NUMBER --issue NUMBER` to add a closing reference to an existing PR as the authenticated numeric repository owner.
 The operation checks the open issue, PR source network, head, base, and current document.
@@ -98,8 +98,8 @@ Use prose when a diagram adds no explanatory relationship, such as a spelling co
 The command adds the black-and-white theme and refuses colors, transparency, effects, icons, and its own D2 configuration in the source.
 Load `screenshots` for a change that a reader can see on a screen, and attach its captures beside the diagram.
 Rewrite the description around the final change if the scope changed.
-Write every PR, issue, review, and comment in the owner's voice: flat, short, and about the change or the decision.
-Leave out who or what wrote it, the local workflow, and notes addressed to the owner.
+Write every PR, issue, review, and comment in the user's voice: flat, short, and about the change or the decision.
+Leave out who or what wrote it, the local workflow, and notes addressed to the user.
 
 Use `pr-workflow start/check/create/edit/ready` instead of the corresponding `gh` mutation.
 Personal non-fork publication requires `--issue NUMBER`, a live open issue in the exact destination, and a visible closing reference in the body.

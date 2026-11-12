@@ -1,5 +1,5 @@
 {
-  "revision": "4a7690d7d044c9915ad7cec1644109b74eaedde26bf667de785ae139125d6a8a",
+  "revision": "ea6e376a5170b101603e9abe1b7945b4536ea9ffed014e2e1342348606a823b7",
   "outcome": "implemented",
   "reason": "Keep required coverage and actual project check results without separate verification inventories or task declarations, while preserving CI and release timing.",
   "evidence": [

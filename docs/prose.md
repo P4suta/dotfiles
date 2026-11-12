@@ -1,6 +1,9 @@
 # Multilingual copyediting
 
 The shared house policy covers replies, persisted prose, human-readable metadata, and editorial checks.
+Personal replies and project notes use direct address and omit ownership labels for the user.
+The shared address check preserves qualified technical ownership terms, literal identifiers, and source quotations.
+Qualified contexts use [Vale lookaround assertions](https://docs.vale.sh/guides/regex) without exempting the rest of a sentence.
 Its canonical dictionary lives in `home/dot_config/prose/house.toml` and compiles into the checker.
 Japanese technical prose uses the preferred English terms and preserves literal identifiers and quoted source material.
 Japanese demonstratives in authored explanations produce error-severity findings.

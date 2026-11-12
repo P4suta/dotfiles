@@ -1,5 +1,5 @@
 {
-  "revision": "a6fb630cb92bfd004c3c009679c419e426c4f1f06e0b4f8ebf7f64956ba83f33",
+  "revision": "129c98b24211cec194d40c164221ede1bf2fe97cf2fc09c9969aa09efbcfafd1",
   "outcome": "implemented",
   "reason": "Preserve scoped native rollout and add reviewed-checkout execution, recursive previews, and native export hash checks after stale policy and incomplete directory previews exposed gaps.",
   "evidence": [

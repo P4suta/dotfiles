@@ -243,7 +243,7 @@ pub enum Exclusion {
     None,
     /// A standing exclusion chosen for the PR.
     Owner,
-    /// An exclusion that lasts only while the owner pauses PR reviews.
+    /// An exclusion that lasts only while the user pauses PR reviews.
     Pause,
 }
 
@@ -256,7 +256,7 @@ pub fn exclusion(ignore: bool, pause_marker: bool) -> Exclusion {
     }
 }
 
-/// Refuse every review request while the owner pauses `CodeRabbit` PR reviews.
+/// Refuse every review request while the user pauses `CodeRabbit` PR reviews.
 #[must_use]
 pub fn review_request_allowed(paused: bool, request: bool) -> bool {
     !paused || !request
@@ -351,7 +351,7 @@ pub enum Step {
     /// A stack needs a linear history.
     Restack,
     Wait,
-    /// Add the `CodeRabbit` pause lines before a draft becomes ready during the owner's pause.
+    /// Add the `CodeRabbit` pause lines before a draft becomes ready during the user's pause.
     Exclude,
     Ready,
     /// Merge the head whose checks the tool read.

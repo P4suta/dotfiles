@@ -13,7 +13,7 @@ Keep repository names, source revisions, secret names, and installed App identit
 
 Use `release-workflow` to separate automatic proposals from candidate verification, signing, and publication.
 Treat creation of a release PR, merging that PR, creating a draft release, and publishing its assets as distinct operations.
-Honor the owner's existing authorization for each operation without asking again.
+Honor the user's existing authorization for each operation without asking again.
 An automatic version proposal grants no release authority.
 
 Select the strategy for the public deliverable rather than the implementation language alone.

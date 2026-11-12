@@ -1,5 +1,5 @@
 {
-  "revision": "ae111b51c885a5e1bc51827c5d092ec1f7c72319293f942007620df212f40f8c",
+  "revision": "59dd5c26bbc0f4e7fcf6c47c1e4dec9f9fdc24359283f46d050773a98e25279a",
   "outcome": "implemented",
   "reason": "Keep independent archive verification and restoration separate from local cache cleanup.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [

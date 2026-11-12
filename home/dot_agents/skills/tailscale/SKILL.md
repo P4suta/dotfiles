@@ -24,7 +24,7 @@ Distinguish ordinary OpenSSH over Tailscale from [Tailscale SSH](https://tailsca
 Preserve the existing OpenSSH and SSH-agent boundary unless the user authorizes a migration.
 Never run `tailscale up --ssh`, reset login state, change advertised routes, or switch an exit node as a generic connectivity fix.
 Before changing the mode, verify which SSH server and operating systems support it.
-The owner handles 1Password approval and private keys in person.
+The user handles 1Password approval and private keys in person.
 Never inspect the vault or relax its approval settings to get unattended access.
 
 For a policy change, preserve unrelated rules, and use the narrowest identity, destination, protocol, and port the intended connection needs.

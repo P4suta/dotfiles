@@ -1,7 +1,7 @@
 {
-  "revision": "374218062fcf1c6670049aead3e93bee38245461f862f9307d26d96fbc2831ba",
+  "revision": "c6b3b282d007bf414f942e93ee6ff6d0031ab0d6c14ad5bf2ca5640ea91110e4",
   "outcome": "implemented",
-  "reason": "The skill reviews applicability across the affected journey, source conditions, observable requirements, and semantic judgments. A browser reference covers reading, controls, responsive behavior, and proposal boundaries without requiring a parallel evidence submission. Primary-source recommendations keep their normative status under the owner's stronger completion policy.",
+  "reason": "The skill reviews applicability across the affected journey, source conditions, observable requirements, and semantic judgments. A browser reference covers reading, controls, responsive behavior, and proposal boundaries without requiring a parallel evidence submission. Primary-source recommendations keep their normative status under the user's stronger completion policy.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "home/dot_agents/skills/source-bound-interface-design/SKILL.md",
     "home/dot_claude/skills/symlink_source-bound-interface-design",
