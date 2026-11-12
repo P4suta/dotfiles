@@ -1,5 +1,5 @@
 {
-  "revision": "927abef1ffcba2d5ffce4f242462e1a6077500b9b71e948e454e5ce38c29f753",
+  "revision": "9d383cd72c02c8a57e1dc57500026b37d23ef1e62d26800c9c5e70a111cabef5",
   "outcome": "implemented",
   "reason": "Run applicable local checks before pushing and preserve required hosted gates and publication holds.\nInspect automatic review state without manual commands or a full-review prerequisite.\nHonor explicit merges during unavailable optional CodeRabbit review.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [

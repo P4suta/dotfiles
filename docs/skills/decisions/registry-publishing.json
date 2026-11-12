@@ -1,5 +1,5 @@
 {
-  "revision": "468030daa74dc26561ae5e8a04bfaa393439aab92c343485df78bf321aa6bcab",
+  "revision": "c5edb95d7b7729a0703c19906d4ba0d6c632a78f179167fa435f05047a773e50",
   "outcome": "implemented",
   "reason": "Support an explicit package-scoped Hex token path when native identity remains unavailable or unsuitable.\nVerify production availability before directing the user through identity registration.\nPreparation requires no live publishing credential, and delivery evidence grants no publication authority.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [

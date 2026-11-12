@@ -1,5 +1,5 @@
 {
-  "revision": "5e32a06c04840a1f776eddab75855b76e1fa8be0f956b923d651d915188f6fda",
+  "revision": "6a2fd0f46da19d3bc4bad06a9b1bba999f141a4543655ce10df16fe204bca706",
   "outcome": "implemented",
   "reason": "Keep owner hosts optional and distinguish background credential access from desktop authentication before requesting account changes.",
   "evidence": [

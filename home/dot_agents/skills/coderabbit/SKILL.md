@@ -14,7 +14,7 @@ Use `coderabbit-review` for local analysis and PR findings.
 Ordinary PR work uses `gh` and automatic reviews.
 Account screens, billing checks, and configuration changes need an explicit service task.
 Leave implementation to the user's existing agent.
-Read `coderabbit --guard-status --json` before a service operation and honor its pause scope, including for settings changes, until the owner resumes.
+Read `coderabbit --guard-status --json` before a service operation and honor its pause scope, including for settings changes, until the user resumes.
 
 ## Fixed-fee setup
 

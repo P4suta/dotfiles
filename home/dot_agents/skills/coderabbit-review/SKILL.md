@@ -21,7 +21,7 @@ Never run reviews from hooks, watchers, file-save events, or background loops.
 ## Review local changes
 
 For an explicitly requested review, read `coderabbit --guard-status --json` first and honor the selected pool's pause and capacity limits.
-Only the owner clears a review pause.
+Only the user clears a review pause.
 Run the project's relevant checks before requesting a service review.
 Check `coderabbit --version` and `coderabbit auth status`, and read `coderabbit review --help` when choosing options.
 Use only the dotfiles-installed `coderabbit` or `cr` guard, including inside `mise x`.
@@ -74,7 +74,7 @@ Accept incremental reviews without demanding a full review or posting manual rev
 Missing, skipped, stale, failed, incomplete, and rate-limited reviews supply no completed-review claim.
 When the user explicitly authorizes merging despite an unavailable optional review, use `pull-request` for normal GitHub admission of the verified head.
 Required checks, repository-required reviews, supported findings, and publication holds remain authoritative.
-An owner pause prohibits starting another review and grants no merge authority by itself.
+A user pause prohibits starting another review and grants no merge authority by itself.
 Keep ordinary PR work in `gh`.
 Service settings, billing, and account screens need an explicit service task.
 Don't require a manual command, CLI fallback, or Resume operation to complete an already-authorized merge without optional review.
@@ -92,5 +92,5 @@ After a push, inspect the updated head's actual review state, findings, and CI b
 When publication or another prerequisite stays unavailable, report the verified local fixes and the pending PR step.
 A resolved conversation or a passing rate-limit check proves no review or fix of the current code.
 Replies, thread resolution, new review triggers, commits, pushes, and merges each need user authorization.
-Write each reply in the owner's voice, as `pull-request` describes for published text.
+Write each reply in the user's voice, as `pull-request` describes for published text.
 Use the `coderabbit` skill for Triage, planning, configuration, or service-side Finishing Touches.

@@ -9,7 +9,7 @@ description: >-
 
 Use `apple-signing`, `release-workflow`, and [the shared native procedure](../code-signing/references/apple.md).
 Check the installed `notarytool` and `stapler` with [Apple's current workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
-The owner holds private keys, and the agent receives only protected-command results and public receipts.
+The user holds private keys, and the agent receives only protected-command results and public receipts.
 Use a notarization-only Doppler config or the existing native Keychain profile for submission and status queries.
 For API-key authentication, deliver only the private key, Key ID, and the Issuer ID when that key type requires it.
 Keep certificate exports and signing passwords out of completion jobs.

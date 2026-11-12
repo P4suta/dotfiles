@@ -1,7 +1,7 @@
 ---
 name: monochrome-design
 description: >-
-  Apply the owner's black-and-white design preferences to interfaces, websites, diagrams, documents, and other visual artifacts.
+  Apply the user's black-and-white design preferences to interfaces, websites, diagrams, documents, and other visual artifacts.
   Use for visual design and design review, with literal copy and explicit typographic hierarchy.
 ---
 
@@ -24,7 +24,7 @@ Extra width alone doesn't justify parallel cards, independent reading paths, or 
 Keep a table when the data relationships require its rows and columns.
 
 For public-facing browser content, use an 18 CSS pixel default for body text and action labels, expressed in relative units.
-The owner selects 18 pixels as a reading preference.
+The user selects 18 pixels as a reading preference.
 The Digital Agency's [typography guidance](https://design.digital.go.jp/dads/foundations/typography/) permits a smaller baseline.
 Choose a coherent heading scale and bounded line length around the actual content.
 Keep browser font preferences, enlargement, and spacing overrides effective.

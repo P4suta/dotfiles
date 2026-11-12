@@ -140,7 +140,7 @@ fn read(root: &Path, home: &Path) -> Result<Project> {
         crate::paths::canonical(path.parent().context("local issue state parent missing")?)?;
     ensure!(
         parent.starts_with(crate::paths::canonical(home)?) && !parent.starts_with(root),
-        "local issues belong to the owner home outside the project"
+        "local issues belong to the user's home outside the project"
     );
     ensure!(
         !fs::symlink_metadata(&path)?.file_type().is_symlink(),
@@ -197,7 +197,7 @@ fn lock(root: &Path, home: &Path) -> Result<fs::File> {
     let canonical = crate::paths::canonical(directory)?;
     ensure!(
         canonical.starts_with(crate::paths::canonical(home)?) && !canonical.starts_with(root),
-        "local issues belong to the owner home outside the project"
+        "local issues belong to the user's home outside the project"
     );
     ensure!(
         !fs::symlink_metadata(path.with_extension("lock"))

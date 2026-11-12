@@ -373,7 +373,7 @@ pub fn args(values: &[&str]) -> Vec<OsString> {
     values.iter().map(OsString::from).collect()
 }
 
-/// The execute bits for the owner, the group, and others.
+/// The execute bits for the file owner, the group, and others.
 #[cfg(unix)]
 const ANY_EXECUTE: u32 = 0o111;
 /// `rwxr-xr-x` for an executable and `rw-r--r--` for any other generated file.

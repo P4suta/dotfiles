@@ -1,7 +1,7 @@
 ---
 name: orbstack
 description: >-
-  Run containers and Linux machines on the owner's Mac through OrbStack, the Docker engine the Mac profile installs.
+  Run containers and Linux machines on the user's Mac through OrbStack, the Docker engine the Mac profile installs.
   Use for Docker or Linux-machine work on macOS, such as the containerized proof gate, not for container work on other hosts.
 metadata:
   tools: "tools.toml"

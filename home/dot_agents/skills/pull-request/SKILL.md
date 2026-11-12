@@ -93,8 +93,8 @@ Use prose when a diagram adds no explanatory relationship, such as a spelling co
 The command adds the black-and-white theme and refuses colors, transparency, effects, icons, and its own D2 configuration in the source.
 Load `screenshots` for a change that a reader can see on a screen, and attach its captures beside the diagram.
 Rewrite the description around the final change if the scope changed.
-Write every PR, issue, review, and comment in the owner's voice: flat, short, and about the change or the decision.
-Leave out who or what wrote it, the local workflow, and notes addressed to the owner.
+Write every PR, issue, review, and comment in the user's voice: flat, short, and about the change or the decision.
+Leave out who or what wrote it, the local workflow, and notes addressed to the user.
 
 Use `pr-workflow start/check/create/edit/ready` instead of the corresponding `gh` mutation.
 Personal non-fork publication requires `--issue NUMBER`, a live open issue in the exact destination, and a visible closing reference in the body.

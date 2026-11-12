@@ -1,5 +1,5 @@
 {
-  "revision": "a1c37a872245df9d747539c28af3e61e5e750280df9c1376940489acff975547",
+  "revision": "d141e09e1dc3e62be6d41b78ff877448573117d26abab85274b68f589f9f42c3",
   "outcome": "implemented",
   "reason": "The skill connects the user's monochrome preferences to the full task, semantic grouping, readable browser typography, labeled controls, and meaningful verification. It distinguishes the user's stronger defaults from source minima and keeps browser units separate from native platform guidance.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [

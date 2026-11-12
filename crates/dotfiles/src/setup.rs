@@ -231,7 +231,7 @@ pub(crate) fn preflight(
             arguments.push(source.clone_url().into());
             if !runner.run(Tool::Git, &arguments)?.success {
                 unmet.push(format!(
-                    "{step:?} clones {} with the owner's GitHub credentials, which this session cannot use non-interactively",
+                    "{step:?} clones {} with the user's GitHub credentials, which this session cannot use non-interactively",
                     source.repository()
                 ));
             }
@@ -1082,7 +1082,7 @@ fn haskell(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
     Ok(())
 }
 
-/// A tool the owner builds from one of their own repositories.
+/// A tool the user builds from one of their own repositories.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum OwnerSource {
     Ocomment,

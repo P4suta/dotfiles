@@ -630,7 +630,7 @@ fn verification(hook: Hook, arguments: &[OsString], input: &[u8]) -> Result<()> 
 pub fn push_paused(marker: &Path) -> Refusal {
     Refusal::new(
         "push.paused",
-        "pushes are paused on this machine; keep the commits local until the owner explicitly resumes pushing",
+        "pushes are paused on this machine; keep the commits local until the user explicitly resumes pushing",
         "git status --short --branch",
     )
     .evidence(format!("marker present: {}", marker.display()))

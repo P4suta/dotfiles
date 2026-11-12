@@ -47,7 +47,7 @@ pub enum Reason {
     Toolchain,
     /// A build dependency that no agent runs.
     Library,
-    /// An interactive program for the owner, which agents never drive.
+    /// An interactive program for the user, which agents never drive.
     Desktop,
     /// A preferred tool whose entry in the modern tool table holds the judgment: when to use it, the legacy cases, and the next action.
     ModernTable,

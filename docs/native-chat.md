@@ -19,7 +19,7 @@ If chat can't run on a host yet, use the existing `setup.ignore` entry for `chat
 The omission remains visible in the profile's declared skips.
 Use a host's configured aliases and pinned SSH keys.
 The setup step doesn't discover or trust peers automatically.
-The doctor's authentication findings may require the owner's normal client login.
+The doctor's authentication findings may require the user's normal client login.
 
 The setup step reuses an installed domyjob when `chat setup --help`, `chat doctor --help`, and `mcp --help` all succeed.
 This checks the needed command interface and trusts the native installation.

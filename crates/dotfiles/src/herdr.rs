@@ -339,7 +339,7 @@ fn launch_lock(home: &Path) -> Result<LaunchLease> {
 pub fn cleanup(home: &Path, pid: u32) -> Result<()> {
     ensure!(
         std::io::stdin().is_terminal(),
-        "Herdr cleanup requires the owner's interactive confirmation"
+        "Herdr cleanup requires the user's interactive confirmation"
     );
     let before = Native::new(home)
         .processes()?

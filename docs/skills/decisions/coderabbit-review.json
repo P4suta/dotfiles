@@ -1,5 +1,5 @@
 {
-  "revision": "1d1c02e90b16012251f33b25b5dd0d3156f00fe1eb5e6febc59e22a32421f2be",
+  "revision": "6a912a7db4b7172b8a7faa7b39be881f33a26c3123e7114d1f2f14b7480b05a8",
   "outcome": "implemented",
   "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, explicit holds, and guarded explicit reviews.\nRead both GitHub completion APIs because a completed review may have no commit status.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [

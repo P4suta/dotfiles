@@ -26,10 +26,10 @@ const HEX_RADIX: u32 = 16;
 pub const PREFIX: &str = "dotfiles-refusal/2 ";
 
 /// Ends every refusal's text, so an agent questions a gate that looks wrong instead of working around it.
-pub const IMPROVE: &str = "If this refusal looks wrong or costs more than it protects, propose a dotfiles change to the owner.";
+pub const IMPROVE: &str = "If this refusal looks wrong or costs more than it protects, propose a dotfiles change to the user.";
 
 /// Ends a hook's report of a failure that no policy decided.
-pub const DEFECT: &str = "This hook failed rather than refused: report the output above to the owner as a dotfiles defect.";
+pub const DEFECT: &str = "This hook failed rather than refused: report the output above to the user as a dotfiles defect.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Refusal {

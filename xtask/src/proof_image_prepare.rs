@@ -785,7 +785,7 @@ fn private_output(root: &Path, requested: &Path) -> Result<PathBuf> {
     let home = platform::home::home().context("owner home")?;
     ensure!(
         parent.starts_with(crate::canonical(&home)?),
-        "output must remain in the owner's home"
+        "output must remain in the user's home"
     );
     #[cfg(unix)]
     {

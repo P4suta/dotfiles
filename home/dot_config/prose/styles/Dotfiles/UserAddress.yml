@@ -5,9 +5,9 @@ ignorecase: true
 nonword: true
 scope: ~text.blockquote
 tokens:
-  - '\bthe\s+owner\s+(?:(?:has|had|can|could|may|must|will|would|should|does|did|explicitly|already)\s+)*(?:asks?|asked|requests?|requested|chose|chooses|confirms?|confirmed|approves?|approved|authorizes?|authorized|decides?|decided|prefers?|preferred|wants?|wanted|says|said)\b'
-  - '\bowner(?:[''’]s)?[-\s]+(?:approval|acceptance|authorization|confirmation|consent|decision|permission|request|instructions?|policy|preference|approved|authorized|requested|imposed|managed|provided)\b'
+  - '\bthe\s+owner\b(?!-|\s+(?:of|map|id|field|column|property|attribute|reference|pointer|handle|record)\b)'
+  - '(?<!\b(?:file|directory|repository|resource|process|service|package|project|account|object|record|group|code)(?:[''’]s)?\s+)\bowner(?:[''’]s\b|[-\s]+(?:approval|acceptance|authorization|confirmation|consent|decision|permission|request|instructions?|policy|preference|approved|authorized|requested|imposed|managed|provided)\b)'
   - '\bowner(?:様|さん)?(?:に|へ|の|は|が|を|から|と)'
   - 'オーナー(?:様|さん)?'
   - '所有者(?:様|さん)'
-  - '所有者の(?:承認|許可|確認|指示|依頼|判断)'
+  - '(?<!の)(?<!ファイル)所有者の(?:承認|許可|確認|指示|依頼|判断)'

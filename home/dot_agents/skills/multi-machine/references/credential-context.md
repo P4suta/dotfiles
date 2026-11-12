@@ -1,8 +1,8 @@
 # Credential execution context
 
-A background service can run as the owner while using a different login session from the desktop.
+A background service can run as the user while using a different login session from the desktop.
 An agent communication error or inaccessible credential store alone proves neither expired credentials nor a locked password manager.
-Check the execution context before asking the owner to log in, unlock an agent, or change authentication settings.
+Check the execution context before asking the user to log in, unlock an agent, or change authentication settings.
 
 Compare the exact executable and version, Git's configured SSH and signing programs, the user, relevant environment variables, and the login session.
 Inspect only the metadata needed for that comparison.

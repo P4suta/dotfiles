@@ -1,5 +1,5 @@
 {
-  "revision": "d64182eab368f79d72cd0bca1f2d6ce1f4a1c665451d4e572298aa29311934e9",
+  "revision": "0459f7ac5bd9f7211466aa864360f360a035822bb7890cce0959917ad5481ab2",
   "outcome": "keep",
   "reason": "Separate Doppler workload authentication from SSL.com signing credentials and certificate enrollment.\nReuse valid signing identities and distinguish runtime failures from credential replacement.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [

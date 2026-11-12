@@ -1,7 +1,7 @@
 ---
 name: synology-dsm
 description: >-
-  Operate and diagnose the owner's Synology NAS over the tailnet through DiskStation Manager's own OpenSSH, with administration kept behind interactive privilege.
+  Operate and diagnose the user's Synology NAS over the tailnet through DiskStation Manager's own OpenSSH, with administration kept behind interactive privilege.
   Use for DiskStation Manager services, ports, certificates, QuickConnect retirement, Drive and file-share endpoints, and NAS-side Tailscale, not for artifact transfers, tailnet policy, or storage changes.
 ---
 
@@ -16,7 +16,7 @@ Use `tailscale` when the name doesn't resolve or the peer is unreachable, `nas` 
 
 Use DSM's OpenSSH server because [Tailscale SSH doesn't run on Synology](https://tailscale.com/docs/integrations/synology#limitations-and-known-issues).
 [DSM 6 and later require an SSH account in the `administrators` group](https://kb.synology.com/en-us/DSM/tutorial/How_to_login_to_DSM_with_root_permission_via_SSH_Telnet).
-Install the authorized public key under the account's home directory for unattended access, and leave interactive credentials with the owner.
+Install the authorized public key under the account's home directory for unattended access, and leave interactive credentials with the user.
 When key authentication fails, inspect ownership and permissions before changing them.
 With `StrictModes` enabled, OpenSSH rejects an authorization file when its file, directory, or home is writable by other users.
 The [OpenSSH file guidance](https://man.openbsd.org/sshd.8#FILES) recommends owner-only access to `.ssh` and `authorized_keys`.
@@ -25,7 +25,7 @@ Use the commands available on DSM rather than assuming the development hosts' to
 ## Privilege boundary
 
 The administrator shell isn't root, and DSM documents interactive escalation through `sudo -i`.
-Read every fact you can without root first, and hand each privileged command to the owner as a one-liner they run with a terminal attached, such as `ssh -t ALIAS sudo COMMAND`.
+Read every fact you can without root first, and hand each privileged command to the user as a one-liner they run with a terminal attached, such as `ssh -t ALIAS sudo COMMAND`.
 Never add a `NOPASSWD` sudoers entry, change the SSH port, or widen the account's groups to avoid a prompt.
 Treat storage pools, shared folders, snapshots, user accounts, and firewall rules as out of scope unless the user authorized that exact change.
 
@@ -43,7 +43,7 @@ Treat storage pools, shared folders, snapshots, user accounts, and firewall rule
 On DSM 7, outbound tailnet connections from other apps require the [documented network device setup](https://tailscale.com/docs/integrations/synology#enable-outbound-connections).
 The root boot task must run again after a Tailscale package upgrade.
 Check the current certificate domains and Domain Name System (DNS) settings without inferring a tailnet-wide configuration from an empty domain list.
-If daemon management needs an operator, the owner can grant the intended account that role with [interactive `sudo tailscale set --operator=ACCOUNT`](https://tailscale.com/docs/reference/troubleshooting/linux/linux-operator-permission).
+If daemon management needs an operator, the user can grant the intended account that role with [interactive `sudo tailscale set --operator=ACCOUNT`](https://tailscale.com/docs/reference/troubleshooting/linux/linux-operator-permission).
 
 ## Serve the web interface on the tailnet name
 

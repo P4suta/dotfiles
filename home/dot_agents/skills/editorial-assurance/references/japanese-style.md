@@ -22,7 +22,7 @@ The shared policy selects version 4.0, published on July 25, 2026.
 The guide's introduction permits coherent adjustments for an organization's rules and identifies technical localization as its foundation.
 Its scope covers orthography rather than translation technique or explanation quality.
 
-The owner's English terminology preference and prohibition of Japanese demonstratives are explicit house rules.
+The user's English terminology preference and prohibition of Japanese demonstratives are explicit house rules.
 They aren't claims that the guide or every engineering organization requires the same vocabulary.
 For comparison, the [Japanese localization guide](https://contribute.cncf.io/techdocs/localization/ja/) preserves project-specific English terminology and supplies a controlled term table.
 

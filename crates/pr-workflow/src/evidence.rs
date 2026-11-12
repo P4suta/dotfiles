@@ -28,7 +28,7 @@ struct Verified {
 }
 
 pub(super) fn home() -> Result<PathBuf> {
-    platform::home::home().context("the owner home for local workflow evidence is unavailable")
+    platform::home::home().context("the user's home for local workflow evidence is unavailable")
 }
 
 fn plain(part: &str) -> bool {

@@ -27,10 +27,10 @@ Add a custom part only when a cited page asks for one.
 
 ## Design the screens first
 
-Design the system and every screen before writing interface code, and show both to the owner.
+Design the system and every screen before writing interface code, and show both to the user.
 Start from Apple's kit for the target release, and keep the project's own layer thin.
 Read the [kit reference](references/figma-kit.md) for the kit's structure, measurements, and limits.
-Ask the owner for each decision that the pages leave open, such as the accent color, the deployment target, and a new control.
+Ask the user for each decision that the pages leave open, such as the accent color, the deployment target, and a new control.
 Compute the contrast of the accent as text in both appearances before proposing the color.
 
 ## Build with SwiftUI

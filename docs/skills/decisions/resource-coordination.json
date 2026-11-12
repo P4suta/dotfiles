@@ -1,5 +1,5 @@
 {
-  "revision": "6c7e2e0ee36b402f6e78b9a5a2f4e38fdcb58eb4f481ba23a13fd34042469055",
+  "revision": "6c9b82d182abadf403f0ef2db9d8a97a636266f76c574a7f28f35e7dc8285c52",
   "outcome": "implemented",
   "reason": "Keep scheduling permission separate from the enforced bounded-tool rule and point to the shared runner without repeating its resource limits.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [

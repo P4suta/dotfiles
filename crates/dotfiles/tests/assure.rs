@@ -902,7 +902,7 @@ fn ready_uses_the_explicit_commit_even_when_remote_tracking_refs_disagree() -> R
     fixture.git(&["update-ref", "refs/remotes/origin/main", &base])?;
     assert_eq!(first, refuse()?);
     assert_eq!(first.rule, "assure.added");
-    assert!(first.cause.contains("owner's local catalog"));
+    assert!(first.cause.contains("user's local catalog"));
     let evidence = first.evidence.join("\n");
     assert!(evidence.contains(&format!("base={base}")), "{evidence}");
     assert!(

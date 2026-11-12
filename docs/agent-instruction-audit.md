@@ -49,11 +49,11 @@ Heading: groups the language lines.
 
 > {{ $language := includeTemplate "partials/reply_language" . -}}
 
-Directive: read the owner's configured reply language.
+Directive: read the user's configured reply language.
 
 > {{ if eq $language "Japanese" -}}
 
-Directive: select the Japanese line from the owner's configured reply language.
+Directive: select the Japanese line from the user's configured reply language.
 
 > - Reply in Japanese.
 
@@ -208,7 +208,7 @@ Judgment: the agent distinguishes reusable guidance from task-specific observati
 
 > - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
 
-Judgment: the owner controls each machine's opt-in, and verification duties still apply without skill maintenance.
+Judgment: the user controls each machine's opt-in, and verification duties still apply without skill maintenance.
 
 > - Keep the CodeRabbit CLI and PR review pools separate, and apply capacity checks to explicitly requested reviews.
 
@@ -229,7 +229,7 @@ Judgment: the user's instruction grants merge authority, and repository requirem
 
 > - Commit, push, reply to or resolve PR threads, request reviews, and merge only when the user asks.
 
-Judgment: authorization comes from the owner's own messages, and no tool separates them from an agent's.
+Judgment: authorization comes from the user's own messages, and no tool separates them from an agent's.
 
 > - Use japanese-lexicon to verify Japanese readings and romanizations with identified public lexical records or major dictionaries and a named spelling standard.
 
@@ -340,11 +340,11 @@ Judgment: the requested language depends on the current user and document.
 
 > Follow the selected Japanese orthography guide from the Japan Translation Federation, with the explicit house choices in the editorial-assurance references.
 
-Judgment: applying the guide requires interpreting its scope and the owner's choices.
+Judgment: applying the guide requires interpreting its scope and the user's choices.
 
 > Don't use Japanese demonstratives in authored explanations or replies.
 
-Judgment: the owner prohibits Japanese demonstratives in authored prose.
+Judgment: the user prohibits Japanese demonstratives in authored prose.
 `crates/prose/src/house.rs` rejects the configured spellings after native annotation.
 
 > Name the actual object, operation, condition, or result.

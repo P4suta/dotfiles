@@ -14,7 +14,7 @@ Confirm enrollment, Credential ID, signing capability, and the intended publishe
 
 Prepare named user-managed inputs for username, password, Credential ID, and the persistent certificate TOTP seed.
 Keep login MFA, a rotating one-time code, certificate TOTP, and an enrollment PIN distinct.
-The owner handles 1Password and QR codes in person.
+The user handles 1Password and QR codes in person.
 Use the service's reviewed pinned action or supported tooling in a fresh credential-bearing job with a verified candidate and no candidate-controlled code execution.
 Keep private values out of arguments, logs, and reports.
 Keep the canonical username, password, Credential ID, and persistent TOTP seed in a Windows-signing config, with field references for each consumer.
