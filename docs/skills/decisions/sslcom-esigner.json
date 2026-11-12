@@ -1,7 +1,7 @@
 {
-  "revision": "d15935bccf9410bc181d7791721ff0ff9e1d53ec36d03973f36ffb6d52929afe",
+  "revision": "0459f7ac5bd9f7211466aa864360f360a035822bb7890cce0959917ad5481ab2",
   "outcome": "keep",
-  "reason": "Separate Doppler workload authentication from SSL.com signing credentials and certificate enrollment.\nReuse valid signing identities and distinguish runtime failures from credential replacement.",
+  "reason": "Separate Doppler workload authentication from SSL.com signing credentials and certificate enrollment.\nReuse valid signing identities and distinguish runtime failures from credential replacement.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "home/dot_agents/skills/sslcom-esigner/SKILL.md",
     "docs/adr/purpose-scoped-doppler-workload-identities.md"

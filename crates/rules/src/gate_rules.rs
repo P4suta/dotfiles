@@ -88,7 +88,7 @@ pub fn rebase_refused(control: bool, rewrites: Option<bool>) -> bool {
 pub enum Admission {
     /// The stack tooling runs it while it holds the repository's stack lease.
     Tooling,
-    /// The owner's bypass, recorded in the bypass log.
+    /// The user's bypass, recorded in the bypass log.
     Waived,
     Refused,
 }

@@ -2,12 +2,12 @@
 name: github-style-slides
 description: >-
   Build or restyle a slide deck in the GitHub Light look, with Primer semantic tokens, repository-style headers, and message titles.
-  Use when the owner explicitly asks for GitHub-style slides; monochrome-design remains the default otherwise.
+  Use when the user explicitly asks for GitHub-style slides; monochrome-design remains the default otherwise.
 ---
 
 # GitHub-style slides
 
-Use this style when the owner explicitly asks for a GitHub-style deck.
+Use this style when the user explicitly asks for a GitHub-style deck.
 The monochrome-design skill states that explicit requirements for the current artifact take precedence, so the request selects this style for that artifact only.
 Keep monochrome-design for every other visual task.
 Use presentation-decks for the brief, the script, the deck structure, and the talk checks.

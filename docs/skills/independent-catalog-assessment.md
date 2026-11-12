@@ -58,7 +58,7 @@ Each row names an independent eligible task and the contract for its scope and f
 | release-workflow | Designing candidate, signing, and publication stages | Exact candidate identity and protected transitions apart from registry details |
 | reliability | Controlling time, concurrency, state, and external dependencies | Deterministic reproductions without blanket serialization or retries |
 | renovate | Maintaining tested updates and shared configuration | Extraction and consumer checks apart from one project's pin resolution |
-| resource-coordination | Bounding expensive work on shared machines within owner permission | Existing workload permission apart from verifier selection |
+| resource-coordination | Bounding expensive work on shared machines within user permission | Existing workload permission apart from verifier selection |
 | rust-invariants | Representing important Rust states and transitions through types | Validated construction and exhaustive variants apart from type checker configuration |
 | rust-release | Handling Rust version proposals and crates.io publication | Exact workspace candidate and registry identity apart from generic release stages |
 | rust-tooling | Implementing maintained typed automation | Project commands for effects and cleanup apart from command discovery |

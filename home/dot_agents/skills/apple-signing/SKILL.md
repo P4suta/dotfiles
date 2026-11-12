@@ -13,9 +13,9 @@ Reuse an existing valid certificate and private key.
 Sign executables with a Developer ID Application certificate and installer packages with a Developer ID Installer certificate.
 
 Select the identity by its exact public certificate selector instead of its position or friendly name.
-A public `.cer` can't sign, so the owner's protected export must contain the matching private key.
+A public `.cer` can't sign, so the user's protected export must contain the matching private key.
 Validate the export with the native importer, certificate chain, and signing ACLs before claiming readiness.
-Keep durable exports in the owner's credential store.
+Keep durable exports in the user's credential store.
 Use Doppler references for CI delivery of the required certificate export and password, and keep the native signing selector in the project's public configuration.
 An installer-signing job receives the Installer identity inputs it needs.
 A notarization completion job receives no signing export or signing password.

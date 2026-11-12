@@ -16,7 +16,7 @@ touch "${HOME}/.config/git/push-paused"
 ```
 
 The first command checks the state, and the other two pause pushes.
-Resume only on explicit owner instruction with `rm -- "${HOME}/.config/git/push-paused"`.
+Resume only on explicit user instruction with `rm -- "${HOME}/.config/git/push-paused"`.
 
 For PowerShell on Windows, resolve the Git wrapper's home directory from the environment:
 

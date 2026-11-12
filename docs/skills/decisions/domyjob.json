@@ -1,5 +1,5 @@
 {
-  "revision": "bbc7077eb36836309aa77492018be4e6ed5a4e4ba9cba3d950707fc518099672",
+  "revision": "1f71cfeaeeae93854b1edbc64eb60a1432aaaf6b5dd6e83a8dee8f2ee912ece3",
   "outcome": "implemented",
   "reason": "Keep remote execution an owner-side convenience and diagnose its credential context before requesting authentication changes.",
   "evidence": [

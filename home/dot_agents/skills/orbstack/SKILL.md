@@ -1,7 +1,7 @@
 ---
 name: orbstack
 description: >-
-  Run containers and Linux machines on the owner's Mac through OrbStack, the Docker engine the Mac profile installs.
+  Run containers and Linux machines on the user's Mac through OrbStack, the Docker engine the Mac profile installs.
   Use for Docker or Linux-machine work on macOS, such as the containerized proof gate, not for container work on other hosts.
 metadata:
   tools: "tools.toml"
@@ -18,7 +18,7 @@ Check running containers and machines with `docker ps` and `orb list` before you
 A container that fills the disk image fills the Mac's disk, so remove only the images and containers your own work created.
 
 A Linux machine created with `orb create` shares the Mac's home directory, so a write inside it changes host files.
-Deleting a machine, resetting OrbStack, or switching the Docker context away affects every project on the Mac, so do those only after the owner approves.
+Deleting a machine, resetting OrbStack, or switching the Docker context away affects every project on the Mac, so do those only after the user approves.
 For work on a real Linux host, use `domyjob` on that host instead of an OrbStack machine.
 
 Read `orb --help` and `docker --help` for the installed release, and the [OrbStack documentation](https://docs.orbstack.dev/) for behavior they don't describe.

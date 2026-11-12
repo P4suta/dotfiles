@@ -1,7 +1,7 @@
 {
-  "revision": "6a6d514439c0df81acc897b05f5973eecc4bdaa2b002ac816aec20532577763e",
+  "revision": "46e6ae7a8ba7f714f9ce9ecaca87c065f213dfa85624feadf18cf8e13584484a",
   "outcome": "implemented",
-  "reason": "Bind required upstream notices to exact repositories and preserve upstream prose through immutable Git baselines.\nKeep external contribution requirements in the existing PR workflow while retaining normal checks for authored changes.",
+  "reason": "Bind required upstream notices to exact repositories and preserve upstream prose through immutable Git baselines.\nKeep contribution requirements in the existing PR workflow and preserve technical ownership terms while addressing the user directly.",
   "evidence": [
     "docs/adr/scope-contribution-exceptions-to-upstream-sources.md",
     "crates/platform/src/contribution.rs",

@@ -31,7 +31,7 @@ Use the project's pinned container or documented hosted runner for each one, and
 | macOS and Windows | Every supported release target |
 
 A developer may run one of these on demand through the same entrypoint when a change needs its answer, and that run gates nothing.
-Keep CI lean by reusing exact-source evidence, never by requiring the owner's hosts.
+Keep CI lean by reusing exact-source evidence, never by requiring the user's hosts.
 
 ## Schedules
 

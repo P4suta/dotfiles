@@ -440,7 +440,7 @@ fn owner_pause_blocks_the_real_entry_point_before_vendor_lookup_and_survives_ins
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(75));
-        assert!(String::from_utf8_lossy(&output.stderr).contains("paused by the owner"));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("paused by the user"));
     }
     let output = fixture_process::command(binary, &home)
         .arg("--guard-status")
@@ -509,7 +509,7 @@ fn each_pause_scope_is_reported_and_only_cli_scopes_block_the_guard() {
         assert_eq!(output.status.code(), Some(75));
         let error = String::from_utf8_lossy(&output.stderr);
         assert_eq!(
-            error.contains("paused by the owner"),
+            error.contains("paused by the user"),
             cli == "paused",
             "{error}"
         );
@@ -557,7 +557,7 @@ fn a_pr_pause_admits_a_guarded_review_through_reservation_preflight_and_executio
         if let Err(error) = result {
             let error = error.to_string();
             assert!(
-                error.contains("paused by the owner") && error.contains("--guard-status --json"),
+                error.contains("paused by the user") && error.contains("--guard-status --json"),
                 "{error}"
             );
         }

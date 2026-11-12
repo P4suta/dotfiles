@@ -18,11 +18,11 @@ For signing or publication, also bind it to the verified candidate identity, ver
 Check the target immediately before approving, and reassess after a changed head, a new attempt, or a different candidate.
 Read the job that uses the environment, including called workflows, instead of inferring its effects from the environment name.
 
-Write the approval or review comment in the owner's voice, as `pull-request` describes for published text.
+Write the approval or review comment in the user's voice, as `pull-request` describes for published text.
 State what the review checked and anything still open in one or two plain sentences.
 Leave out field labels, authorization notes, and any description of who or what wrote it.
 A deployment approval comment names the same scope and evidence in the same voice.
-Never approve the owner's own PR from another identity.
+Never approve the user's own PR from another identity.
 Keep credentials and private payloads out of every comment.
 
 Never approve while relevant checks fail, blocking findings remain, required evidence goes missing, or the operation exceeds the permission.

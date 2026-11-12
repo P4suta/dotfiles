@@ -1,7 +1,7 @@
 {
-  "revision": "c8467c49b688b6a8f61ccb271979a8c9982345b0d2b6610fe9efbb83d5993176",
+  "revision": "102bb72bb14cb9c176cca82cc720ba9e264e23278018c2cf7252b9feb64e8fe1",
   "outcome": "implemented",
-  "reason": "The owner requests proactive capture of reusable knowledge from research, implementation, debugging, reviews, failures, and feedback. The skill prefers existing guidance, preserves evidence and applicability, and leaves experimental maintenance disabled.",
+  "reason": "The user requests proactive capture of reusable knowledge from research, implementation, debugging, reviews, failures, and feedback. The skill prefers existing guidance, preserves evidence and applicability, and leaves experimental maintenance disabled.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "home/dot_agents/skills/knowledge-to-skills/SKILL.md",
     "docs/adr/capture-reusable-knowledge-as-shared-skills.md"

@@ -60,7 +60,7 @@ Disconnect the old writer before deleting its GitHub copies, because an active s
 
 ## Import values held only in GitHub
 
-Use a temporary reviewed Rust job when the owner authorizes moving GitHub credentials without opening the vault.
+Use a temporary reviewed Rust job when the user authorizes moving GitHub credentials without opening the vault.
 Compile the exact repository ID, ref, Doppler project and config, and selected secret names into the adapter, and accept no runtime target arguments.
 Require `workflow_dispatch`, a verified source SHA, the original environment reviewer gate, and a one-hour read/write token limited to the destination config.
 Build and test without credentials, then inject only the selected values into the final transfer step.

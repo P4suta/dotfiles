@@ -23,9 +23,12 @@ pub const CRATES: [&str; 9] = [
     "crates/skill-ops",
 ];
 
+const USER_ADDRESS_POLICY: &str = "home/dot_config/prose/styles/Dotfiles/UserAddress.yml";
+
 /// Files outside the crates' `src` directories that the compiler includes or that decide how the tools build.
-const SHARED: [&str; 62] = [
+const SHARED: [&str; 63] = [
     "home/dot_config/prose/house.toml",
+    USER_ADDRESS_POLICY,
     ".cargo/config.toml",
     ".chezmoiroot",
     ".github/workflows/ci.yml",
@@ -159,4 +162,29 @@ pub fn hex(bytes: &[u8]) -> String {
         .flat_map(|byte| [byte / HEX_RADIX, byte % HEX_RADIX])
         .filter_map(|digit| char::from_digit(u32::from(digit), u32::from(HEX_RADIX)))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn personal_address_edits_change_the_producer_identity() -> io::Result<()> {
+        let fixture = tempfile::tempdir()?;
+        for krate in CRATES {
+            fs::create_dir_all(fixture.path().join(krate).join("src"))?;
+        }
+        let absent = content_hash(fixture.path())?;
+        let policy = fixture.path().join(USER_ADDRESS_POLICY);
+        fs::create_dir_all(policy.parent().expect("policy directory"))?;
+        fs::write(&policy, "extends: existence\ntokens: ['owner approval']\n")?;
+        let original = content_hash(fixture.path())?;
+        assert_ne!(absent, original);
+        fs::write(
+            &policy,
+            "extends: existence\ntokens: ['owner acceptance']\n",
+        )?;
+        assert_ne!(original, content_hash(fixture.path())?);
+        Ok(())
+    }
 }

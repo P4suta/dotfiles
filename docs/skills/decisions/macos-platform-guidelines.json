@@ -1,5 +1,5 @@
 {
-  "revision": "c68940bdbd24305f1a9bb13475d3ffc52ed4ff069d2fac6f79fc322721bc23ab",
+  "revision": "36a51c9e0b6123190e075f465f5b131fc530382b6a3629779cf09b98e983b464",
   "outcome": "implemented",
   "reason": "Desktop guidance covers settings, window ownership, screen capture, sandbox migration, diagnostics, and distribution with platform-specific primary sources. Native acceptance remains distinct from core proofs.",
   "evidence": [
