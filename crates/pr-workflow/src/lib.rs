@@ -905,7 +905,7 @@ fn refuse_provenance(part: &str, text: &str, recheck: impl FnOnce() -> String) -
 fn refuse_local_evidence(body: &str, recheck: impl FnOnce() -> String) -> Result<()> {
     for (number, line) in body.lines().enumerate() {
         let line = line.trim();
-        if line.starts_with(review_policy::PACKET_PREFIX) {
+        if line.starts_with(review_policy::PACKET_PREFIX) || line == "@coderabbitai ignore" {
             return Err(Refusal::new(
                 "pr.local-evidence",
                 "published documents can't carry local workflow evidence; delete the line, because pr-workflow keeps assessments and pause exclusions in owner-local state",
@@ -1179,9 +1179,10 @@ pub(crate) fn validate(target: &Target, title: String, body: String) -> Result<V
         )
     })?;
     refuse_attribution("title", &title, || recheck(target, None))?;
-    refuse_attribution("body", &body, || recheck(target, Some(&title)))?;
+    let projected = platform::contribution::project(Some(&target.repo), &body)?;
+    refuse_attribution("body", &projected, || recheck(target, Some(&title)))?;
     refuse_provenance("title", &title, || recheck(target, None))?;
-    refuse_provenance("body", &body, || recheck(target, Some(&title)))?;
+    refuse_provenance("body", &projected, || recheck(target, Some(&title)))?;
     refuse_local_evidence(&body, || recheck(target, Some(&title)))?;
     let body_refusal = |cause: &str, evidence: String| {
         Refusal::new("pr.body", cause, recheck(target, Some(&title))).evidence(evidence)
@@ -1275,6 +1276,34 @@ fn offline_destination(repo: &str) -> Result<Destination> {
     })
 }
 
+#[cfg(test)]
+mod external_controls {
+    use super::*;
+
+    #[test]
+    fn an_external_description_needs_no_control_and_rejects_a_leaked_control() -> Result<()> {
+        let target = Target {
+            repo: "upstream/project".into(),
+            title_policy: None,
+            issue: None,
+            cli_receipt: None,
+            prior_cli_receipt: None,
+        };
+        let title = "perf(iterator): avoid a single-item buffer".to_owned();
+        let body = "The iterator keeps its final value in a local variable.\n";
+        assert_eq!(validate(&target, title.clone(), body.into())?.body, body);
+        assert!(validate(&target, title, format!("{body}\n@coderabbitai ignore\n")).is_err());
+        assert!(
+            validate_issue_contents(
+                "Avoid an item buffer",
+                format!("{body}\n@coderabbitai ignore\n")
+            )
+            .is_err()
+        );
+        Ok(())
+    }
+}
+
 /// Validates an issue title and body with the checks a PR document receives, apart from title syntax.
 fn validate_issue(document: &IssueDocument) -> Result<ValidatedDocument> {
     let target = Target {
@@ -1286,7 +1315,9 @@ fn validate_issue(document: &IssueDocument) -> Result<ValidatedDocument> {
     };
     target.conventional_required()?;
     let body = fs::read_to_string(&document.body_file).context("read UTF-8 issue body file")?;
-    let mut validated = validate_issue_contents(&document.title, body)?;
+    let projected = platform::contribution::project(Some(&document.repo), &body)?;
+    let mut validated = validate_issue_contents(&document.title, projected.into_owned())?;
+    validated.body = body;
     figure::prepare_document(&mut validated, &document.body_file)?;
     Ok(validated)
 }

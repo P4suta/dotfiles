@@ -57,7 +57,7 @@ pub fn tidy_upstream(root: &Path, paths: &[PathBuf]) -> Result<()> {
         };
         let current = read(path)?;
         if current != original {
-            let inputs = prose::upstream_comment_inputs(root, &relative, &original, &current)?;
+            let inputs = prose::upstream_prose_inputs(root, &relative, &original, &current)?;
             if !inputs.is_empty() {
                 let findings = prose::check_inputs(&prose::Bundle::installed()?, &inputs)?;
                 ensure!(

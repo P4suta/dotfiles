@@ -221,6 +221,16 @@ enum RepositoryRequest {
 
 #[derive(Subcommand)]
 enum UpstreamRequest {
+    RegisterGit {
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        directory: PathBuf,
+        #[arg(long)]
+        revision: String,
+        #[arg(long)]
+        origin: String,
+    },
     RegisterArchive {
         #[arg(long, default_value = ".")]
         root: PathBuf,
@@ -254,6 +264,23 @@ enum UpstreamRequest {
 
 fn upstream(request: UpstreamRequest) -> Result<()> {
     match request {
+        UpstreamRequest::RegisterGit {
+            root,
+            directory,
+            revision,
+            origin,
+        } => {
+            platform::upstream::register_git(
+                &root,
+                platform::upstream::GitSource {
+                    repository: platform::upstream::repository(&root)?,
+                    directory,
+                    revision,
+                    origin,
+                },
+            )?;
+            println!("Registered reviewed Git upstream source");
+        }
         UpstreamRequest::RegisterArchive {
             root,
             directory,

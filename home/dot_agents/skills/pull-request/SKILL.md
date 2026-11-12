@@ -20,6 +20,9 @@ For a personal non-fork repository, select an existing open issue or create one 
 Record the problem, intended behavior, bounded scope, and observable acceptance criteria in the issue before coding.
 Reuse a suitable issue instead of creating a duplicate.
 External projects and forks follow their own contribution rules and need no upstream issue.
+Check existing issues and follow the upstream rules for discussing or claiming work before submission.
+Keep owner-local review controls, assessments, and quota information out of external issues, comments, and PR descriptions.
+An exact notice required by upstream can use the destination-scoped registration described in [upstream contribution requirements](references/workflow.md#upstream-contribution-requirements).
 Treat an unknown or inconsistent repository response as a failed prerequisite.
 Online operations need live authenticated `gh` access, keep requests bounded and serialized, and stop without retry on authentication failure, low quota, or rate limit.
 Never transfer tokens between machines or publish from stale prerequisite caches.

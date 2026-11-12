@@ -219,6 +219,22 @@ For an explicitly requested review or service diagnosis, check the current [rate
 Ordinary automatic PR work needs no service administration or billing-screen preflight.
 Never start a review merely to discover capacity or enable paid usage to continue.
 
+## Upstream contribution requirements
+
+An upstream rule can take precedence over the personal policy on text provenance.
+Register the exact notice required by upstream in the owner-local `~/.config/dotfiles/contribution-notices/OWNER__REPO.json` file.
+Use a lowercase registration filename.
+The registration uses schema 1 and supplies `repository`, `notice`, `source`, `reason`, and `remove_when`.
+Read the primary source before registering the exception and recheck its applicability before publication.
+The notice must be visible plain text on the body's final line.
+The remaining text keeps its normal checks, and an unknown destination gets no exception.
+Registrations grant no publication authority and never enter a published document.
+
+For an upstream checkout, `dotfiles upstream register-git` binds a reviewed source directory to its full immutable commit and HTTPS origin.
+Use `--directory .` to cover the repository root.
+Unchanged publisher paragraphs and comments keep their bytes while new or changed prose keeps its normal checks.
+Missing objects, invalid paths, links, and malformed registrations refuse the operation.
+
 ## Destination title exception
 
 When an upstream project requires another format, pass `--title-policy policy.json` to every relevant command.

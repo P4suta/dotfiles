@@ -17,6 +17,8 @@ use std::path::Path;
 /// The byte budget for a literal body or one JSON input.
 pub const MAX_BODY_INPUT: usize = 1024 * 1024;
 const MAX_BODIES: usize = 64;
+const GITHUB_ORIGIN: &str = "https://github.com";
+const GITHUB_HOST: &str = "github.com";
 
 /// Decodes a parsed shell word when its quoting and values are static.
 #[must_use]
@@ -182,6 +184,7 @@ pub(crate) enum Body {
     Text {
         channel: prose::Channel,
         text: String,
+        repository: Option<String>,
     },
     Unreadable(String),
 }
@@ -207,6 +210,7 @@ pub struct Publication {
     channel: prose::Channel,
     inputs: Vec<Input>,
     direct: bool,
+    repository: Option<String>,
 }
 
 /// Decodes exact static shell words without reading a file or executing a command.
@@ -229,7 +233,68 @@ pub fn decode(spellings: &[&str]) -> Result<Option<Publication>> {
         channel: target.channel,
         inputs: inputs(&target)?,
         direct: start == 0,
+        repository: explicit_repository(&values[start + 1..])?,
     }))
+}
+
+fn explicit_repository(arguments: &[String]) -> Result<Option<String>> {
+    let api = target(arguments)?.is_some_and(|target| target.api);
+    let mut repository = None;
+    let mut index = 0;
+    while let Some(argument) = arguments.get(index) {
+        let candidate = if let Some(value) = option(arguments, &mut index, "--repo", Some("-R"))? {
+            platform::source_identity::github_slug(&value).or_else(|| {
+                platform::source_identity::github_slug(&format!("{GITHUB_ORIGIN}/{value}"))
+            })
+        } else if let Some(host) = option(arguments, &mut index, "--hostname", None)? {
+            if host != GITHUB_HOST {
+                return Ok(None);
+            }
+            continue;
+        } else if matches!(
+            argument.as_str(),
+            "--body"
+                | "-b"
+                | "--body-file"
+                | "-F"
+                | "--title"
+                | "-t"
+                | "--field"
+                | "-f"
+                | "--raw-field"
+                | "--input"
+                | "--jq"
+                | "-q"
+                | "--template"
+        ) {
+            index += 2;
+            continue;
+        } else if metadata_option(arguments, &mut index)?.is_some() {
+            continue;
+        } else {
+            index += 1;
+            argument
+                .trim_start_matches('/')
+                .strip_prefix("repos/")
+                .filter(|_| api)
+                .and_then(|path| {
+                    let mut parts = path.split('/');
+                    let owner = parts.next()?;
+                    let name = parts.next()?;
+                    platform::source_identity::github_slug(&format!(
+                        "{GITHUB_ORIGIN}/{owner}/{name}"
+                    ))
+                })
+        };
+        if let Some(candidate) = candidate {
+            ensure!(
+                repository.as_ref().is_none_or(|prior| prior == &candidate),
+                "GitHub destination is ambiguous"
+            );
+            repository = Some(candidate);
+        }
+    }
+    Ok(repository)
 }
 
 fn option(
@@ -837,6 +902,7 @@ fn resolve_publication(
         bodies.extend(texts.into_iter().map(|text| Body::Text {
             channel: selected.channel,
             text,
+            repository: selected.repository.clone(),
         }));
         ensure!(
             bodies.len() <= MAX_BODIES,
@@ -930,9 +996,25 @@ pub(crate) fn refusals(
     };
     let mut messages = Vec::new();
     for (index, body) in bodies.iter().enumerate() {
-        let Body::Text { channel, text } = body else {
+        let Body::Text {
+            channel,
+            text,
+            repository,
+        } = body
+        else {
             continue;
         };
+        let projected = match platform::contribution::project(repository.as_deref(), text) {
+            Ok(projected) => projected,
+            Err(error) => {
+                messages.extend(decision(
+                    Inspection::Unreadable,
+                    &format!("contribution notice: {error:#}"),
+                ));
+                continue;
+            }
+        };
+        let text = projected.as_ref();
         if matches!(
             crate::body_rules::verdict(dotguard::attribution::find(text).is_some()),
             crate::body_rules::Verdict::Refuse(_)
@@ -971,6 +1053,66 @@ pub(crate) fn refusals(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notice_destinations_require_explicit_unambiguous_arguments() -> Result<()> {
+        for arguments in [
+            vec![
+                "issue",
+                "comment",
+                "1",
+                "--repo",
+                "dotnet/runtime",
+                "--body",
+                "--repo",
+            ],
+            vec![
+                "-Rdotnet/runtime",
+                "issue",
+                "comment",
+                "1",
+                "--body",
+                "Text.",
+            ],
+            vec![
+                "api",
+                "repos/dotnet/runtime/issues/1/comments",
+                "-f",
+                "body=Text.",
+            ],
+        ] {
+            let arguments: Vec<_> = arguments.into_iter().map(str::to_owned).collect();
+            assert_eq!(
+                explicit_repository(&arguments)?.as_deref(),
+                Some("dotnet/runtime")
+            );
+        }
+        let ambiguous = ["--repo", "dotnet/runtime", "-R", "example/runtime"].map(str::to_owned);
+        assert!(explicit_repository(&ambiguous).is_err());
+        let implicit = ["issue", "comment", "1", "--body", "--repo"].map(str::to_owned);
+        assert_eq!(explicit_repository(&implicit)?, None);
+        let other_host = [
+            "api",
+            "repos/dotnet/runtime/issues/1/comments",
+            "--hostname",
+            "example.com",
+        ]
+        .map(str::to_owned);
+        assert_eq!(explicit_repository(&other_host)?, None);
+        let label = [
+            "issue",
+            "create",
+            "--label",
+            "repos/dotnet/runtime",
+            "--body",
+            "Text.",
+        ]
+        .map(str::to_owned);
+        assert_eq!(explicit_repository(&label)?, None);
+        let preview = ["api", "graphql", "--preview", "repos/dotnet/runtime"].map(str::to_owned);
+        assert_eq!(explicit_repository(&preview)?, None);
+        Ok(())
+    }
 
     #[test]
     fn explicit_github_reads_do_not_require_publication_spellings() {

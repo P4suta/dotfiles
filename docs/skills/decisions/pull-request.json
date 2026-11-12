@@ -1,8 +1,14 @@
 {
-  "revision": "9c6a487c4b5fdad64fd34868ea737de422a7d0a1804c09971dd75290e1f48bb6",
+  "revision": "46e6ae7a8ba7f714f9ce9ecaca87c065f213dfa85624feadf18cf8e13584484a",
   "outcome": "implemented",
-  "reason": "Use automatic incremental reviews without manual commands or a full-review prerequisite.\nHonor an explicit merge instruction during unavailable optional review through normal GitHub admission.\nPreserve source checks, required reviews, supported findings, and truthful review status.\nAccept CodeRabbit Check Runs bound to the provider and inspected head while preserving review and finding checks.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
+  "reason": "Bind required upstream notices to exact repositories and preserve upstream prose through immutable Git baselines.\nKeep contribution requirements in the existing PR workflow and preserve technical ownership terms while addressing the user directly.",
   "evidence": [
+    "docs/adr/scope-contribution-exceptions-to-upstream-sources.md",
+    "crates/platform/src/contribution.rs",
+    "crates/platform/src/upstream.rs",
+    "crates/platform/tests/contribution_notices.rs",
+    "crates/platform/tests/upstream_git.rs",
+    "crates/prose/src/copyedit/nlp.rs",
     "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
     "docs/adr/use-coderabbit-without-importance-opt-outs.md",
@@ -85,7 +91,7 @@
   "revisit": null,
   "size": {
     "outcome": "keep",
-    "reason": "Keep service configuration and source assessment details in focused references.\nThe executable workflow owns metadata parsing and realistic regression fixtures.",
+    "reason": "Keep contribution prerequisites in the entrypoint and registration details in the existing workflow reference.",
     "revisit": null
   }
 }
