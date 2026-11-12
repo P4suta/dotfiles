@@ -1250,7 +1250,54 @@ fn check_adr_paths(root: &Path, after: &Tree, paths: &BTreeSet<String>) -> Resul
 /// # Errors
 /// Returns an error when Git, ownership, text decoding, or the ADR check fails.
 pub fn check_adrs(root: &Path, before: &Tree, after: &Tree) -> Result<()> {
-    check_adr_paths(root, after, &changed(root, before, after)?)
+    let inherited = if matches!(after, Tree::Index | Tree::WorkingTree)
+        && *before == Tree::Commit(resolve(root, "HEAD")?)
+    {
+        merge_parents(root)?
+            .into_iter()
+            .map(|commit| Tree::Commit(Some(commit)))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    check_inherited_adrs(root, after, changed(root, before, after)?, &inherited)
+}
+
+fn check_inherited_adrs(
+    root: &Path,
+    after: &Tree,
+    mut paths: BTreeSet<String>,
+    inherited: &[Tree],
+) -> Result<()> {
+    paths.retain(|path| prose::adr::is_record(path));
+    for tree in inherited {
+        let listed: Vec<_> = paths.iter().cloned().collect();
+        let previous = contents(root, tree, &listed)?;
+        let current = contents(root, after, &listed)?;
+        paths.retain(|path| previous.get(path) != current.get(path));
+    }
+    check_adr_paths(root, after, &paths)
+}
+
+fn published_adr_base(root: &Path, remote: &str, local: &str) -> Result<Option<String>> {
+    let advertised = remote_git(root, &["ls-remote", remote, "HEAD"])?;
+    if advertised.is_empty() && remote_git(root, &["ls-remote", remote])?.is_empty() {
+        return Ok(None);
+    }
+    let advertised = std::str::from_utf8(&advertised)?;
+    let tip = advertised
+        .strip_suffix("\tHEAD\n")
+        .filter(|commit| shape_rules::commit_id(commit.as_bytes()))
+        .context("ADR comparison needs the remote's advertised default commit")?;
+    ensure!(
+        resolve(root, tip)?.is_some(),
+        "fetch the remote default commit before checking changed ADRs"
+    );
+    Ok(Some(
+        String::from_utf8(git(root, &["merge-base", local, tip])?)?
+            .trim()
+            .to_owned(),
+    ))
 }
 
 pub(crate) fn push_adrs(root: &Path, remote: &str, input: &[u8]) -> Result<()> {
@@ -1278,25 +1325,7 @@ pub(crate) fn push_adrs(root: &Path, remote: &str, input: &[u8]) -> Result<()> {
             continue;
         }
         let base = if zero(theirs) {
-            let advertised = remote_git(root, &["ls-remote", remote, "HEAD"])?;
-            if advertised.is_empty() && remote_git(root, &["ls-remote", remote])?.is_empty() {
-                None
-            } else {
-                let advertised = std::str::from_utf8(&advertised)?;
-                let tip = advertised
-                    .strip_suffix("\tHEAD\n")
-                    .filter(|commit| shape_rules::commit_id(commit.as_bytes()))
-                    .context("ADR comparison needs the remote's advertised default commit")?;
-                ensure!(
-                    resolve(root, tip)?.is_some(),
-                    "fetch the remote default commit before checking changed ADRs"
-                );
-                Some(
-                    String::from_utf8(git(root, &["merge-base", local, tip])?)?
-                        .trim()
-                        .to_owned(),
-                )
-            }
+            published_adr_base(root, remote, local)?
         } else {
             ensure!(
                 resolve(root, theirs)?.is_some(),
@@ -1304,7 +1333,32 @@ pub(crate) fn push_adrs(root: &Path, remote: &str, input: &[u8]) -> Result<()> {
             );
             Some(theirs.to_owned())
         };
-        check_adrs(root, &Tree::Commit(base), &after)?;
+        let inherited = if let Some(base) = &base
+            && !zero(theirs)
+            && !git(
+                root,
+                &[
+                    "rev-list",
+                    "--merges",
+                    "--max-count=1",
+                    &format!("{base}..{local}"),
+                ],
+            )?
+            .is_empty()
+        {
+            published_adr_base(root, remote, local)?
+                .into_iter()
+                .map(|commit| Tree::Commit(Some(commit)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        check_inherited_adrs(
+            root,
+            &after,
+            changed(root, &Tree::Commit(base), &after)?,
+            &inherited,
+        )?;
     }
     Ok(())
 }
@@ -1990,7 +2044,7 @@ fn decide_with(
             changed.retain(|path| inherited_files.get(path) != current_files.get(path));
         }
     }
-    check_adr_paths(root, after, &changed)?;
+    check_inherited_adrs(root, after, changed.clone(), &inherited)?;
     let old_keys: Vec<_> = old
         .keys()
         .into_iter()
