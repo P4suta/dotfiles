@@ -1,7 +1,7 @@
 {
-  "revision": "6c9b82d182abadf403f0ef2db9d8a97a636266f76c574a7f28f35e7dc8285c52",
+  "revision": "c3e371ae2d063e6e0c6188656aa607e9236329366970d8ad8b7e85c7df091bf1",
   "outcome": "implemented",
-  "reason": "Keep scheduling permission separate from the enforced bounded-tool rule and point to the shared runner without repeating its resource limits.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
+  "reason": "Keep scheduling permission separate from the enforced bounded-tool rule and point to the shared runner without repeating its resource limits.\nPersonal references name the user without changing scope, authorization, or technical ownership.\nRemove retired messaging coordination while preserving explicit permission and bounded resource use.",
   "evidence": [
     "crates/dotfiles/src/bounded.rs",
     "home/dot_agents/skills/resource-coordination/SKILL.md"

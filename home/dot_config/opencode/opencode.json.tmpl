@@ -17,7 +17,6 @@
 {{- $node := joinPath .chezmoi.homeDir ".local/share/mise/installs/node/latest/bin" -}}
 {{- $npx := list "npx" -}}
 {{- if eq .profile "windows" }}{{ $npx = list "cmd" "/c" "npx" }}{{ end -}}
-{{- $domyjobMcp := includeTemplate "partials/domyjob_mcp" . -}}
 {{- $onePasswordMcp := includeTemplate "partials/onepassword_mcp_command" . -}}
 {
   "$schema": "https://opencode.ai/config.json",
@@ -90,8 +89,7 @@
       "type": "local",
       "command": [{{ $onePasswordMcp | toJson }}],
       "enabled": true
-    }{{ end }}{{ if $domyjobMcp }},
-    "domyjob": {{ $domyjobMcp }}{{ end }}
+    }{{ end }}
   }{{ if $hasOnePassword }},
   "plugin": ["@upstash/context7-opencode"]{{ end }}
 }

@@ -476,7 +476,6 @@ pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: St
         Step::Tools => tools(context, runner, false)?,
         Step::Upgrade => upgrade(context, runner)?,
         Step::Integrations => integrations(context, runner)?,
-        Step::Chat => chat(context, runner)?,
         Step::Desktop => crate::desktop::refresh(context, runner)?,
         Step::Ocaml => ocaml(context, runner)?,
         Step::Racket => {
@@ -661,56 +660,11 @@ fn integrations(context: &TemplateData, runner: &mut impl Runner) -> Result<()> 
     crate::integrations::integrations(&context.home, runner, gui)
 }
 
-fn chat(context: &TemplateData, runner: &mut impl Runner) -> Result<()> {
-    let next = "set [data.domyjob.chat] peers = ['SSH_ALIAS', ...] in this host's machine-local chezmoi config and apply again; while unavailable, declare chat.sh or chat.ps1 in setup.ignore with a reason";
-    let configuration: model::data::Domyjob = serde_json::from_value(
-        context
-            .data
-            .get("domyjob")
-            .cloned()
-            .with_context(|| format!("chat setup is incomplete: {next}"))?,
-    )
-    .with_context(|| format!("invalid domyjob chat configuration: {next}"))?;
-    let peers = configuration.chat.peers;
-    ensure!(!peers.is_empty(), "chat setup is incomplete: {next}");
-    for (index, peer) in peers.iter().enumerate() {
-        ensure!(
-            peer.bytes()
-                .next()
-                .is_some_and(|byte| byte.is_ascii_alphanumeric())
-                && peer
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-                && !peers[..index].contains(peer),
-            "chat peers require distinct literal SSH aliases; {next}"
-        );
-    }
-    let mut setup = args(&["chat", "--json", "setup"]);
-    setup.extend(peers.into_iter().map(Into::into));
-    let configured = runner.run(Tool::Domyjob, &setup)?;
-    ensure!(
-        configured.success,
-        "domyjob chat setup is incomplete; run `domyjob chat doctor` and apply again:\n{}",
-        String::from_utf8_lossy(&configured.bytes)
-    );
-    let diagnosis = runner.run(Tool::Domyjob, &args(&["chat", "doctor"]))?;
-    ensure!(
-        diagnosis.success,
-        "domyjob chat remains incomplete; follow these findings and apply again:\n{}",
-        String::from_utf8_lossy(&diagnosis.bytes)
-    );
-    Ok(())
-}
-
 fn native_domyjob(runner: &mut impl Runner) -> Result<bool> {
     if !runner.available(Tool::Domyjob) {
         return Ok(false);
     }
-    for command in [
-        args(&["chat", "setup", "--help"]),
-        args(&["chat", "doctor", "--help"]),
-        args(&["mcp", "--help"]),
-    ] {
+    for command in [args(&["run", "--help"]), args(&["on", "--help"])] {
         if !runner.run(Tool::Domyjob, &command)?.success {
             return Ok(false);
         }
@@ -1597,12 +1551,11 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct ChatRecording {
+    struct DomyjobRecording {
         commands: Vec<String>,
-        fail: Option<&'static str>,
     }
 
-    impl crate::runtime::Runner for ChatRecording {
+    impl crate::runtime::Runner for DomyjobRecording {
         fn available(&self, tool: Tool) -> bool {
             tool == Tool::Domyjob
         }
@@ -1614,98 +1567,16 @@ mod tests {
                 .map(|word| word.to_string_lossy())
                 .collect::<Vec<_>>()
                 .join(" ");
-            let success = self.fail != Some(command.as_str());
             self.commands.push(command);
             Ok(crate::runtime::Reply {
-                success,
-                bytes: if success {
-                    Vec::new()
-                } else {
-                    b"FIX peer: fixture peer unavailable".to_vec()
-                },
+                success: true,
+                bytes: Vec::new(),
             })
         }
 
         fn run_installed(&mut self, _: &Path, _: &[OsString]) -> Result<crate::runtime::Reply> {
             unreachable!()
         }
-    }
-
-    #[test]
-    fn chat_setup_uses_local_peers_and_requires_a_clean_doctor() -> Result<()> {
-        let scope = tempfile::tempdir()?;
-        for profile in [Profile::Mac, Profile::Linux, Profile::Wsl, Profile::Windows] {
-            let context = TemplateData {
-                source: scope.path().into(),
-                home: scope.path().into(),
-                config: scope.path().join("chezmoi.toml"),
-                profile,
-                data: serde_json::json!({"domyjob": {"chat": {"peers": ["peer-one", "peer-two"]}}}),
-            };
-            let mut runner = ChatRecording::default();
-            execute(&context, &mut runner, Step::Chat)?;
-            assert_eq!(
-                runner.commands,
-                ["chat --json setup peer-one peer-two", "chat doctor"]
-            );
-            assert!(Step::Domyjob.runs_on(profile));
-            assert!(Step::Chat.runs_on(profile));
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn invalid_chat_configuration_reports_the_next_action_before_any_command() -> Result<()> {
-        let scope = tempfile::tempdir()?;
-        for data in [
-            serde_json::json!({}),
-            serde_json::json!({"domyjob": {"chat": {"peers": []}}}),
-            serde_json::json!({"domyjob": {"chat": {"peers": ["--replace"]}}}),
-            serde_json::json!({"domyjob": {"chat": {"peers": ["peer", "peer"]}}}),
-            serde_json::json!({"domyjob": {"chat": {"peers": ["peer other"]}}}),
-            serde_json::json!({"domyjob": {"chat": {"peers": [1]}}}),
-            serde_json::json!({"domyjob": {"chat": {"peers": ["peer"], "replace": true}}}),
-        ] {
-            let context = TemplateData {
-                source: scope.path().into(),
-                home: scope.path().into(),
-                config: scope.path().join("chezmoi.toml"),
-                profile: Profile::Linux,
-                data,
-            };
-            let mut runner = ChatRecording::default();
-            let error = execute(&context, &mut runner, Step::Chat)
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains("data.domyjob.chat"), "{error}");
-            assert!(error.contains("setup.ignore"), "{error}");
-            assert_eq!(runner.commands, Vec::<String>::new());
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn chat_setup_and_doctor_failures_keep_the_actual_findings() -> Result<()> {
-        let scope = tempfile::tempdir()?;
-        let context = TemplateData {
-            source: scope.path().into(),
-            home: scope.path().into(),
-            config: scope.path().join("chezmoi.toml"),
-            profile: Profile::Linux,
-            data: serde_json::json!({"domyjob": {"chat": {"peers": ["peer"]}}}),
-        };
-        for (fail, commands) in [("chat --json setup peer", 1), ("chat doctor", 2)] {
-            let mut runner = ChatRecording {
-                fail: Some(fail),
-                ..ChatRecording::default()
-            };
-            let error = execute(&context, &mut runner, Step::Chat)
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains("fixture peer unavailable"), "{error}");
-            assert_eq!(runner.commands.len(), commands);
-        }
-        Ok(())
     }
 
     #[test]
@@ -1718,13 +1589,10 @@ mod tests {
             profile: Profile::Windows,
             data: serde_json::json!({}),
         };
-        let mut runner = ChatRecording::default();
+        let mut runner = DomyjobRecording::default();
         preflight(&context, &mut runner, &[Step::Domyjob])?;
         execute(&context, &mut runner, Step::Domyjob)?;
-        assert_eq!(
-            runner.commands,
-            ["chat setup --help", "chat doctor --help", "mcp --help"].repeat(2)
-        );
+        assert_eq!(runner.commands, ["run --help", "on --help"].repeat(2));
         Ok(())
     }
 

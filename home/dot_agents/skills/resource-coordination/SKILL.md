@@ -29,12 +29,6 @@ Silence never answers a pending permission request.
 Prefer the least disruptive host, conservative concurrency, and a persistent job that supports stopping and inspection.
 If the absence or resource allocation stays uncertain, keep the expensive job pending and finish independent work.
 
-When the current task explicitly permits coordination between agents, use the current `domyjob` chat manual to find the agents on the intended machines and exchange a short resource request.
-State the machine, workload, CPU and memory allocation, expected interval, job identity when available, and how to stop or release it.
-Silence reserves nothing, so get an affirmative agreement from the relevant machine users before relying on availability.
-Their agreement never replaces the user's required authorization.
-Without an enforced reservation, a chat agreement works as cooperative scheduling, not an exclusive lock, so recheck before starting.
-
 Start verification jobs through the project's maintained runner.
 Use `domyjob` only within the owner-side tooling boundary in `formal-assurance`, with owner hosts serving as optional caches.
 Keep the runner, process, and submission identities, and report progress at phase changes.

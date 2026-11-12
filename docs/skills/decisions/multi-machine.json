@@ -1,7 +1,7 @@
 {
-  "revision": "6a2fd0f46da19d3bc4bad06a9b1bba999f141a4543655ce10df16fe204bca706",
+  "revision": "71300295301a18370c8bc164d62cd742498bd43b014fc6da0127a7084a181ed8",
   "outcome": "implemented",
-  "reason": "Keep owner hosts optional and distinguish background credential access from desktop authentication before requesting account changes.",
+  "reason": "Keep personal hosts optional and distinguish background credential access from desktop authentication before requesting account changes.\nRemove retired messaging guidance and retain native remote commands and cache synchronization.",
   "evidence": [
     "home/dot_agents/skills/multi-machine/SKILL.md",
     "home/dot_agents/skills/multi-machine/references/credential-context.md",

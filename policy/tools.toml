@@ -32,7 +32,6 @@ domyjob = ["domyjob"]
 fleet = ["fleet"]
 retire-tmux = []
 upgrade = []
-chat = []
 adapters = []
 
 # Tools that exist on only some platforms, so a skill for one installs only there.

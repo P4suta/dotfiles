@@ -24,7 +24,6 @@ pub enum Role {
     Server,
     Client,
     Codex,
-    Domyjob,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,9 +68,7 @@ fn inspect(observations: &mut impl Observations) -> Result<Inspection> {
     });
     let mut stale_daemons = Vec::new();
     for process in &processes {
-        if matches!(process.role, Role::Codex | Role::Domyjob)
-            && observations.dead_socket(process)?
-        {
+        if process.role == Role::Codex && observations.dead_socket(process)? {
             stale_daemons.push(process.clone());
         }
     }
@@ -129,7 +126,6 @@ fn process(line: &str) -> Option<Process> {
         ("herdr", None | Some("attach")) => Role::Client,
         ("herdr", Some(argument)) if argument.starts_with('-') => Role::Client,
         ("codex", Some("app-server")) => Role::Codex,
-        ("domyjob", Some("chat")) if arguments.contains(&"serve") => Role::Domyjob,
         _ => return None,
     };
     Some(Process {
@@ -486,7 +482,7 @@ mod tests {
                 process(10, Role::Server),
                 process(11, Role::Server),
                 process(12, Role::Codex),
-                process(13, Role::Domyjob),
+                process(13, Role::Codex),
             ],
             responding: true,
             dead: vec![12, 13],

@@ -1,7 +1,7 @@
 {
-  "revision": "1f71cfeaeeae93854b1edbc64eb60a1432aaaf6b5dd6e83a8dee8f2ee912ece3",
+  "revision": "7af005738060cf8f07c69e4a08db93f1e76bf13c54ebba4d3c4330f602085ee8",
   "outcome": "implemented",
-  "reason": "Keep remote execution an owner-side convenience and diagnose its credential context before requesting authentication changes.",
+  "reason": "Keep remote execution a personal convenience and diagnose its credential context before requesting authentication changes.\nRemove retired messaging integration and retain the supported remote command procedure.",
   "evidence": [
     "home/dot_agents/skills/domyjob/SKILL.md",
     "home/dot_agents/skills/domyjob/tools.toml",
