@@ -5741,6 +5741,112 @@ fn reviewed_head_fixture(rebase: bool) -> Result<(Fixture, String, serde_json::V
 }
 
 #[test]
+fn check_runs_admit_current_head_reviews_and_empty_submitted_approvals() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    for empty_approval in [false, true] {
+        let mut command = fixture.command("check")?;
+        command
+            .args(["--pr", "17", "--final"])
+            .env("GH_FIXTURE_STATUSES", "[]")
+            .env(
+                "GH_FIXTURE_CHECK_RUNS",
+                serde_json::json!({"total_count":1,"check_runs":[{
+                    "id":131_069_924_302_u64,"app":{"id":347_564,"slug":"coderabbitai"},
+                    "name":"CodeRabbit","head_sha":fixture.head,
+                    "status":"completed","conclusion":"success",
+                    "started_at":"2026-10-26T00:00:00Z",
+                    "completed_at":"2026-10-26T00:01:00Z",
+                    "output":{"title":"Finished","summary":"Result: Success - Review completed\nRun ID: `fixture`"}
+                }]}).to_string(),
+            );
+        if empty_approval {
+            command.env(
+                "GH_FIXTURE_REVIEWS",
+                serde_json::json!([{
+                    "id":1,"user":{"login":"coderabbitai[bot]"},"commit_id":fixture.head,
+                    "state":"APPROVED","submitted_at":"2026-10-26T00:00:59Z","body":""
+                }])
+                .to_string(),
+            );
+        }
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "empty approval {empty_approval}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let log = fs::read_to_string(&fixture.log)?;
+        assert!(
+            log.contains(&format!("/commits/{}/check-runs?", fixture.head)),
+            "{log}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn check_run_pagination_requires_a_complete_stable_inventory() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    let run = serde_json::json!({
+        "id":101,"app":{"id":347_564,"slug":"coderabbitai"},
+        "name":"CodeRabbit","head_sha":fixture.head,
+        "status":"completed","conclusion":"success",
+        "started_at":"2026-10-26T00:00:00Z",
+        "completed_at":"2026-10-26T00:01:00Z",
+        "output":{"summary":"Result: Success - Review completed"}
+    });
+    let other_runs: Vec<_> = (1..=100)
+        .map(|id| {
+            let mut other = run.clone();
+            other["id"] = serde_json::json!(id);
+            other["app"]["id"] = serde_json::json!(1);
+            other
+        })
+        .collect();
+    for case in [
+        "complete",
+        "truncated",
+        "changed-count",
+        "duplicate",
+        "oversized",
+    ] {
+        let total = if case == "oversized" { 2001 } else { 101 };
+        let first = serde_json::json!({"total_count":total,"check_runs":other_runs});
+        let mut second = serde_json::json!({"total_count":total,"check_runs":[run]});
+        if case == "truncated" {
+            second["check_runs"] = serde_json::json!([]);
+        } else if case == "changed-count" {
+            second["total_count"] = serde_json::json!(100);
+        } else if case == "duplicate" {
+            second["check_runs"][0]["id"] = serde_json::json!(1);
+        }
+        let endpoint = format!(
+            "repos/owner/project/commits/{}/check-runs?filter=all&per_page=100&page=",
+            fixture.head
+        );
+        let output = fixture
+            .command("check")?
+            .args(["--pr", "17", "--final"])
+            .env("GH_FIXTURE_STATUSES", "[]")
+            .env(
+                "GH_FIXTURE_CHECK_RUN_PAGES",
+                format!("{endpoint}1={first}\n{endpoint}2={second}"),
+            )
+            .output()?;
+        assert_eq!(
+            output.status.success(),
+            case == "complete",
+            "{case}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if case == "complete" {
+            assert!(fs::read_to_string(&fixture.log)?.contains(&format!("{endpoint}2")));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn automatic_incremental_reviews_accept_completion_and_preserve_open_findings() -> Result<()> {
     let fixture = Fixture::new(BODY)?;
     let body = format!(
@@ -5845,7 +5951,7 @@ fn repository_pr_policy_accepts_carried_current_head_completion() -> Result<()> 
             );
             let log = fixture.log()?;
             assert_eq!(mutations(&log), Vec::<String>::new(), "{log}");
-            assert!(log.contains(&endpoint), "{log}");
+            assert_eq!(log.contains(&endpoint), !approval, "{log}");
         }
     }
     Ok(())
