@@ -37,7 +37,10 @@ Fetch nested comment pages for a thread with more than 100 comments.
 Read REST `repos/<owner>/<repo>/pulls/<number>/reviews` and `repos/<owner>/<repo>/issues/<number>/comments` with `gh api --paginate` for review commit IDs and summary status.
 Compare the current head with completed review metadata and the newest bot summary, because an incremental review may report completion only in the summary.
 An incremental review covers updates since the preceding run and need not repeat the full PR range or the preceding run's selected files.
-Never describe an approval, a skipped review, `Review rate limited`, a superseded run, or missing commit evidence as a fresh completed review.
+Fetch [commit statuses](https://docs.github.com/en/rest/commits/statuses) and [Check Runs](https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference) for the exact head.
+Check the CodeRabbit app identity and completed successful review output instead of relying on the check's name or conclusion alone.
+Accept an empty current-head `APPROVED` review after verifying its submission time and successful completion.
+An approval alone, a skipped review, `Review rate limited`, a superseded run, or missing commit evidence establishes no fresh completed review.
 Review completion and user-authorized merge admission are separate decisions.
 Use `pull-request` for merge commands when the user explicitly chooses to merge without optional review.
 Read the head again before acting when the branch moves.

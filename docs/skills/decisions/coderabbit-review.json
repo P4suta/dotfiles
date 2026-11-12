@@ -1,7 +1,7 @@
 {
-  "revision": "4fe15837fbadf6cb7e569919270fdd6f8057e4dce5eafb05a9e56adbc1f147a6",
+  "revision": "1d1c02e90b16012251f33b25b5dd0d3156f00fe1eb5e6febc59e22a32421f2be",
   "outcome": "implemented",
-  "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, explicit holds, and guarded explicit reviews.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
+  "reason": "Accept automatic incremental reviews without manual requests or service administration during ordinary PR work.\nSeparate truthful review completion from an explicit merge instruction during unavailable optional analysis.\nPreserve required checks, supported findings, explicit holds, and guarded explicit reviews.\nRead both GitHub completion APIs because a completed review may have no commit status.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
     "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
@@ -10,6 +10,7 @@
     "docs/adr/require-no-cli-review-for-high-prs.md",
     "crates/coderabbit-guard/src/lib.rs",
     "home/dot_agents/skills/coderabbit-review/SKILL.md",
+    "home/dot_agents/skills/coderabbit-review/references/pr-evidence.md",
     "home/dot_agents/skills/pull-request/references/importance.md",
     "docs/adr/route-coderabbit-by-current-pr-importance.md",
     "crates/rules/src/review_completion_rules.rs",

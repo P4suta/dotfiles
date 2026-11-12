@@ -194,7 +194,11 @@ Leave draft review off unless the repository needs early feedback.
 Set `auto_pause_after_reviewed_commits: 0` to keep automatic updates enabled.
 During explicitly requested configuration work, read back the effective service configuration because local instructions don't configure the provider.
 Keep automatic summaries off to preserve authored descriptions.
-Use CodeRabbit commit statuses for the workflow's current-head review admission.
+Read both [commit statuses](https://docs.github.com/en/rest/commits/statuses) and [Check Runs](https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference) for the current head.
+Bind a Check Run to CodeRabbit's app identity and the exact head, require completed successful review output, and inspect every page.
+Order replacement runs within their API format and compare timestamps across formats, because their numeric IDs belong to separate sequences.
+An [approved review](https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request) can have an empty body.
+A current-head CodeRabbit approval with valid submission time and successful review completion needs no prior full-review body.
 Accept ordinary incremental reviews ending at the current head.
 An incremental run need not repeat the full PR range or every preceding run's selected file.
 Wait for automatic review after readiness or updates without posting manual review commands.
