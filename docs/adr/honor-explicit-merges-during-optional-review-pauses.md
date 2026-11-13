@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: amended
+changed_by: [merge-after-coderabbit-review-limits.md]
 date: 2026-11-10
 ---
 # Honor explicit merges during optional review pauses

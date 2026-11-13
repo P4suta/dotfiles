@@ -1,8 +1,9 @@
 {
-  "revision": "46e6ae7a8ba7f714f9ce9ecaca87c065f213dfa85624feadf18cf8e13584484a",
+  "revision": "b0ad4e357a8c3a35dfcdec280dae29a892fe9b3b703c1754bd07d6948a8cd2d4",
   "outcome": "implemented",
-  "reason": "Bind required upstream notices to exact repositories and preserve upstream prose through immutable Git baselines.\nKeep contribution requirements in the existing PR workflow and preserve technical ownership terms while addressing the user directly.",
+  "reason": "Bind required upstream notices to exact repositories and preserve upstream prose through immutable Git baselines.\nKeep contribution requirements in the existing PR workflow and preserve technical ownership terms while addressing the user directly.\nUse the standing current-head PR quota exception without another confirmation for already authorized personal non-fork PR merges.\nPreserve required checks, reviews, supported findings, publication holds, and truthful review status.\nKeep the installed guidance for concise PR descriptions.",
   "evidence": [
+    "docs/adr/merge-after-coderabbit-review-limits.md",
     "docs/adr/scope-contribution-exceptions-to-upstream-sources.md",
     "crates/platform/src/contribution.rs",
     "crates/platform/src/upstream.rs",

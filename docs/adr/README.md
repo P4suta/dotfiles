@@ -155,4 +155,5 @@
 | [2026-11-09 Use automatic CodeRabbit reviews without command generation](use-automatic-coderabbit-reviews-without-command-generation.md) | accepted |  |
 | [2026-11-09 Use CodeRabbit without importance opt-outs](use-coderabbit-without-importance-opt-outs.md) | accepted |  |
 | [2026-11-10 Bind official tarballs to npm workspace lockfiles](bind-official-tarballs-to-npm-workspace-lockfiles.md) | proposed |  |
-| [2026-11-10 Honor explicit merges during optional review pauses](honor-explicit-merges-during-optional-review-pauses.md) | accepted |  |
+| [2026-11-10 Honor explicit merges during optional review pauses](honor-explicit-merges-during-optional-review-pauses.md) | amended | [2026-11-13](merge-after-coderabbit-review-limits.md) |
+| [2026-11-13 Merge after CodeRabbit review limits](merge-after-coderabbit-review-limits.md) | accepted |  |
