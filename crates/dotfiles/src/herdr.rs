@@ -17,6 +17,8 @@ const AUTH_SOCKET: &str = "SSH_AUTH_SOCK";
 const SSH_COMMAND: &str = "GIT_SSH_COMMAND";
 const IDENTITY_AGENT: &str = "IdentityAgent=";
 const LAUNCH_LOCK: &str = ".local/state/herdr/launch.lock";
+const LAUNCH_WAIT_LIMIT: Duration = Duration::from_secs(10);
+const LAUNCH_WAIT_INTERVAL: Duration = Duration::from_millis(25);
 const SSH_CONFIG: &str = ".config/dotfiles/ssh-agent.conf";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -297,9 +299,9 @@ impl Drop for LaunchLease {
 /// Hold the launch lock until the server has become responsive.
 ///
 /// # Errors
-/// Returns errors when another launcher owns the lock or an observation fails.
+/// Returns errors when waiting for another launcher times out or an observation fails.
 pub fn launch_guard(home: &Path) -> Result<(LaunchLease, Launch)> {
-    let lock = launch_lock(home)?;
+    let lock = wait_for_launch_lock(home, LAUNCH_WAIT_LIMIT, std::thread::sleep)?;
     let mut native = Native::new(home);
     let processes = native.processes()?;
     let servers = processes.iter().filter(|p| p.role == Role::Server).count();
@@ -326,6 +328,34 @@ fn launch_lock(home: &Path) -> Result<LaunchLease> {
     lock.try_lock()
         .context("another Herdr launcher is active; try again after it finishes")?;
     Ok(LaunchLease { file: lock })
+}
+
+fn wait_for_launch_lock(
+    home: &Path,
+    limit: Duration,
+    mut wait: impl FnMut(Duration),
+) -> Result<LaunchLease> {
+    let deadline = Instant::now() + limit;
+    loop {
+        match launch_lock(home) {
+            Ok(lease) => return Ok(lease),
+            Err(error) => {
+                if !matches!(
+                    error.downcast_ref::<std::fs::TryLockError>(),
+                    Some(std::fs::TryLockError::WouldBlock)
+                ) {
+                    return Err(error);
+                }
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(error.context(
+                        "timed out waiting for another Herdr launcher; run `dotfiles herdr health`",
+                    ));
+                }
+                wait(LAUNCH_WAIT_INTERVAL.min(remaining));
+            }
+        }
+    }
 }
 
 /// Stop one owned Herdr instance after exact interactive confirmation and identity revalidation.
@@ -423,6 +453,64 @@ mod tests {
         assert!(launch_lock(home.path()).is_err());
         drop(lock);
         let _lock = launch_lock(home.path())?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_contending_launcher_waits_for_the_owning_lease() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let mut owner = Some(launch_lock(home.path())?);
+        let mut waits = 0;
+        let lease = wait_for_launch_lock(home.path(), HEALTH_LIMIT, |pause| {
+            assert!(!pause.is_zero() && pause <= HEALTH_LIMIT);
+            waits += 1;
+            drop(owner.take());
+        })?;
+        assert_eq!(waits, 1);
+        child_lease(home.path(), false)?;
+        drop(lease);
+        child_lease(home.path(), true)?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_contending_launcher_times_out_without_releasing_the_owner() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let owner = launch_lock(home.path())?;
+        let error = wait_for_launch_lock(home.path(), Duration::ZERO, |_| {
+            panic!("an expired deadline must not wait");
+        })
+        .expect_err("a held lease must time out");
+        assert!(format!("{error:#}").contains("timed out waiting"));
+        child_lease(home.path(), false)?;
+        drop(owner);
+        child_lease(home.path(), true)?;
+        Ok(())
+    }
+
+    #[test]
+    fn an_available_launch_lease_needs_no_wait() -> Result<()> {
+        let home = tempfile::tempdir()?;
+        let _lease = wait_for_launch_lock(home.path(), Duration::ZERO, |_| {
+            panic!("an available lease must not wait");
+        })?;
+        child_lease(home.path(), false)?;
+        Ok(())
+    }
+
+    #[test]
+    fn launch_lock_io_errors_return_without_waiting() -> Result<()> {
+        let home = tempfile::NamedTempFile::new()?;
+        let error = wait_for_launch_lock(home.path(), HEALTH_LIMIT, |_| {
+            panic!("an I/O failure must not wait");
+        })
+        .expect_err("a file cannot contain the launch lock directory");
+        assert_eq!(
+            error
+                .downcast_ref::<std::io::Error>()
+                .map(std::io::Error::kind),
+            Some(std::io::ErrorKind::NotADirectory)
+        );
         Ok(())
     }
 
