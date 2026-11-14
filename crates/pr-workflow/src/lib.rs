@@ -2222,12 +2222,13 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
     let destination = destination(&github, &target.repo)?;
     written_to_standard(destination, PULL_REQUEST, &document)?;
     require_issue(
-        inspect_issue(
+        inspect_issue_for(
             &github,
             target,
             destination,
             Some((&document.body, BodySource::Pr(pr))),
             rerun,
+            live.state == "MERGED",
         )?,
         target,
     )?;
