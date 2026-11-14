@@ -1,7 +1,7 @@
 {
-  "revision": "36a51c9e0b6123190e075f465f5b131fc530382b6a3629779cf09b98e983b464",
+  "revision": "98ed56e0c2fbe5333147d2a4a885ac62ed8ff860c2f921a65ce196bb992baa2e",
   "outcome": "implemented",
-  "reason": "Desktop guidance covers settings, window ownership, screen capture, sandbox migration, diagnostics, and distribution with platform-specific primary sources. Native acceptance remains distinct from core proofs.",
+  "reason": "Desktop guidance scopes Window menu restoration to available entries and keeps unsupported preparation as missing coverage alongside the tested restoration regressions.",
   "evidence": [
     "home/dot_agents/skills/macos-platform-guidelines/SKILL.md",
     "home/dot_agents/skills/macos-platform-guidelines/references/desktop-interaction.md",
