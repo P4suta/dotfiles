@@ -35,7 +35,7 @@ legacy = ["find"]
 preferred = "fd"
 tool = "fd"
 # renovate: datasource=github-releases depName=sharkdp/fd extractVersion=^v(?<version>.+)$
-version = "10.5.0"
+version = "10.5.2"
 reason = "It respects ignore files and has one predictable syntax on every host."
 keep = "A POSIX script that runs before provisioning, or a `-exec` pipeline whose exact semantics a caller depends on."
 next = "find"
@@ -95,7 +95,7 @@ legacy = ["du"]
 preferred = "dust"
 tool = "dust"
 # renovate: datasource=github-releases depName=bootandy/dust extractVersion=^v(?<version>.+)$
-version = "1.2.6"
+version = "1.2.7"
 reason = "It bounds its output and walks in parallel, and storage-scout plans scans and cleanup."
 keep = "None."
 next = "`storage-scout scan <path>` for disk usage and `storage-scout clean` to reclaim space, since the hook refuses every recursive size walk, including dust"
@@ -115,7 +115,7 @@ legacy = ["top", "htop"]
 preferred = "btm"
 tool = "bottom"
 # renovate: datasource=github-releases depName=ClementTsang/bottom
-version = "0.14.9"
+version = "0.15.0"
 reason = "It shows one structured process and resource view on every host."
 keep = "None."
 next = "procs for a snapshot, or btm for a live view"
@@ -155,7 +155,7 @@ legacy = ["xq", "tomlq"]
 preferred = "yq"
 tool = "yq"
 # renovate: datasource=github-releases depName=mikefarah/yq extractVersion=^v(?<version>.+)$
-version = "4.54.1"
+version = "4.54.3"
 reason = "One tool queries YAML, TOML, and XML."
 keep = "None."
 next = "yq {args}"
@@ -250,7 +250,7 @@ legacy = ["df"]
 preferred = "dysk"
 tool = "github:Canop/dysk"
 # renovate: datasource=github-releases depName=Canop/dysk extractVersion=^v(?<version>.+)$
-version = "3.8.1"
+version = "3.8.2"
 reason = "It shows readable mounts and free space on every host."
 keep = "A POSIX script that runs before provisioning, or a caller that parses df's exact output."
 next = "dysk {args}"
