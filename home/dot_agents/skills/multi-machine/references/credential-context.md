@@ -29,6 +29,11 @@ When a CLI reports that secure credential storage is unavailable, diagnose sessi
 Verify which credential store the CLI uses after any authorized repair.
 Treat plaintext fallback storage as unresolved until you verify secure storage or remove the temporary credential through the CLI's normal logout.
 
+For Windows error 448, inspect the executable selected by the launcher, its reparse attributes, and its target before changing authentication or security settings.
+On 2026-11-14, a native-check cache reproduced that error with symbolic Cargo proxies to `rustup.exe`, while byte-identical regular copies passed in the same isolated environment.
+For a confirmed cache repair, check active users of the cache and preserve displaced entries before replacing only the affected proxies.
+Verify unchanged hashes and regular-file attributes, then rerun the failed command in its original environment before resuming project checks.
+
 Serialize selected PowerShell metadata with `ConvertTo-Json` or `Out-String` before an immediate process exit.
 Deferred display formatting can discard output at exit, so an empty display alone proves no absence.
 

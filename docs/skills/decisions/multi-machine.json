@@ -1,7 +1,7 @@
 {
-  "revision": "71300295301a18370c8bc164d62cd742498bd43b014fc6da0127a7084a181ed8",
+  "revision": "c7d550d8b02a4178a71820c34b8328ceeaf22d7d4bbd5d3c390a9ee711069891",
   "outcome": "implemented",
-  "reason": "Keep personal hosts optional and distinguish background credential access from desktop authentication before requesting account changes.\nRemove retired messaging guidance and retain native remote commands and cache synchronization.",
+  "reason": "Record the reproduced Windows cache failure and require matching hashes when repairing affected proxies.\nKeep diagnostics and repair confined to the confirmed cache.",
   "evidence": [
     "home/dot_agents/skills/multi-machine/SKILL.md",
     "home/dot_agents/skills/multi-machine/references/credential-context.md",
