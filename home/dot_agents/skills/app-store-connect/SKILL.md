@@ -27,7 +27,9 @@ Preserve review contacts and existing settings when changing unrelated fields.
 Distinguish preparing metadata, uploading a build, adding items to a draft, submitting for review, and releasing an approved version.
 Apple's [submission procedure](https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/submit-an-app) separates adding an item for review from submitting the review draft.
 An instruction to leave the final submission button to the user stops before submission.
-For that handoff, verify a ready draft with the intended items and a null submission timestamp.
+A fresh draft must contain the intended items and have a null submission timestamp.
+Preserve the historical submission timestamp when correcting a rejected submission.
+Read [review recovery](references/review-recovery.md) for that case.
 Keep the selected release option explicit, because automatic release can publish after approval.
 
 ## Authenticate without borrowing the browser session
@@ -139,7 +141,8 @@ asc review submissions-create --app "$APP_ID" --platform "$PLATFORM"
 asc review items add --submission "$SUBMISSION_ID" --item-type appStoreVersions --item-id "$VERSION_ID"
 ```
 
-Inspect existing drafts before creating another one.
+Inspect existing submissions before creating another one.
+Use review recovery for existing rejected items.
 Inspect command effects before calling submission or publishing wrappers.
 The convenience workflow can prepare and submit a version: `asc review submit`.
 An existing draft can use `asc review submissions-submit`.
