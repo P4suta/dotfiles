@@ -19,7 +19,10 @@ Test rejection of missing, incomplete, and stale evidence at the packaging bound
 
 Prepare the window state a Mac UI scenario needs after every launch.
 Activation alone can leave restored windows minimized.
-If `app.windows` omits minimized windows, inventory existing windows through the app's [Window menu](https://developer.apple.com/documentation/appkit/nsapplication/windowsmenu).
+If `app.windows` omits minimized windows, inventory existing windows through usable entries in the app's [Window menu](https://developer.apple.com/documentation/appkit/nsapplication/windowsmenu).
+AppKit's `windowsMenu` property can be `nil` when the menu is absent.
+If window entries are unavailable, use supported controls supplied by the app or report unsupported window preparation.
+Unsupported preparation leaves required coverage incomplete.
 Select each entry to [show its window](https://developer.apple.com/documentation/appkit/nswindow/makekeyandorderfront(_:)) before closing unwanted windows with [Command-W](https://support.apple.com/en-us/102650).
 Use observed accessibility identifiers and indexed entries when window titles repeat.
 Verify a visible window and usable controls after preparation.
