@@ -1,7 +1,7 @@
 {
-  "revision": "36a51c9e0b6123190e075f465f5b131fc530382b6a3629779cf09b98e983b464",
+  "revision": "ee879b1f0cb6f5d47e4b06ae91c819b85d2263dd82e5a69240c5fe46844fea34",
   "outcome": "implemented",
-  "reason": "Desktop guidance covers settings, window ownership, screen capture, sandbox migration, diagnostics, and distribution with platform-specific primary sources. Native acceptance remains distinct from core proofs.",
+  "reason": "Desktop guidance adds tested Window menu restoration, scopes SDK observations, and preserves the distinction between native acceptance and core proofs.",
   "evidence": [
     "home/dot_agents/skills/macos-platform-guidelines/SKILL.md",
     "home/dot_agents/skills/macos-platform-guidelines/references/desktop-interaction.md",

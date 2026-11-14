@@ -145,7 +145,7 @@
     {"mode":"0755","path":".agents/skills/macos-platform-guidelines/references","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/macos-platform-guidelines/references/capture-and-sandbox.md","sha256":"ae8dc93ac5f11f9e9020ba8ecd5bb202bf6896c18e0a502a26707997e4409b71","type":"file"},
     {"mode":"0644","path":".agents/skills/macos-platform-guidelines/references/desktop-interaction.md","sha256":"a7409e438e64779ef1c4e4f00202487acab10b3f5f47272e856040bc8c8ab02e","type":"file"},
-    {"mode":"0644","path":".agents/skills/macos-platform-guidelines/references/verification-and-distribution.md","sha256":"8553b7c0931bb7cde3be6c7206e8e8496a4eb9f31a24d2f499b3cf30c808439b","type":"file"},
+    {"mode":"0644","path":".agents/skills/macos-platform-guidelines/references/verification-and-distribution.md","sha256":"4b3513eb6ea274e1d601d4cbaa3d789d478f82c70500a798d146d181a505ffe0","type":"file"},
     {"mode":"0755","path":".agents/skills/mise","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/mise/SKILL.md","sha256":"a7481f62ef5877e264c8103a2b322c835a55a37c8d04fc2423e29ded585b9770","type":"file"},
     {"mode":"0644","path":".agents/skills/mise/tools.toml","sha256":"167615b87cbbeec5b75383be8e9ed3e92162a901cc643ae9ecbc93e40d9c2e70","type":"file"},

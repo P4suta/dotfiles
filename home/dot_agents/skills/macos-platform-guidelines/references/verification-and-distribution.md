@@ -17,6 +17,18 @@ Keep fast contributor checks independent of owner-only tools and move full proof
 Issue a release receipt only after every required check succeeds for the exact source, tools, targets, and built artifact.
 Test rejection of missing, incomplete, and stale evidence at the packaging boundary.
 
+Prepare the window state a Mac UI scenario needs after every launch.
+Activation alone can leave restored windows minimized.
+If `app.windows` omits minimized windows, inventory existing windows through the app's [Window menu](https://developer.apple.com/documentation/appkit/nsapplication/windowsmenu).
+Select each entry to [show its window](https://developer.apple.com/documentation/appkit/nswindow/makekeyandorderfront(_:)) before closing unwanted windows with [Command-W](https://support.apple.com/en-us/102650).
+Use observed accessibility identifiers and indexed entries when window titles repeat.
+Verify a visible window and usable controls after preparation.
+
+On 2026-11-14, XCTest omitted minimized windows on macOS 27.0.1 with Xcode 27.0.
+The [hosted regressions](https://github.com/P4suta/gymemo/actions/runs/43600500036) passed for two open windows, two minimized windows, repeated preparation, and relaunch.
+Keep the query observation scoped to the tested SDK.
+Recheck window queries and menu selectors after changing the OS or SDK.
+
 Choose Mac App Store or Developer ID distribution before defining release evidence.
 Read [distribution guidance](https://developer.apple.com/documentation/xcode/distributing-your-app-for-beta-testing-and-releases) for the chosen route.
 Use `apple-signing`, `apple-notarization`, and `release-evidence` for their specific stages.
@@ -30,4 +42,6 @@ Android's [Compose defaults](https://developer.android.com/develop/ui/compose/ac
 macOS uses Apple's desktop control guidance and native keyboard behavior rather than that measurement.
 Android's [log disclosure guidance](https://developer.android.com/privacy-and-security/risks/log-info-disclosure) and Apple's logging guidance both motivate excluding sensitive payloads.
 The logging APIs and release configuration remain platform-specific.
+Android's [activity lifecycle](https://developer.android.com/guide/components/activities/activity-lifecycle#onresume) ties interaction to the Resumed state.
+Keep activity callbacks and Mac window restoration with their respective platforms.
 The compared Android guidance already covers these outcomes, so the desktop split needs no Android API changes.
