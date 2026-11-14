@@ -5376,6 +5376,67 @@ fn a_merged_pr_document_takes_corrections_against_the_issue_it_closed() -> Resul
 }
 
 #[test]
+fn merged_pr_checks_validate_closed_issues_without_weakening_review() -> Result<()> {
+    let linked = format!("{BODY}\nCloses #23.\n");
+    for final_check in [false, true] {
+        for (state, body, reviewed, expected_rule) in [
+            ("MERGED", linked.as_str(), true, None),
+            ("MERGED", BODY, true, Some("pr.body")),
+            ("OPEN", linked.as_str(), true, Some("pr.issue")),
+            ("CLOSED", linked.as_str(), true, Some("pr.issue")),
+            (
+                "MERGED",
+                linked.as_str(),
+                false,
+                final_check.then_some("pr.review"),
+            ),
+        ] {
+            let mut fixture = Fixture::new(body)?;
+            fixture.reviewed = reviewed;
+            let branch = git(fixture.directory.path(), &["branch", "--show-current"])?;
+            let mut command = fixture.personal_command("check")?;
+            command.args(["--pr", "17", "--issue", "23"]);
+            if final_check {
+                command.arg("--final");
+            }
+            let output = command
+                .env(
+                    "GH_FIXTURE_ISSUE",
+                    serde_json::json!({
+                        "number":23,"title":"Preserve edits","body":"The original input must survive edits.",
+                        "state":"closed","html_url":"https://github.com/P4suta/project/issues/23"
+                    })
+                    .to_string(),
+                )
+                .env(
+                    "GH_FIXTURE_VIEW",
+                    serde_json::json!({
+                        "title":"fix: preserve edits", "body":body,
+                        "state":state, "isDraft":false,
+                        "author":{"login":"P4suta","is_bot":false},
+                        "headRefName":branch, "headRepository":{"name":"project"},
+                        "headRepositoryOwner":{"login":"P4suta"},
+                        "isCrossRepository":false
+                    })
+                    .to_string(),
+                )
+                .output()?;
+            assert_eq!(
+                output.status.success(),
+                expected_rule.is_none(),
+                "{state}, final={final_check}, reviewed={reviewed}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            if let Some(expected_rule) = expected_rule {
+                assert_eq!(rule(&output), expected_rule);
+            }
+            assert_eq!(mutations(&fixture.log()?), Vec::<String>::new());
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn the_repository_owner_can_assess_a_bot_pull_request() -> Result<()> {
     let body = format!("{BODY}\nCloses #23.\n");
     let fixture = Fixture::new(&body)?;
