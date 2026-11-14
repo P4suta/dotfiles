@@ -1,7 +1,7 @@
 {
-  "revision": "c7d550d8b02a4178a71820c34b8328ceeaf22d7d4bbd5d3c390a9ee711069891",
+  "revision": "01c5863427a14acd228927463b28d91d88d856c0812a0664606a72d14515d202",
   "outcome": "implemented",
-  "reason": "Record the reproduced Windows cache failure and require matching hashes when repairing affected proxies.\nKeep diagnostics and repair confined to the confirmed cache.",
+  "reason": "Require a controlled comparison before cache repair and compare replacements with the recorded target hash.",
   "evidence": [
     "home/dot_agents/skills/multi-machine/SKILL.md",
     "home/dot_agents/skills/multi-machine/references/credential-context.md",
