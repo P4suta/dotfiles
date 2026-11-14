@@ -1,7 +1,7 @@
 {
-  "revision": "3fcd2ac05e02857715ba0db0297f16914e9b2ef8731cc352e3a397e9a979afd1",
+  "revision": "059bfd95c37b50e59d16d414c01dc9531aeb46acf20d5255c1574f63f868c35b",
   "outcome": "implemented",
-  "reason": "Keep rejected review history while preparing corrected metadata, builds, and resolved items for a separately authorized resubmission.",
+  "reason": "Check every rejected item before a ready handoff while preserving review history and separate resubmission authority.",
   "evidence": [
     "home/dot_agents/skills/app-store-connect/SKILL.md",
     "home/dot_agents/skills/app-store-connect/references/creative-assets.md",

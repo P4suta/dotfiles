@@ -11,7 +11,7 @@
     {"mode":"0644","path":".agents/skills/app-store-connect/SKILL.md","sha256":"e462af57f4d445129129bc472efed4efd0e6d595b6b8d46fe6bdd68314477d2d","type":"file"},
     {"mode":"0755","path":".agents/skills/app-store-connect/references","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/app-store-connect/references/creative-assets.md","sha256":"bb3d062aa41911e3fdbe54388a5c4a5df31cd663be3f1605b537544e9362712d","type":"file"},
-    {"mode":"0644","path":".agents/skills/app-store-connect/references/review-recovery.md","sha256":"3f2aed71eaa3a8641e41179e5eff21f079d41c77fcb156827ce1b2ec9309ceec","type":"file"},
+    {"mode":"0644","path":".agents/skills/app-store-connect/references/review-recovery.md","sha256":"a6afaad007cf9b2752333eacb45665eb63c5148abce9bd6afc3f3f99adfde404","type":"file"},
     {"mode":"0755","path":".agents/skills/apple-notarization","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/apple-notarization/SKILL.md","sha256":"078ca8a3d5cc756bcf5ddcc27f5045e3dbe7b026ab81c71ff8a971bccea3da08","type":"file"},
     {"mode":"0755","path":".agents/skills/apple-platform-guidelines","sha256":null,"type":"dir"},

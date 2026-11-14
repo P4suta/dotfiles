@@ -25,6 +25,9 @@ A historical submission can keep a non-null submission timestamp while awaiting 
 Compare that timestamp with the value read before the correction and inspect the current state.
 Don't remove the item or cancel review history to force a null timestamp.
 
+Check all submission items for unresolved rejections before the handoff.
+Correct remaining items within the authorized scope and report any blockers outside that scope.
+Describe the submission as ready only after resolving every rejected item.
 When the requested handoff leaves the final button to the user, stop with the corrected item ready for the separate resubmission action.
 Don't invoke submission wrappers or send an App Review message without authorization for that operation.
 The [fresh-submission procedure](https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/submit-an-app) also distinguishes adding an item from submitting it.
