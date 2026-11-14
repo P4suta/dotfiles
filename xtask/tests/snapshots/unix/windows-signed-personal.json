@@ -154,7 +154,7 @@
     {"mode":"0755","path":".agents/skills/multi-machine","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/multi-machine/SKILL.md","sha256":"a124d3f59db0c1c81d63a9f94dcbd9d543e223b074b03c896dd1c491931265d7","type":"file"},
     {"mode":"0755","path":".agents/skills/multi-machine/references","sha256":null,"type":"dir"},
-    {"mode":"0644","path":".agents/skills/multi-machine/references/credential-context.md","sha256":"2dcf46d3827223e7a65de213d1ea5720ae16ec613c3675d164a72fecc3cb2911","type":"file"},
+    {"mode":"0644","path":".agents/skills/multi-machine/references/credential-context.md","sha256":"ea645ad8401cc82d744452909f1546602c40710fb0f8f4699ee11fcc13239479","type":"file"},
     {"mode":"0755","path":".agents/skills/mutation-testing","sha256":null,"type":"dir"},
     {"mode":"0644","path":".agents/skills/mutation-testing/SKILL.md","sha256":"8f31ca9d538c4bc826fff07917c120031a7cffcc1ab19caf885075dc6f13f444","type":"file"},
     {"mode":"0644","path":".agents/skills/mutation-testing/tools.toml","sha256":"f3b0ff9d397c8fbf5fa05883500298e8f3019cd860ac240a2012bbbb6cd65efe","type":"file"},
