@@ -63,3 +63,4 @@ The CLI describes that swap relationship as a live-verified extension, so inspec
 Assign the corrected images and add the version back to the draft.
 Read back both placements, embedded artwork states, selected version, and `submittedDate`.
 Leave final submission to the user when that's the requested handoff.
+For a rejected submission, use [review recovery](review-recovery.md) and preserve its existing review item.
