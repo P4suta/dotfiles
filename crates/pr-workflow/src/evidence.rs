@@ -132,17 +132,20 @@ pub fn store_assessment(
 }
 
 /// The current signed assessment of `head` and `diff_sha256` in `repository`.
-pub(crate) fn assessment(repository: &str, head: &str, diff_sha256: &str) -> Result<Packet> {
+pub(crate) fn assessment(
+    repository: &str,
+    head: &str,
+    diff_sha256: &str,
+) -> Result<Option<Packet>> {
     let path = directory(&home()?, ASSESSMENTS, repository)?.join(format!(
         "{}-{}.json",
         hexadecimal(head)?,
         hexadecimal(diff_sha256)?
     ));
-    ensure!(
-        path.try_exists()?,
-        "PR importance assessment is missing on this machine; run pr-workflow assess for this exact diff"
-    );
-    read_packet(&path)
+    if !path.try_exists()? {
+        return Ok(None);
+    }
+    read_packet(&path).map(Some)
 }
 
 /// The archived signed assessment named `object` in `repository`.

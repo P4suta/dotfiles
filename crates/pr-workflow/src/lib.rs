@@ -57,7 +57,7 @@ pub fn current_review_route(
         "OPEN" => {}
         _ => bail!("unknown PR lifecycle while reading its review route"),
     }
-    Ok(review_policy::live_binding_at(root, &github, &target, &live.body, &live)?.route)
+    Ok(review_policy::live_binding_at(root, &github, &target, pr, &live.body, &live)?.route)
 }
 
 pub use platform::{aside, build_inputs, freshness, refusal, report, tool};
@@ -2207,7 +2207,7 @@ fn ready_command(target: &Target, pr: u64, rerun: &str) -> Result<()> {
         rerun,
     )?;
     let live = live_document(&github, target, pr)?;
-    let checked = review_policy::live_binding(&github, target, &body, &live)?;
+    let checked = review_policy::live_binding(&github, target, pr, &body, &live)?;
     review_policy::describe(&checked)
 }
 
@@ -2216,7 +2216,7 @@ fn check_live(target: &Target, pr: u64, r#final: bool, rerun: &str) -> Result<()
     target.conventional_required()?;
     let github = Github::connect()?;
     let live = live_document(&github, target, pr)?;
-    let checked = review_policy::live_binding(&github, target, &live.body, &live)?;
+    let checked = review_policy::live_binding(&github, target, pr, &live.body, &live)?;
     review_policy::remember(&checked, target, &github, pr)?;
     let document = validate(target, live.title, live.body)?;
     let destination = destination(&github, &target.repo)?;
@@ -2366,7 +2366,7 @@ fn edit(document: DocumentArgs, pr: u64, rerun: &str) -> Result<()> {
     let (target, document) = read_document(document)?;
     let github = Github::connect()?;
     let live = live_document(&github, &target, pr)?;
-    let checked = review_policy::live_binding(&github, &target, &document.body, &live)?;
+    let checked = review_policy::live_binding(&github, &target, pr, &document.body, &live)?;
     review_policy::admit_publication(&checked)?;
     review_policy::preserve_edit(&github, &target, pr, &checked)?;
     let destination = destination(&github, &target.repo)?;
@@ -2422,7 +2422,7 @@ fn make_ready(
         live.head_ref_oid.as_deref() == Some(head),
         "PR head changed before its ready admission"
     );
-    let reviewed = review_policy::live_binding(github, target, &body, &live)?;
+    let reviewed = review_policy::live_binding(github, target, pr, &body, &live)?;
     review_policy::admit_ready(&reviewed, target, github, pr)?;
     let document = validate(target, title, body)?;
     let destination = destination(github, &target.repo)?;

@@ -385,7 +385,19 @@ impl Fixture {
     }
 
     fn personal_command(&self, operation: &str) -> Result<Command> {
-        let mut command = self.command_for_repo(operation, "P4suta/project")?;
+        self.personal_command_with_assessment(operation, true)
+    }
+
+    fn personal_command_with_assessment(
+        &self,
+        operation: &str,
+        legacy_assessment: bool,
+    ) -> Result<Command> {
+        let mut command = if legacy_assessment {
+            self.command_for_repo(operation, "P4suta/project")?
+        } else {
+            self.command_at_repo(operation, "P4suta/project", false)?
+        };
         command
             .env("GH_FIXTURE_REPOSITORY", serde_json::json!({
                 "id":37,"full_name":"P4suta/project","owner":{"login":"P4suta","id":42_543_015},"fork":false,"default_branch":"main"
@@ -640,6 +652,125 @@ impl ForkFixture {
         )?;
         Ok(root)
     }
+}
+
+#[test]
+fn ordinary_fork_publication_needs_no_authored_assessment() -> Result<()> {
+    let fixture = ForkFixture::new()?;
+    fs::write(
+        &fixture.fixture.body,
+        Fixture::normalized_body(&format!("{BODY}\nCloses #23.\n")),
+    )?;
+    let output = fixture.create("feature")?.output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for operation in ["check", "edit", "ready"] {
+        let mut command = fixture.command(operation)?;
+        command.args(["--pr", "17", "--issue", "23"]);
+        if operation == "edit" {
+            command
+                .args(["--title", "fix: preserve edits", "--body-file"])
+                .arg(&fixture.fixture.body);
+        }
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "{operation}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let complete = fixture
+        .command("check")?
+        .args(["--pr", "17", "--issue", "23", "--final"])
+        .output()?;
+    assert!(
+        complete.status.success(),
+        "{}",
+        String::from_utf8_lossy(&complete.stderr)
+    );
+    let unreviewed = fixture
+        .command("check")?
+        .args(["--pr", "17", "--issue", "23", "--final"])
+        .env_remove("GH_FIXTURE_DEFAULT_REVIEW")
+        .output()?;
+    assert!(!unreviewed.status.success());
+    assert!(
+        String::from_utf8_lossy(&unreviewed.stderr).contains("CodeRabbit"),
+        "{}",
+        String::from_utf8_lossy(&unreviewed.stderr)
+    );
+    let moved = fixture
+        .create("feature")?
+        .env(
+            "GH_FIXTURE_BRANCHES",
+            fixture.branches(&fixture.fixture.base),
+        )
+        .output()?;
+    assert!(!moved.status.success());
+    assert!(
+        String::from_utf8_lossy(&moved.stderr).contains("actual fork head branch differs"),
+        "{}",
+        String::from_utf8_lossy(&moved.stderr)
+    );
+    assert!(
+        !fixture
+            .fixture
+            .context_home
+            .path()
+            .join(".local/state/pr-workflow/assessments")
+            .exists()
+    );
+    Ok(())
+}
+
+#[test]
+fn ordinary_personal_publication_keeps_its_issue_context_without_assessments() -> Result<()> {
+    let fixture = Fixture::new(BODY)?;
+    fs::write(
+        &fixture.body,
+        Fixture::normalized_body(&format!("{BODY}\nCloses #23.\n")),
+    )?;
+    let started = fixture
+        .personal_command_with_assessment("start", false)?
+        .args(["--issue", "23"])
+        .output()?;
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let mut create = fixture.personal_command_with_assessment("create", false)?;
+    fixture.prepare_context_signer(&mut create)?;
+    let output = create
+        .args([
+            "--issue",
+            "23",
+            "--head",
+            "feature",
+            "--base",
+            "main",
+            "--title",
+            "fix: preserve edits",
+            "--body-file",
+        ])
+        .arg(&fixture.body)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !fixture
+            .context_home
+            .path()
+            .join(".local/state/pr-workflow/assessments")
+            .exists()
+    );
+    Ok(())
 }
 
 #[test]
@@ -6962,9 +7093,22 @@ fn merge_carries_the_signed_assessment_after_an_update_only_when_the_diff_matche
             .output()?;
         let log = fixture.log()?;
         if changed {
-            assert!(!output.status.success());
-            assert!(!mutations(&log).contains(&"merge".into()));
-            assert!(String::from_utf8_lossy(&output.stderr).contains("diff"));
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(mutations(&log), ["update-branch", "merge"]);
+            assert!(log.contains(&format!("--match-head-commit\n{new}\n")));
+            let directory = fixture
+                .directory
+                .path()
+                .join(".local/state/pr-workflow/assessments/p4suta__project");
+            assert!(
+                !fs::read_dir(directory)?
+                    .filter_map(Result::ok)
+                    .any(|entry| { entry.file_name().to_string_lossy().starts_with(&new) })
+            );
         } else {
             assert!(
                 output.status.success(),
@@ -7176,11 +7320,14 @@ fn merge_carries_the_assessment_through_an_update_merge_that_keeps_the_hunks() -
                 assert_eq!(statement["binding"]["base"], advanced.as_str());
             }
             HeadUpdate::HunkContext => {
-                assert!(!output.status.success(), "{update:?}");
-                assert!(!mutations(&log).contains(&"merge".into()));
+                assert!(output.status.success(), "{update:?}: {stderr}");
+                assert_eq!(mutations(&log), ["update-branch", "merge"], "{update:?}");
+                assert!(log.contains(&format!("--match-head-commit\n{head}\n")));
+                let directory = root.join(".local/state/pr-workflow/assessments/p4suta__project");
                 assert!(
-                    stderr.contains("assessment is missing"),
-                    "{update:?}: {stderr}"
+                    !fs::read_dir(directory)?
+                        .filter_map(Result::ok)
+                        .any(|entry| { entry.file_name().to_string_lossy().starts_with(&head) })
                 );
             }
             HeadUpdate::PlainCommit => {

@@ -469,14 +469,36 @@ struct HistoricalReview {
     source: Option<platform::source_identity::Binding>,
 }
 
+enum AssessmentRecord {
+    Ordinary,
+    Authenticated {
+        object: String,
+        value: Box<Assessment>,
+    },
+}
+
+impl AssessmentRecord {
+    fn value(&self) -> Option<&Assessment> {
+        match self {
+            Self::Ordinary => None,
+            Self::Authenticated { value, .. } => Some(value),
+        }
+    }
+
+    fn object(&self) -> Option<&str> {
+        match self {
+            Self::Ordinary => None,
+            Self::Authenticated { object, .. } => Some(object),
+        }
+    }
+}
+
 pub(super) struct Checked {
     pub route: ReviewRoute,
     repository_policy: ReviewPolicy,
-    /// The signed assessment object this check authenticated.
-    pub object: String,
     binding: Binding,
     root: PathBuf,
-    assessment: Assessment,
+    assessment: AssessmentRecord,
     signer: String,
     history: Option<HistoricalReview>,
     changed: BTreeSet<String>,
@@ -561,6 +583,9 @@ pub(super) fn carry_forward(
     prior: &Checked,
 ) -> Result<()> {
     use rules::pr_merge_rules::{AssessmentChange, assessment_change};
+    let Some(object) = prior.assessment.object() else {
+        return Ok(());
+    };
     let current = capture_verified(
         github,
         &prior.root,
@@ -588,7 +613,7 @@ pub(super) fn carry_forward(
         AssessmentChange::Resign => {}
     }
     let signers = context::signers_for_login(github, signer)?;
-    let packet = evidence::object(&target.repo, &prior.object)?;
+    let packet = evidence::object(&target.repo, object)?;
     let mut statement = authenticate(&old, &packet, signers.path(), signer)?;
     statement.binding = current.binding;
     statement.source = current.source;
@@ -634,28 +659,40 @@ fn check_at(
 ) -> Result<Checked> {
     super::refuse_local_evidence(body, || super::recheck(target, None))?;
     let current = capture_verified(github, root, &target.repo, base, head)?;
-    let signers = context::signers_for_login(github, signer)?;
     let packet = evidence::assessment(
         &current.binding.repository,
         &current.binding.head,
         &current.binding.diff_sha256,
     )?;
-    let statement = authenticate(&current, &packet, signers.path(), signer)?;
     let repository_policy = repository_policy(&evidence::home()?, &target.repo)?;
-    let route = policy::repository_route(statement.assessment.level.into(), repository_policy);
+    let (assessment, history) = if let Some(packet) = packet {
+        let signers = context::signers_for_login(github, signer)?;
+        let statement = authenticate(&current, &packet, signers.path(), signer)?;
+        (
+            AssessmentRecord::Authenticated {
+                object: packet.object,
+                value: Box::new(statement.assessment),
+            },
+            statement.history,
+        )
+    } else {
+        (AssessmentRecord::Ordinary, None)
+    };
+    let route = assessment.value().map_or(ReviewRoute::Pr, |value| {
+        policy::repository_route(value.level.into(), repository_policy)
+    });
     Ok(Checked {
         route,
         repository_policy,
-        object: packet.object,
         binding: current.binding,
         root: current.root,
-        assessment: statement.assessment,
+        assessment,
         signer: signer.into(),
-        history: statement.history,
+        history,
         changed: current.changed,
         source: current
             .source
-            .context("verified assessment source missing")?,
+            .context("verified publication source missing")?,
     })
 }
 
@@ -790,7 +827,13 @@ pub(super) fn completion(
                 target.cli_receipt.is_none(),
                 "the selected PR review route does not accept a CLI substitute"
             );
-            require_pr_review(github, target, pr, &checked.binding, &checked.assessment)?;
+            require_pr_review(
+                github,
+                target,
+                pr,
+                &checked.binding,
+                checked.assessment.value(),
+            )?;
         }
     }
     let mut unique = std::collections::BTreeMap::new();
@@ -799,7 +842,7 @@ pub(super) fn completion(
     }
     let findings = unique.into_values().collect::<Vec<_>>();
     validate_findings(
-        &checked.assessment,
+        checked.assessment.value(),
         &findings,
         &checked.root,
         &checked.binding.head,
@@ -826,7 +869,7 @@ pub(super) fn completion(
 }
 
 fn validate_findings(
-    assessment: &Assessment,
+    assessment: Option<&Assessment>,
     findings: &[coderabbit_guard::CliFinding],
     root: &Path,
     head: &str,
@@ -839,7 +882,10 @@ fn validate_findings(
         "CLI finding inventory is duplicated"
     );
     let mut dispositions = BTreeSet::new();
-    for disposition in &assessment.finding_dispositions {
+    for disposition in assessment
+        .into_iter()
+        .flat_map(|value| &value.finding_dispositions)
+    {
         ensure!(
             (!exact || actual.contains(disposition.id.as_str()))
                 && dispositions.insert(disposition.id.as_str())
@@ -1208,7 +1254,7 @@ fn require_pr_review(
     target: &Target,
     pr: u64,
     binding: &Binding,
-    assessment: &Assessment,
+    assessment: Option<&Assessment>,
 ) -> Result<()> {
     let head = &binding.head;
     let reviews: Vec<SubmittedReview> =
@@ -1244,7 +1290,7 @@ fn validate_pr_evidence_with_summaries(
     statuses: &[CommitStatus],
     summaries: &[ReviewSummary],
     binding: &Binding,
-    assessment: &Assessment,
+    assessment: Option<&Assessment>,
     pr: u64,
     compare: impl FnMut(&SubmittedReview) -> Result<ComparedReview>,
 ) -> Result<()> {
@@ -1360,7 +1406,7 @@ fn validate_pr_evidence(
     reviews: &[SubmittedReview],
     statuses: &[CommitStatus],
     binding: &Binding,
-    assessment: &Assessment,
+    assessment: Option<&Assessment>,
     pr: u64,
     compare: impl FnMut(&SubmittedReview) -> Result<ComparedReview>,
 ) -> Result<()> {
@@ -1399,7 +1445,7 @@ fn validate_carried_review(
     reviews: &[SubmittedReview],
     status: &CommitStatus,
     binding: &Binding,
-    assessment: &Assessment,
+    assessment: Option<&Assessment>,
     pr: u64,
     mut compare: impl FnMut(&SubmittedReview) -> Result<ComparedReview>,
 ) -> Result<()> {
@@ -1424,8 +1470,8 @@ fn validate_carried_review(
     );
     ensure!(
         assessment
-            .evidence
-            .iter()
+            .into_iter()
+            .flat_map(|value| &value.evidence)
             .all(|evidence| files.contains(&evidence.path)),
         "assessment evidence paths were not selected by the prior full CodeRabbit review"
     );
@@ -1896,7 +1942,7 @@ pub(super) fn create_binding(
         ))?;
         ensure!(
             published.name == head && published.commit.sha == object(&root, &reference)?,
-            "actual fork head branch differs from the local assessed source"
+            "actual fork head branch differs from the local source"
         );
     }
     check(
@@ -1912,16 +1958,18 @@ pub(super) fn create_binding(
 pub(super) fn live_binding(
     github: &Github,
     target: &Target,
+    pr: u64,
     body: &str,
     live: &super::LiveDocument,
 ) -> Result<Checked> {
-    live_binding_at(&std::env::current_dir()?, github, target, body, live)
+    live_binding_at(&std::env::current_dir()?, github, target, pr, body, live)
 }
 
 pub(super) fn live_binding_at(
     root: &Path,
     github: &Github,
     target: &Target,
+    pr: u64,
     body: &str,
     live: &super::LiveDocument,
 ) -> Result<Checked> {
@@ -1936,7 +1984,7 @@ pub(super) fn live_binding_at(
             .context("actual PR head commit is missing")?,
     )?;
     let signer = assessment_signer(github, target, &live.author, &live.source)?;
-    let checked = check_at(
+    let mut checked = check_at(
         root,
         github,
         target,
@@ -1949,6 +1997,11 @@ pub(super) fn live_binding_at(
             .context("actual PR head commit is missing")?,
         signer,
     )?;
+    if checked.assessment.value().is_none()
+        && let Some((prior, _)) = previous(github, target, pr, signer, root)?
+    {
+        checked.history = prior.history;
+    }
     validate_live_source(&checked, &live.source, None)?;
     labels(&live.labels)?;
     Ok(checked)
@@ -2253,7 +2306,7 @@ fn prepare_history(
             prior.source.as_ref(),
         )?;
         validate_findings(
-            assessment,
+            Some(assessment),
             &findings,
             &current.root,
             &current.binding.head,
@@ -2273,7 +2326,7 @@ fn prepare_history(
 fn require_history(checked: &Checked, target: &Target, github: &Github) -> Result<()> {
     let findings = history_findings(checked, target, github)?;
     validate_findings(
-        &checked.assessment,
+        checked.assessment.value(),
         &findings,
         &checked.root,
         &checked.binding.head,
@@ -2354,13 +2407,16 @@ pub(super) fn preserve_edit(
 }
 
 pub(super) fn remember(checked: &Checked, target: &Target, github: &Github, pr: u64) -> Result<()> {
-    if checked.repository_policy == ReviewPolicy::AlwaysPr {
+    if checked.assessment.value().is_none() || checked.repository_policy == ReviewPolicy::AlwaysPr {
         preserve_edit(github, target, pr, checked)?;
     }
+    let Some(object) = checked.assessment.object() else {
+        return Ok(());
+    };
     evidence::remember(
         &target.repo,
         pr,
-        &checked.object,
+        object,
         checked.repository_policy == ReviewPolicy::AlwaysPr,
     )
 }
@@ -2567,7 +2623,7 @@ mod tests {
             &[review],
             &[status(1, "success", "Review completed")],
             &binding,
-            &assessment,
+            Some(&assessment),
             17,
             no_comparison,
         )
@@ -2586,7 +2642,7 @@ mod tests {
             &[status(1, "success", "Review completed")],
             &[summary],
             &binding,
-            &assessment,
+            Some(&assessment),
             17,
             no_comparison,
         )
@@ -2850,9 +2906,14 @@ mod tests {
         let mut run = check_run(1, &binding.head);
         run["started_at"] = serde_json::json!("2026-10-13T23:59:00Z");
         let statuses = include_check_runs(vec![], &[serde_json::from_value(run)?], &binding.head)?;
-        let error = validate_pr_evidence(&[review], &statuses, &binding, &assessment, 17, |_| {
-            Ok(compared_review(&binding, &[], true))
-        })
+        let error = validate_pr_evidence(
+            &[review],
+            &statuses,
+            &binding,
+            Some(&assessment),
+            17,
+            |_| Ok(compared_review(&binding, &[], true)),
+        )
         .unwrap_err();
         assert!(error.to_string().contains("not created after"), "{error:#}");
         Ok(())
@@ -2885,7 +2946,7 @@ mod tests {
             &[review],
             &[status(1, "success", "Review completed")],
             &binding,
-            &assessment,
+            Some(&assessment),
             17,
             |_| Ok(compared_review(&binding, &["README.md"], false)),
         )
@@ -2898,7 +2959,7 @@ mod tests {
             &[review],
             &[status(1, "success", "Review completed")],
             &binding,
-            &assessment,
+            Some(&assessment),
             17,
             |_| Ok(compared_review(&binding, &[], false)),
         )
@@ -2921,7 +2982,7 @@ mod tests {
             &[approval],
             &[status(1, "success", "Review completed")],
             &binding,
-            &assessment,
+            Some(&assessment),
             17,
             no_comparison,
         )
@@ -2934,7 +2995,7 @@ mod tests {
             &[review],
             &[status(1, "success", "Review completed")],
             &binding,
-            &assessment,
+            Some(&assessment),
             17,
             |_| Ok(compared_review(&binding, &["upstream.md"], true)),
         )
@@ -2947,7 +3008,7 @@ mod tests {
             &[review],
             &[status(1, "success", "Review completed")],
             &binding,
-            &assessment,
+            Some(&assessment),
             17,
             |_| {
                 Ok(compared_review(
@@ -2978,11 +3039,15 @@ mod tests {
             let (binding, assessment, review) = earlier_review_fixture()?;
             let mut terminal = status(1, "success", "Review completed");
             terminal.created_at = created_at.map(str::to_owned);
-            let error =
-                validate_pr_evidence(&[review], &[terminal], &binding, &assessment, 17, |_| {
-                    Ok(compared_review(&binding, &[], false))
-                })
-                .unwrap_err();
+            let error = validate_pr_evidence(
+                &[review],
+                &[terminal],
+                &binding,
+                Some(&assessment),
+                17,
+                |_| Ok(compared_review(&binding, &[], false)),
+            )
+            .unwrap_err();
             assert!(
                 error.to_string().contains(message),
                 "{created_at:?}: {error:#}"
@@ -3012,11 +3077,15 @@ mod tests {
             ),
         ] {
             let (binding, assessment, review) = earlier_review_fixture()?;
-            let error =
-                validate_pr_evidence(&[review], &statuses, &binding, &assessment, 17, |_| {
-                    Ok(compared_review(&binding, &[], false))
-                })
-                .unwrap_err();
+            let error = validate_pr_evidence(
+                &[review],
+                &statuses,
+                &binding,
+                Some(&assessment),
+                17,
+                |_| Ok(compared_review(&binding, &[], false)),
+            )
+            .unwrap_err();
             assert!(error.to_string().contains(message), "{error:#}");
         }
         Ok(())
@@ -3033,7 +3102,7 @@ mod tests {
                 &[review],
                 &[status(1, "success", "Review completed")],
                 &binding,
-                &assessment,
+                Some(&assessment),
                 17,
                 |_| {
                     Ok(ComparedReview {
@@ -3059,7 +3128,7 @@ mod tests {
             &[newer, review],
             &[status(1, "success", "Review completed")],
             &binding,
-            &assessment,
+            Some(&assessment),
             17,
             |_| Ok(compared_review(&binding, &[], false)),
         )
@@ -3111,7 +3180,7 @@ mod tests {
                 &[review],
                 &[status(1, "success", "Review completed")],
                 &binding,
-                &assessment,
+                Some(&assessment),
                 17,
                 |_| Ok(compared_review(&binding, &[], false)),
             )
@@ -3132,7 +3201,7 @@ mod tests {
             &[review, approval],
             &[status(1, "success", "Review completed")],
             &binding,
-            &assessment,
+            Some(&assessment),
             17,
             |_| Ok(compared_review(&binding, &[], true)),
         )
@@ -3167,7 +3236,7 @@ mod tests {
             &[review],
             &[status(1, "success", "Review completed")],
             &binding,
-            &assessment,
+            Some(&assessment),
             1,
             no_comparison,
         )?;
@@ -3182,7 +3251,7 @@ mod tests {
             &reviews,
             &[status(1, "success", "Review completed")],
             &binding,
-            &assessment,
+            Some(&assessment),
             1,
             no_comparison,
         )?;
@@ -3196,7 +3265,7 @@ mod tests {
                     &reviews,
                     &[status(1, "success", "Review completed"), latest],
                     &binding,
-                    &assessment,
+                    Some(&assessment),
                     1,
                     no_comparison,
                 )
@@ -3212,7 +3281,7 @@ mod tests {
                 &reviews,
                 &[status(1, "success", "Review completed")],
                 &binding,
-                &assessment,
+                Some(&assessment),
                 1,
                 no_comparison,
             )
@@ -3227,9 +3296,15 @@ mod tests {
         let reviews = [review];
         let statuses = [status(1, "success", "Review completed")];
         for (reviews, statuses) in [(&[][..], &statuses[..]), (&reviews[..], &[][..])] {
-            let error =
-                validate_pr_evidence(reviews, statuses, &binding, &assessment, 17, no_comparison)
-                    .unwrap_err();
+            let error = validate_pr_evidence(
+                reviews,
+                statuses,
+                &binding,
+                Some(&assessment),
+                17,
+                no_comparison,
+            )
+            .unwrap_err();
             let refusal = error
                 .downcast_ref::<platform::refusal::Refusal>()
                 .context("missing review needs its domain refusal")?;
@@ -3243,7 +3318,7 @@ mod tests {
             &reviews,
             &[status(2, "success", "Review skipped")],
             &binding,
-            &assessment,
+            Some(&assessment),
             17,
             no_comparison,
         )
