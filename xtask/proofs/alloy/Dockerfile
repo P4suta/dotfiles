@@ -1,5 +1,5 @@
 # The offline host of the Alloy obligations, which `just proofs` runs with `--network none`.
-FROM docker.io/library/eclipse-temurin:21-jre@sha256:18bb4a91a3dea3f03ee31d3755af34dfb40f904fc77ab56cdc2f092e32fff9c2
+FROM docker.io/library/eclipse-temurin:27-jre@sha256:05a57c9f4d6d8bf8d8c2213049ea816609672ffcc14463a9c83433a610703e10
 
 # The release publishes no checksum file, so this file pins the digest of the jar the release serves.
 ARG ALLOY_VERSION=6.2.0
