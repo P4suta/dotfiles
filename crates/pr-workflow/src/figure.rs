@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn publication_comparison_preserves_text_and_alternative_text() {
-        let local = "Before.\n\n![Failure](</cache/image.svg>)\n\nAfter.\n";
+        let local = "Before.\n\n![Failure](<cache/image.svg>)\n\nAfter.\n";
         let uploaded =
             "Before.\n\n![Failure](https://github.com/user-attachments/assets/fixture)\n\nAfter.\n";
         assert_eq!(publication_shape(local), publication_shape(uploaded));
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn publication_comparison_preserves_image_titles() {
-        let local = "![Failure](</cache/image.svg> \"Retry state\")";
+        let local = "![Failure](<cache/image.svg> \"Retry state\")";
         let uploaded =
             "![Failure](https://github.com/user-attachments/assets/fixture \"Retry state\")";
         assert_eq!(publication_shape(local), publication_shape(uploaded));

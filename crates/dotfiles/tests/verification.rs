@@ -1,6 +1,6 @@
 //! Explicit receipts preserve check ordering and source identity without coupling managed hooks.
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use std::fs;
@@ -200,11 +200,14 @@ struct Fixture {
     root: PathBuf,
     home: PathBuf,
     plan: PathBuf,
+    mise_data: PathBuf,
     _scope: tempfile::TempDir,
 }
 
 impl Fixture {
     fn new(behavior: bool) -> Result<Self> {
+        let native_home = platform::home::home().context("native tool storage home")?;
+        let mise_data = platform::code_environment::Installations::discover(&native_home)?.data;
         let scope = tempfile::tempdir()?;
         let root = scope.path().join("repository");
         let home = scope.path().join("home");
@@ -214,6 +217,7 @@ impl Fixture {
             .join(".local/state/dotfiles/answers")
             .join(platform::build_inputs::hex(&Sha256::digest(b"session")));
         fs::create_dir_all(&request)?;
+        fs::write(home.join("mise-global.toml"), "")?;
         fs::write(
             request.join("request.json"),
             serde_json::to_vec(&json!({
@@ -281,6 +285,7 @@ impl Fixture {
             root,
             home,
             plan,
+            mise_data,
             _scope: scope,
         })
     }
@@ -294,7 +299,18 @@ impl Fixture {
         );
         let mut command = fixture_git::command(executable, &self.home.join("gitconfig"));
         let original = platform::home::home().unwrap();
-        command.env("MISE_DATA_DIR", original.join(".local/share/mise"));
+        command
+            .env_remove("__MISE_DIFF")
+            .env_remove("MISE_CONFIG_FILE")
+            .env("MISE_DATA_DIR", &self.mise_data)
+            .env(
+                "MISE_GLOBAL_CONFIG_FILE",
+                self.home.join("mise-global.toml"),
+            )
+            .env(
+                "MISE_SYSTEM_CONFIG_FILE",
+                self.home.join("mise-global.toml"),
+            );
         for (name, directory) in [("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")] {
             command.env(
                 name,

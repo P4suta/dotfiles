@@ -62,9 +62,9 @@ async function until(condition: () => boolean): Promise<void> {
 
 class Events {
 	items: NativeEvent[] = [];
-	processed = 0;
 	ending = false;
 	wake: (() => void) | undefined;
+	pending: { complete: () => void; fail: (error: Error) => void } | undefined;
 	async *subscribe({
 		signal,
 	}: {
@@ -77,7 +77,8 @@ class Events {
 				const event = this.items.shift();
 				if (event) {
 					yield event;
-					this.processed++;
+					this.pending?.complete();
+					this.pending = undefined;
 				} else {
 					await new Promise<void>((resolve) => {
 						this.wake = resolve;
@@ -85,11 +86,20 @@ class Events {
 				}
 			}
 		} finally {
+			this.ending = true;
+			this.pending?.fail(
+				new Error("The native event stream closed before completing the event"),
+			);
+			this.pending = undefined;
 			signal.removeEventListener("abort", wake);
 		}
 	}
 	async idle(sessionID: string, directory: string): Promise<void> {
-		const expected = this.processed + 1;
+		assert(!this.ending, "The native event stream is closed");
+		assert(!this.pending, "The fixture waits for one event at a time");
+		const completion = new Promise<void>((complete, fail) => {
+			this.pending = { complete, fail };
+		});
 		this.items.push({
 			id: "event_fixture",
 			created: 0,
@@ -98,7 +108,7 @@ class Events {
 			data: { sessionID },
 		});
 		this.wake?.();
-		await until(() => this.processed >= expected);
+		await completion;
 	}
 	end(): void {
 		this.ending = true;

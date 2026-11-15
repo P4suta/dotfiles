@@ -472,10 +472,7 @@ fn retain_native(
         )?;
         fs::copy(source::evidence_path(root, &report)?, &destination)?;
         hashes.insert(
-            report
-                .to_str()
-                .context("non-UTF-8 native report path")?
-                .to_owned(),
+            source::evidence_name(&report)?,
             source::digest(&fs::read(destination)?),
         );
     }
@@ -1019,6 +1016,29 @@ mod tests {
         let traversal = BTreeMap::from([("../outside.json".into(), source::digest(b"one"))]);
         assert!(validate_native(retained.path(), &traversal).is_err());
         assert!(source::evidence_path(root.path(), Path::new("/absolute.json")).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn mutation_report_filenames_remain_portable_after_native_path_operations() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let retained = tempfile::tempdir()?;
+        let check: Check = serde_json::from_value(serde_json::json!({
+            "id":"mutants", "method":"mutation", "tool":"cargo",
+            "arguments":["mutants"], "report":"mutants", "expected":["contract"],
+            "report_path":"artifacts/outcomes.json"
+        }))?;
+        let directory = root.path().join("artifacts");
+        fs::create_dir_all(&directory)?;
+        for name in ["outcomes.json", "mutants.json"] {
+            fs::write(directory.join(name), b"{}")?;
+        }
+        let hashes = retain_native(root.path(), retained.path(), &check, "")?;
+        assert_eq!(
+            hashes.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["artifacts/mutants.json", "artifacts/outcomes.json"]
+        );
+        validate_native(retained.path(), &hashes)?;
         Ok(())
     }
 

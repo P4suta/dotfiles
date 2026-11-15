@@ -528,8 +528,6 @@ pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: St
         Step::Fcitx5 => fcitx(context, runner)?,
         Step::RetireTmux => retire_tmux(context, runner)?,
         #[cfg(windows)]
-        Step::Wezterm => crate::windows::wezterm::wezterm(&context.home, runner)?,
-        #[cfg(windows)]
         Step::Scoop
         | Step::Winget
         | Step::PythonStub
@@ -538,8 +536,7 @@ pub(crate) fn execute(context: &TemplateData, runner: &mut impl Runner, step: St
         | Step::Keyboard
         | Step::StorageScout => crate::windows::steps::run(context, step)?,
         #[cfg(not(windows))]
-        Step::Wezterm
-        | Step::Scoop
+        Step::Scoop
         | Step::Winget
         | Step::PythonStub
         | Step::Herdr

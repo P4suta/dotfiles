@@ -1527,6 +1527,7 @@ pub fn unknown_recipes(root: &Path) -> Result<Vec<String>> {
                     relative.as_str(),
                     ".git" | "target" | "node_modules" | "docs/adr" | "xtask/tests"
                 ) && !relative.ends_with("/target")
+                    && !relative.ends_with("/node_modules")
                 {
                     stack.push(path);
                 }

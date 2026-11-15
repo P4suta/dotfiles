@@ -12,7 +12,6 @@ winget = []
 nix = ["nix"]
 desktop = []
 tools = []
-wezterm = ["wezterm"]
 herdr = ["herdr"]
 integrations = []
 python-stub = []
@@ -132,6 +131,7 @@ tools = ["pulseaudio"]
 reason = "desktop"
 why = "These are interactive terminals, editors, shells, prompts, and full-screen viewers for the owner, which an agent neither drives nor needs to explain."
 tools = [
+  "alacritty",
   "atuin",
   "broot",
   "carapace",
@@ -172,7 +172,6 @@ tools = [
   "viddy",
   "visual-studio-code",
   "vivid",
-  "wezterm",
   "yazi",
   "zed",
   "zoxide",

@@ -1,0 +1,38 @@
+[terminal.shell]
+program = "pwsh"
+{{ if eq .platforms.windows.terminal.multiplexer "none" -}}
+args = ["-NoLogo"]
+{{- else -}}
+args = ["-NoLogo", "-NoExit", "-Command", {{ .platforms.windows.terminal.multiplexer | quote }}]
+{{- end }}
+
+[font]
+normal = { family = {{ .platforms.windows.terminal.font_family | quote }}, style = "Medium" }
+size = {{ .platforms.windows.terminal.font_size }}.0
+
+[window]
+padding = { x = 12, y = 8 }
+opacity = {{ .platforms.windows.terminal.opacity }}
+
+[colors.primary]
+background = "{{ .palette.black }}"
+foreground = "{{ .palette.white }}"
+
+[colors.cursor]
+text = "{{ .palette.black }}"
+cursor = "{{ .palette.white }}"
+
+[colors.selection]
+text = "{{ .palette.black }}"
+background = "{{ .palette.white }}"
+
+[cursor]
+style = { shape = "Beam", blinking = "Never" }
+
+[keyboard]
+bindings = [
+  { key = "Left", mods = "Alt", chars = "\u0001", mode = "~Vi|~Search" },
+  { key = "Right", mods = "Alt", chars = "\u0005", mode = "~Vi|~Search" },
+  { key = "Left", mods = "Control", chars = "\u001bb", mode = "~Vi|~Search" },
+  { key = "Right", mods = "Control", chars = "\u001bf", mode = "~Vi|~Search" },
+]

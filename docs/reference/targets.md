@@ -65,8 +65,6 @@ A target missing from the first table reaches every profile.
 | `.config/systemd/user/storage-scout.service` | linux | linux |
 | `.config/systemd/user/tools-upgrade.service` | systemd | linux, wsl |
 | `.config/systemd/user/tools-upgrade.timer` | systemd | linux, wsl |
-| `.config/wezterm` | windows | windows |
-| `.config/wezterm/wezterm.lua` | windows | windows |
 | `.config/xdg-terminals.list` | linux | linux |
 | `.local/bin/dev-reaper` | systemd | linux, wsl |
 | `.local/bin/dotfiles-doctor` | unix | mac, linux, wsl |
@@ -94,6 +92,8 @@ A target missing from the first table reaches every profile.
 | `.zshrc` | mac | mac |
 | `AppData` | windows | windows |
 | `AppData/Local/lazygit/config.yml` | windows | windows |
+| `AppData/Roaming/alacritty` | windows | windows |
+| `AppData/Roaming/alacritty/alacritty.toml` | windows | windows |
 | `AppData/Roaming/herdr/config.toml` | windows | windows |
 | `Documents` | windows | windows |
 | `Documents/PowerShell/Microsoft.PowerShell_profile.ps1` | windows | windows |
@@ -154,13 +154,16 @@ Each profile in the set removes the target when it applies.
 | `.config/systemd/user/docker-prune.timer` | linux | linux |
 | `.config/systemd/user/mise-upgrade.service` | systemd | linux, wsl |
 | `.config/systemd/user/mise-upgrade.timer` | systemd | linux, wsl |
+| `.config/wezterm` | windows | windows |
 | `.gitconfig` | unix | mac, linux, wsl |
 | `.local/bin/dotctl.exe` | windows | windows |
 | `.local/bin/dotfiles-wm-defaults` | mac | mac |
 | `.local/bin/dotfiles-xtask` | unix | mac, linux, wsl |
 | `.local/bin/dotfiles-xtask.exe` | windows | windows |
 | `.local/bin/renovate-local` | mac | mac |
-| `AppData/Roaming/alacritty/alacritty.toml` | windows | windows |
+| `.local/bin/wezterm.cmd` | windows | windows |
+| `AppData/Local/Programs/WezTerm-nightly` | windows | windows |
+| `AppData/Roaming/Microsoft/Windows/Start Menu/Programs/WezTerm Nightly.lnk` | windows | windows |
 | `Documents/PowerShell/modules/00-readline.ps1` | windows | windows |
 | `Documents/PowerShell/modules/05-mise.ps1` | windows | windows |
 | `Documents/PowerShell/modules/10-tools.ps1` | windows | windows |

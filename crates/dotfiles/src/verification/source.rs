@@ -301,11 +301,19 @@ pub(super) fn safe_path(path: &str) -> bool {
             .all(|part| matches!(part, Component::Normal(_)))
 }
 
+pub(super) fn evidence_name(relative: &Path) -> Result<String> {
+    let name = relative.to_str().context("non-UTF-8 native report path")?;
+    let name = if cfg!(windows) {
+        name.replace('\\', "/")
+    } else {
+        name.to_owned()
+    };
+    anyhow::ensure!(safe_path(&name), "unsafe native evidence path");
+    Ok(name)
+}
+
 pub(super) fn evidence_path(root: &Path, relative: &Path) -> Result<std::path::PathBuf> {
-    anyhow::ensure!(
-        relative.to_str().is_some_and(safe_path),
-        "unsafe native evidence path"
-    );
+    let relative = evidence_name(relative)?;
     let root = platform::paths::canonical(root)?;
     let file = platform::paths::canonical(&root.join(relative))?;
     anyhow::ensure!(

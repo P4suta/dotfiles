@@ -226,6 +226,7 @@ pub struct Palette {
     pub bg_dim: Option<Hex>,
     pub bg_highlight: Option<Hex>,
     pub bg_panel: Option<Hex>,
+    pub black: Option<Hex>,
     pub blue: Option<Hex>,
     pub blue1: Option<Hex>,
     pub bright_black: Option<Hex>,
@@ -245,6 +246,7 @@ pub struct Palette {
     pub selection: Option<Hex>,
     pub surface: Option<Hex>,
     pub teal: Option<Hex>,
+    pub white: Option<Hex>,
     pub yellow: Option<Hex>,
 }
 
@@ -523,7 +525,6 @@ pub struct Sshd {
 pub struct Terminal {
     pub font_family: Option<String>,
     pub font_size: Option<u32>,
-    pub max_fps: Option<u32>,
     pub multiplexer: Option<String>,
     pub opacity: Option<f64>,
 }
