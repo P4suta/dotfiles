@@ -40,6 +40,7 @@ bg = "#1a1b26"
 bg_dim = "#15161e"
 bg_highlight = "#292e42"
 bg_panel = "#1f2335"
+black = "#000000"
 blue = "#7aa2f7"
 blue1 = "#2ac3de"
 bright_black = "#414868"
@@ -60,6 +61,7 @@ red = "#f7768e"
 selection = "#33467c"
 surface = "#3b4261"
 teal = "#73daca"
+white = "#ffffff"
 yellow = "#e0af68"
 
 # Each pair of palette colors that a theme draws text with, which the profile gate holds to a text contrast of 4.5:1.
@@ -67,7 +69,17 @@ yellow = "#e0af68"
 [[contrast]]
 foreground = "fg"
 background = "bg"
-used = "the body text of every terminal, editor, and prompt"
+used = "the body text of the shared color theme"
+
+[[contrast]]
+foreground = "white"
+background = "black"
+used = "the Alacritty body text and cursor"
+
+[[contrast]]
+foreground = "black"
+background = "white"
+used = "the Alacritty selection text"
 
 [[contrast]]
 foreground = "fg_dim"

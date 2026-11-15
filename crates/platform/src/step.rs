@@ -15,7 +15,6 @@ pub enum Step {
     Nix,
     Desktop,
     Tools,
-    Wezterm,
     Herdr,
     Integrations,
     PythonStub,
@@ -111,7 +110,7 @@ const EVERY: &[Profile] = &[Profile::Mac, Profile::Linux, Profile::Wsl, Profile:
 
 impl Step {
     /// Every step in declaration order, which breaks ties in the run order.
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 28] = [
         Self::Mise,
         Self::Runtime,
         Self::Github,
@@ -120,7 +119,6 @@ impl Step {
         Self::Nix,
         Self::Desktop,
         Self::Tools,
-        Self::Wezterm,
         Self::Herdr,
         Self::Integrations,
         Self::PythonStub,
@@ -155,7 +153,6 @@ impl Step {
             Self::Nix => "nix",
             Self::Desktop => "desktop",
             Self::Tools => "tools",
-            Self::Wezterm => "wezterm",
             Self::Herdr => "herdr",
             Self::Integrations => "integrations",
             Self::PythonStub => "python-stub",
@@ -195,7 +192,6 @@ impl Step {
             | Self::Adapters => EVERY,
             Self::Scoop
             | Self::Winget
-            | Self::Wezterm
             | Self::Herdr
             | Self::PythonStub
             | Self::Keyboard
@@ -238,7 +234,6 @@ impl Step {
             | Self::Scoop
             | Self::Winget
             | Self::Nix
-            | Self::Wezterm
             | Self::Herdr
             | Self::PythonStub
             | Self::Keyboard
@@ -277,12 +272,7 @@ impl Step {
     pub const fn condition(self, family: Family) -> Condition {
         match (self, family) {
             (
-                Self::Mise
-                | Self::Runtime
-                | Self::Integrations
-                | Self::Winget
-                | Self::Wezterm
-                | Self::Adapters,
+                Self::Mise | Self::Runtime | Self::Integrations | Self::Winget | Self::Adapters,
                 _,
             )
             | (Self::Ocomment, Family::Windows) => Condition::Always,
@@ -371,10 +361,10 @@ impl Step {
     }
 }
 
-const ALL_BUT_ADAPTERS: [Step; 28] = {
-    let mut steps = [Step::Mise; 28];
+const ALL_BUT_ADAPTERS: [Step; 27] = {
+    let mut steps = [Step::Mise; 27];
     let mut index = 0;
-    while index < 28 {
+    while index < 27 {
         steps[index] = Step::ALL[index];
         index += 1;
     }

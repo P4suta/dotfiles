@@ -920,6 +920,16 @@
             }
           ]
         },
+        "black": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "blue": {
           "anyOf": [
             {
@@ -1101,6 +1111,16 @@
           ]
         },
         "teal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Hex"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "white": {
           "anyOf": [
             {
               "$ref": "#/$defs/Hex"
@@ -1461,14 +1481,6 @@
           ]
         },
         "font_size": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 0
-        },
-        "max_fps": {
           "type": [
             "integer",
             "null"

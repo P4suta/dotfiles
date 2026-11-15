@@ -291,6 +291,7 @@ collections = ["compiler-lib", "rackunit-lib"]
 [platforms.windows.scoop]
 apps = [
   "actionlint",
+  "alacritty",
   "ast-grep",
   "bat",
   "codex",

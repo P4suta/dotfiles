@@ -11,6 +11,5 @@ repeat_interval = 33
 [platforms.windows.terminal]
 font_family = "JetBrainsMono NF"
 font_size = 11
-max_fps = 120
 multiplexer = "herdr"
 opacity = 0.8

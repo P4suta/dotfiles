@@ -186,6 +186,22 @@ fn every_ignore_and_remove_pattern_is_distinct_and_justified() {
 }
 
 #[test]
+fn recipe_references_ignore_dependency_trees_but_keep_owned_documents() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("justfile"), "check:\n").unwrap();
+    fs::write(root.path().join("README.md"), "Run `just missing`.\n").unwrap();
+    for relative in ["node_modules", "xtask/proofs/quint/node_modules"] {
+        let dependencies = root.path().join(relative);
+        fs::create_dir_all(&dependencies).unwrap();
+        fs::write(dependencies.join("README.md"), "Run `just dependency`.\n").unwrap();
+    }
+    assert_eq!(
+        quality::unknown_recipes(root.path()).unwrap(),
+        ["README.md:1: just missing"]
+    );
+}
+
+#[test]
 fn an_ignore_pattern_that_matches_nothing_is_refused() {
     let snapshot = source_snapshot();
     let ignore = snapshot.path().join("home/.chezmoiignore");

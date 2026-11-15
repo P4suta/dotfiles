@@ -852,7 +852,7 @@ mod tests {
         let mut preserved = Preserved {
             repository: source.repository.clone(),
             directory: source.directory.clone(),
-            manifest: source.directory.join("SHA256SUMS"),
+            manifest: "vendor/publisher/SHA256SUMS".into(),
             sha256: source.sha256.clone(),
             origin: source.origin.clone(),
             files: BTreeMap::from([("vendor/publisher/src/lib.rs".into(), source.sha256.clone())]),
@@ -882,7 +882,7 @@ mod tests {
         let mut preserved = Preserved {
             repository: source.repository,
             directory: source.directory.clone(),
-            manifest: source.directory.join("SHA256SUMS"),
+            manifest: "vendor/publisher/SHA256SUMS".into(),
             sha256: digest.to_ascii_uppercase(),
             origin: source.origin,
             files: BTreeMap::from([("vendor/publisher/src/lib.rs".into(), digest)]),
@@ -922,7 +922,7 @@ mod tests {
     #[test]
     fn checksum_manifests_require_unique_bounded_members_inside_the_registered_directory() {
         let directory = Path::new("vendor/publisher");
-        let manifest = directory.join("SHA256SUMS");
+        let manifest = PathBuf::from("vendor/publisher/SHA256SUMS");
         let digest = crate::build_inputs::hex(&Sha256::digest(b""));
         let valid = format!("{digest}  src/empty.rs\n");
         assert_eq!(
@@ -980,7 +980,7 @@ mod tests {
         let (source, _) = archive();
         let preserved = Preserved {
             repository: source.repository.clone(),
-            directory: source.directory.join("src"),
+            directory: "vendor/publisher/src".into(),
             manifest: "sources.sha256".into(),
             sha256: source.sha256.clone(),
             origin: source.origin.clone(),
@@ -1075,7 +1075,7 @@ mod tests {
                 threads.spawn(move || {
                     let (mut source, _) = archive();
                     source.directory = format!("vendor/publisher-{index}").into();
-                    source.archive = source.directory.join("upstream.crate");
+                    source.archive = format!("vendor/publisher-{index}/upstream.crate").into();
                     barrier.wait();
                     update_registry(path, |registry| {
                         registry.sources.push(source);
