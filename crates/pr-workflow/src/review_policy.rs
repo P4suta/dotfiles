@@ -26,16 +26,18 @@ const MAX_ASSESSMENT_BYTES: usize = 16 * 1024;
 const MAX_REVIEW_POLICY_BYTES: u64 = 16 * 1024;
 const REVIEW_POLICIES: &str = "review-policies";
 const REVIEW_POLICY_FILE: &str = "policy.json";
-const REVIEW_EXCLUSION: &str = "@coderabbitai ignore";
 const PAGE_SIZE: usize = 100;
 const MAX_PAGES: usize = 20;
 const REVIEW_BOT: &str = "coderabbitai[bot]";
 const GRAPHQL_BOT: &str = "coderabbitai";
 const REVIEW_CONTEXT: &str = "CodeRabbit";
+const REVIEW_APP_ID: u64 = 347_564;
+const CHECK_RUN_COMPLETION: &str = "Result: Success - Review completed";
 const RUN_ID_LENGTH: usize = 36;
 const RUN_ID_SEPARATORS: [usize; 4] = [8, 13, 18, 23];
 const REVIEW_RANGE: &str = "Reviewing files that changed from the base of the PR and between ";
-pub(super) const CRITICAL_LABEL: &str = "review:critical";
+const RECENT_REVIEW: &str = "<!-- recent_review_start -->";
+const SUMMARY_PREFIX: &str = "<!-- coderabbit-ai-generated:v1 -->\n\n<!-- This is an auto-generated comment: summarize by coderabbit.ai -->";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -348,7 +350,6 @@ fn capture_source(
                 .as_ref()
                 .map_or(repository, platform::source_identity::Binding::source)
                 .into(),
-            generation: rules::pr_rules::Generation::Local,
             title_policy: None,
             issue: None,
             cli_receipt: None,
@@ -642,17 +643,6 @@ fn check_at(
     let statement = authenticate(&current, &packet, signers.path(), signer)?;
     let repository_policy = repository_policy(&evidence::home()?, &target.repo)?;
     let route = policy::repository_route(statement.assessment.level.into(), repository_policy);
-    let ignore_count = body
-        .lines()
-        .filter(|line| line.trim() == REVIEW_EXCLUSION)
-        .count();
-    ensure!(ignore_count <= 1, "duplicate CodeRabbit suppression lines");
-    if route != ReviewRoute::Pr {
-        ensure!(
-            ignore_count == 1 && target.generation == rules::pr_rules::Generation::Local,
-            "low, medium, and high use a standing CodeRabbit PR suppression and local document generation"
-        );
-    }
     Ok(Checked {
         route,
         repository_policy,
@@ -727,7 +717,7 @@ pub(super) fn assess(
     )?;
     authenticate(&final_current, &packet, signers.path(), &github.login)?;
     let stored = evidence::store_assessment(
-        &platform::home::home().context("the owner home for the assessment is unavailable")?,
+        &platform::home::home().context("the user's home for the assessment is unavailable")?,
         &statement.binding.repository,
         &statement.binding.head,
         &statement.binding.diff_sha256,
@@ -753,17 +743,11 @@ pub(super) fn paused(checked: &Checked) -> Result<bool> {
     })
 }
 
-pub(super) fn admit_publication(checked: &Checked, body: &str) -> Result<()> {
-    if checked.repository_policy == ReviewPolicy::AlwaysPr {
-        ensure!(
-            !paused(checked)?,
-            "repository PR review route is paused by the owner; keep this operation pending until the owner resumes PR reviews"
-        );
-        ensure!(
-            !body.lines().any(|line| line.trim() == REVIEW_EXCLUSION),
-            "repository PR review policy requires removing the standing CodeRabbit suppression"
-        );
-    }
+pub(super) fn admit_publication(checked: &Checked) -> Result<()> {
+    ensure!(
+        rules::pr_rules::review_request_allowed(paused(checked)?, true),
+        "CodeRabbit PR reviews are paused by the user; wait for the user to resume reviews"
+    );
     Ok(())
 }
 
@@ -908,15 +892,11 @@ fn validate_findings(
     Ok(())
 }
 
-pub(super) fn labels(checked: &Checked, labels: &[super::ReviewLabel]) -> Result<()> {
+pub(super) fn labels(labels: &[super::ReviewLabel]) -> Result<()> {
     let mut seen = BTreeSet::new();
     for label in labels {
         ensure!(seen.insert(&label.name), "duplicate PR label");
     }
-    ensure!(
-        checked.route == ReviewRoute::Pr || !seen.contains(&CRITICAL_LABEL.to_owned()),
-        "the selected review route cannot opt into automatic CodeRabbit PR review"
-    );
     Ok(())
 }
 
@@ -945,6 +925,14 @@ struct SubmittedReview {
 }
 
 #[derive(Deserialize)]
+struct ReviewSummary {
+    id: u64,
+    user: Option<Bot>,
+    updated_at: Option<String>,
+    body: String,
+}
+
+#[derive(Deserialize)]
 struct CommitStatus {
     id: u64,
     creator: Bot,
@@ -952,6 +940,36 @@ struct CommitStatus {
     state: String,
     description: String,
     created_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CheckRunPage {
+    total_count: usize,
+    check_runs: Vec<ReviewCheckRun>,
+}
+
+#[derive(Deserialize)]
+struct ReviewCheckRun {
+    id: u64,
+    app: Option<CheckApp>,
+    name: String,
+    head_sha: String,
+    status: String,
+    conclusion: Option<String>,
+    started_at: Option<String>,
+    completed_at: Option<String>,
+    output: Option<CheckOutput>,
+}
+
+#[derive(Deserialize)]
+struct CheckApp {
+    id: u64,
+    slug: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CheckOutput {
+    summary: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1072,6 +1090,119 @@ fn pages<T: serde::de::DeserializeOwned>(github: &Github, endpoint: &str) -> Res
     anyhow::bail!("review API inventory exceeds its bound; no partial review credit")
 }
 
+fn check_runs(github: &Github, repository: &str, head: &str) -> Result<Vec<ReviewCheckRun>> {
+    let mut all = Vec::new();
+    let mut expected_total = None;
+    for page in 1..=MAX_PAGES {
+        let result: CheckRunPage = github.read(&format!(
+            "repos/{repository}/commits/{head}/check-runs?filter=all&per_page={PAGE_SIZE}&page={page}"
+        ))?;
+        ensure!(
+            result.check_runs.len() <= PAGE_SIZE
+                && result.total_count <= MAX_PAGES * PAGE_SIZE
+                && expected_total.is_none_or(|total| total == result.total_count),
+            "review Check Run inventory is oversized or changed during pagination"
+        );
+        expected_total = Some(result.total_count);
+        let last = result.check_runs.len() < PAGE_SIZE;
+        all.extend(result.check_runs);
+        ensure!(
+            all.len() <= result.total_count,
+            "review Check Run inventory exceeds its reported count"
+        );
+        if last || all.len() == result.total_count {
+            ensure!(
+                all.len() == result.total_count,
+                "review Check Run inventory is incomplete; no partial review credit"
+            );
+            let ids: BTreeSet<_> = all.iter().map(|run| run.id).collect();
+            ensure!(ids.len() == all.len(), "duplicate review Check Run IDs");
+            return Ok(all);
+        }
+    }
+    anyhow::bail!("review Check Run inventory exceeds its bound; no partial review credit")
+}
+
+fn review_timestamp(value: Option<&str>) -> Result<jiff::Timestamp> {
+    value
+        .context("review completion time is missing")?
+        .parse()
+        .context("review completion time is malformed")
+}
+
+fn include_check_runs(
+    statuses: Vec<CommitStatus>,
+    runs: &[ReviewCheckRun],
+    head: &str,
+) -> Result<Vec<CommitStatus>> {
+    let owned: Vec<_> = runs
+        .iter()
+        .filter(|run| {
+            run.name == REVIEW_CONTEXT
+                && run.app.as_ref().is_some_and(|app| {
+                    app.id == REVIEW_APP_ID && app.slug.as_deref() == Some(GRAPHQL_BOT)
+                })
+        })
+        .collect();
+    ensure!(
+        owned.iter().all(|run| run.id != 0 && run.head_sha == head),
+        "CodeRabbit Check Run belongs to another head or has no identity"
+    );
+    let Some(run) = owned.into_iter().max_by_key(|run| run.id) else {
+        return Ok(statuses);
+    };
+    let started = review_timestamp(run.started_at.as_deref())?;
+    let observed = if run.status == "completed" {
+        let completed = review_timestamp(run.completed_at.as_deref())?;
+        ensure!(
+            completed >= started,
+            "CodeRabbit Check Run ends before it starts"
+        );
+        completed
+    } else {
+        started
+    };
+    let complete = run.status == "completed"
+        && run.conclusion.as_deref() == Some("success")
+        && run
+            .output
+            .as_ref()
+            .and_then(|output| output.summary.as_deref())
+            .and_then(|summary| summary.lines().next())
+            == Some(CHECK_RUN_COMPLETION);
+    if let Some(status) = statuses
+        .iter()
+        .filter(|status| status.creator.login == REVIEW_BOT && status.context == REVIEW_CONTEXT)
+        .max_by_key(|status| status.id)
+    {
+        let created = review_timestamp(status.created_at.as_deref())?;
+        if created > observed {
+            return Ok(statuses);
+        }
+        ensure!(
+            created != observed
+                || complete
+                    == (status.state == "success" && status.description == "Review completed"),
+            "CodeRabbit completion formats disagree at the same time"
+        );
+    }
+    Ok(vec![CommitStatus {
+        id: run.id,
+        creator: Bot {
+            login: REVIEW_BOT.into(),
+        },
+        context: REVIEW_CONTEXT.into(),
+        state: if complete { "success" } else { "pending" }.into(),
+        description: if complete {
+            "Review completed"
+        } else {
+            "Review incomplete"
+        }
+        .into(),
+        created_at: run.started_at.clone(),
+    }])
+}
+
 fn require_pr_review(
     github: &Github,
     target: &Target,
@@ -1086,15 +1217,143 @@ fn require_pr_review(
         github,
         &format!("repos/{}/commits/{head}/statuses", target.repo),
     )?;
-    validate_pr_evidence(&reviews, &statuses, binding, assessment, pr, |review| {
-        compare_reviewed_head(github, target, binding, review)
-    })?;
+    let statuses = include_check_runs(statuses, &check_runs(github, &target.repo, head)?, head)?;
+    let summaries: Vec<ReviewSummary> = pages(
+        github,
+        &format!("repos/{}/issues/{pr}/comments", target.repo),
+    )?;
+    validate_pr_evidence_with_summaries(
+        &reviews,
+        &statuses,
+        &summaries,
+        binding,
+        assessment,
+        pr,
+        |review| compare_reviewed_head(github, target, binding, review),
+    )?;
     let live = super::live_document(github, target, pr)?;
     ensure!(
         live.head_ref_oid.as_deref() == Some(head.as_str()),
         "PR head changed while review evidence was inspected"
     );
     Ok(())
+}
+
+fn validate_pr_evidence_with_summaries(
+    reviews: &[SubmittedReview],
+    statuses: &[CommitStatus],
+    summaries: &[ReviewSummary],
+    binding: &Binding,
+    assessment: &Assessment,
+    pr: u64,
+    compare: impl FnMut(&SubmittedReview) -> Result<ComparedReview>,
+) -> Result<()> {
+    let summary = summaries
+        .iter()
+        .filter(|summary| {
+            summary
+                .user
+                .as_ref()
+                .is_some_and(|user| user.login == REVIEW_BOT)
+                && summary.body.starts_with(SUMMARY_PREFIX)
+                && summary.body.contains(RECENT_REVIEW)
+        })
+        .max_by_key(|summary| summary.id);
+    let Some(summary) = summary else {
+        return validate_pr_evidence(reviews, statuses, binding, assessment, pr, compare);
+    };
+    match validate_clean_summary(summary, reviews, statuses, binding, pr) {
+        Ok(()) => Ok(()),
+        Err(error) => validate_pr_evidence(reviews, statuses, binding, assessment, pr, compare)
+            .with_context(|| format!("CodeRabbit clean review summary was rejected: {error:#}")),
+    }
+}
+
+fn summary_section<'a>(body: &'a str, start: &str, end: &str) -> Result<&'a str> {
+    ensure!(
+        body.matches(start).count() == 1 && body.matches(end).count() == 1,
+        "CodeRabbit summary section is missing or ambiguous"
+    );
+    body.split_once(start)
+        .and_then(|(_, body)| body.split_once(end))
+        .map(|(section, _)| section)
+        .context("CodeRabbit summary section is incomplete")
+}
+
+fn validate_clean_summary(
+    summary: &ReviewSummary,
+    reviews: &[SubmittedReview],
+    statuses: &[CommitStatus],
+    binding: &Binding,
+    pr: u64,
+) -> Result<()> {
+    ensure!(
+        summary.id != 0
+            && summary
+                .user
+                .as_ref()
+                .is_some_and(|user| user.login == REVIEW_BOT)
+            && summary.body.starts_with(SUMMARY_PREFIX),
+        "CodeRabbit summary has no recognized provider identity"
+    );
+    let clean = summary_section(
+        &summary.body,
+        "<!-- recent_review_status_start -->",
+        "<!-- recent_review_status_end -->",
+    )?;
+    ensure!(
+        clean.trim() == "No actionable comments were generated in the recent review.",
+        "CodeRabbit summary does not report a clean completed review"
+    );
+    let updated: jiff::Timestamp = summary
+        .updated_at
+        .as_deref()
+        .context("CodeRabbit summary update time is missing")?
+        .parse()
+        .context("CodeRabbit summary update time is malformed")?;
+    completed_pr_status(statuses, binding, pr)?;
+    if let Some(review) = reviews
+        .iter()
+        .filter(|review| review.user.login == REVIEW_BOT)
+        .max_by_key(|review| review.id)
+    {
+        let submitted: jiff::Timestamp = review
+            .submitted_at
+            .as_deref()
+            .context("latest CodeRabbit review submission time is missing")?
+            .parse()
+            .context("latest CodeRabbit review submission time is malformed")?;
+        ensure!(
+            submitted <= updated,
+            "CodeRabbit summary precedes the latest submitted review"
+        );
+    }
+    let metadata = summary_section(&summary.body, RECENT_REVIEW, "<!-- recent_review_end -->")?;
+    review_metadata(metadata, &binding.head)?;
+    Ok(())
+}
+
+fn completed_pr_status<'a>(
+    statuses: &'a [CommitStatus],
+    binding: &Binding,
+    pr: u64,
+) -> Result<&'a CommitStatus> {
+    let status = statuses
+        .iter()
+        .filter(|status| status.creator.login == REVIEW_BOT && status.context == REVIEW_CONTEXT)
+        .max_by_key(|status| status.id)
+        .ok_or_else(|| {
+            missing_pr_review(
+                binding,
+                pr,
+                "current-head CodeRabbit terminal status is unavailable",
+            )
+        })?;
+    ensure!(
+        status.state == "success" && status.description == "Review completed",
+        "current-head CodeRabbit terminal is skipped, partial, pending, failed, or unknown"
+    );
+    Ok(status)
 }
 
 fn validate_pr_evidence(
@@ -1116,23 +1375,9 @@ fn validate_pr_evidence(
                 "PR has no submitted CodeRabbit review of its current head",
             )
         })?;
-    let status = statuses
-        .iter()
-        .filter(|status| status.creator.login == REVIEW_BOT && status.context == REVIEW_CONTEXT)
-        .max_by_key(|status| status.id)
-        .ok_or_else(|| {
-            missing_pr_review(
-                binding,
-                pr,
-                "current-head CodeRabbit terminal status is unavailable",
-            )
-        })?;
-    ensure!(
-        status.state == "success" && status.description == "Review completed",
-        "current-head CodeRabbit terminal is skipped, partial, pending, failed, or unknown"
-    );
+    let status = completed_pr_status(statuses, binding, pr)?;
     if review.commit_id == binding.head && !review.body.trim().is_empty() {
-        return validate_submitted_review(review, binding, assessment);
+        return validate_submitted_review(review, binding);
     }
     if review.commit_id == binding.head {
         ensure!(
@@ -1144,6 +1389,8 @@ fn validate_pr_evidence(
                     .is_some_and(|time| !time.is_empty()),
             "empty current-head CodeRabbit review is not a submitted approval"
         );
+        review_timestamp(review.submitted_at.as_deref())?;
+        return Ok(());
     }
     validate_carried_review(reviews, status, binding, assessment, pr, compare)
 }
@@ -1238,16 +1485,12 @@ fn missing_pr_review(binding: &Binding, pr: u64, cause: &str) -> platform::refus
         ]),
     )
     .evidence(format!(
-        "{}#{pr}: full review {}..{}; diff SHA256 {}",
+        "{}#{pr}: source {}..{}; diff SHA256 {}",
         binding.repository, binding.base, binding.head, binding.diff_sha256
     ))
 }
 
-fn validate_submitted_review(
-    review: &SubmittedReview,
-    binding: &Binding,
-    assessment: &Assessment,
-) -> Result<()> {
+fn validate_submitted_review(review: &SubmittedReview, binding: &Binding) -> Result<()> {
     ensure!(
         review.id != 0
             && review.commit_id == binding.head
@@ -1259,36 +1502,85 @@ fn validate_submitted_review(
             && !review.body.trim().is_empty(),
         "current-head CodeRabbit review is pending, dismissed, empty, or requests changes"
     );
-    let files = full_review_body(&review.body, &binding.base, &binding.head)?;
-    ensure!(
-        assessment
-            .evidence
-            .iter()
-            .all(|evidence| files.contains(&evidence.path)),
-        "assessment evidence paths were not selected by the completed full PR review"
-    );
+    review_metadata(complete_review_body(&review.body)?, &binding.head)?;
     Ok(())
 }
 
-fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTreeSet<String>> {
+fn valid_review_id(value: &str) -> bool {
+    value.len() == RUN_ID_LENGTH
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if RUN_ID_SEPARATORS.contains(&index) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+fn complete_review_body(body: &str) -> Result<&str> {
+    const GENERATED: &str = "<!-- coderabbit-ai-generated:v1 -->\n\n";
+    const PUBLICATION: &str = "\n\n<!-- coderabbit-review-publication v1 publication=";
+    const COMMENTS: &str = "**Actionable comments posted: ";
     const FOOTER: &str =
         "<!-- This is an auto-generated comment by CodeRabbit for review status -->";
-    const COMMENTS: &str = "**Actionable comments posted: ";
-    const RUN: &str = "- **Run ID**: `";
-    const FILES: &str = "<summary>📒 Files selected for processing (";
+    let generated = body.strip_prefix(GENERATED);
+    let body = generated.unwrap_or(body);
+    ensure!(
+        body.matches(PUBLICATION).count() <= 1,
+        "CodeRabbit publication metadata is ambiguous"
+    );
+    let body = if let Some((body, publication)) = body.rsplit_once(PUBLICATION) {
+        let (publication, attempt) = publication
+            .split_once(" attempt=")
+            .context("CodeRabbit publication identity missing")?;
+        let (attempt, batch) = attempt
+            .split_once(" batch=")
+            .context("CodeRabbit publication batch missing")?;
+        ensure!(
+            valid_review_id(publication) && valid_review_id(attempt) && batch == "1/1 -->",
+            "CodeRabbit publication is malformed or incomplete"
+        );
+        body
+    } else {
+        body
+    };
     ensure!(
         body.lines().last() == Some(FOOTER) && body.matches(FOOTER).count() == 1,
         "CodeRabbit submitted review has no recognized complete-review body"
     );
-    let comments = body
+    if let Some(comments) = body
         .lines()
         .next()
         .and_then(|line| line.strip_prefix(COMMENTS))
-        .and_then(|line| line.strip_suffix("**"))
-        .context("CodeRabbit actionable inventory missing")?;
-    comments
-        .parse::<usize>()
-        .context("CodeRabbit actionable inventory malformed")?;
+    {
+        comments
+            .strip_suffix("**")
+            .context("CodeRabbit actionable inventory malformed")?
+            .parse::<usize>()
+            .context("CodeRabbit actionable inventory malformed")?;
+    } else {
+        ensure!(
+            generated.is_some(),
+            "CodeRabbit actionable inventory missing"
+        );
+    }
+    Ok(body)
+}
+
+fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTreeSet<String>> {
+    let metadata = complete_review_body(body)?;
+    let (base, _) = review_range(metadata)?;
+    ensure!(
+        base == expected_base,
+        "prior PR review must cover its canonical PR base-to-head range"
+    );
+    review_metadata(metadata, head)
+}
+
+fn review_metadata(body: &str, head: &str) -> Result<BTreeSet<String>> {
+    const RUN: &str = "- **Run ID**: `";
+    const FILES: &str = "<summary>📒 Files selected for processing (";
+    const DECORATED_FILES: &str = " Files selected for processing: ";
     let unique = |prefix: &str| -> Result<&str> {
         let mut found = body.lines().filter_map(|line| line.strip_prefix(prefix));
         let value = found
@@ -1303,30 +1595,37 @@ fn full_review_body(body: &str, expected_base: &str, head: &str) -> Result<BTree
     let run = unique(RUN)?
         .strip_suffix('`')
         .context("CodeRabbit run identity malformed")?;
+    ensure!(valid_review_id(run), "CodeRabbit run identity malformed");
+    let (_, reviewed) = review_range(body)?;
+    ensure!(reviewed == head, "PR review must end at the current head");
+    let mut inventories = body.lines().filter(|line| {
+        line.starts_with(FILES) || (line.starts_with("<summary>") && line.contains(DECORATED_FILES))
+    });
+    let inventory = inventories
+        .next()
+        .context("CodeRabbit selected files missing")?;
     ensure!(
-        run.len() == RUN_ID_LENGTH
-            && run
-                .bytes()
-                .enumerate()
-                .all(|(index, byte)| if RUN_ID_SEPARATORS.contains(&index) {
-                    byte == b'-'
-                } else {
-                    byte.is_ascii_hexdigit()
-                }),
-        "CodeRabbit run identity malformed"
+        inventories.next().is_none(),
+        "CodeRabbit selected file inventory is ambiguous"
     );
-    let (base, reviewed) = review_range(body)?;
-    ensure!(
-        base == expected_base && reviewed == head,
-        "PR review must cover the full canonical PR base-to-head range"
-    );
-    let count = unique(FILES)?
-        .strip_suffix(")</summary>")
+    let count = inventory
+        .strip_prefix(FILES)
+        .and_then(|count| count.strip_suffix(")</summary>"))
+        .or_else(|| {
+            let (_, count) = inventory
+                .strip_suffix("</summary>")?
+                .rsplit_once(DECORATED_FILES)?;
+            if inventory.starts_with("<summary><strong>") {
+                count.strip_suffix("</strong>")
+            } else {
+                Some(count)
+            }
+        })
         .context("CodeRabbit selected file inventory malformed")?
         .parse::<usize>()?;
     ensure!(count > 0, "CodeRabbit selected no files for the PR review");
     let selected = body
-        .split_once(FILES)
+        .split_once(inventory)
         .context("CodeRabbit selected files missing")?
         .1
         .split_once("</details>")
@@ -1651,7 +1950,7 @@ pub(super) fn live_binding_at(
         signer,
     )?;
     validate_live_source(&checked, &live.source, None)?;
-    labels(&checked, &live.labels)?;
+    labels(&live.labels)?;
     Ok(checked)
 }
 
@@ -1836,23 +2135,10 @@ pub(super) fn admit_ready(
     target: &Target,
     github: &Github,
     pr: u64,
-    body: &str,
 ) -> Result<()> {
-    if checked.route == ReviewRoute::Pr && checked.repository_policy == ReviewPolicy::Importance {
-        ensure!(
-            !paused(checked)?,
-            "critical PR review is paused; keep this PR draft until its required route resumes"
-        );
-        ensure!(
-            !body.lines().any(|line| line.trim() == REVIEW_EXCLUSION),
-            "critical PR must remove review suppression before requesting review"
-        );
-        require_history(checked, target, github)?;
-        require_resolved_threads(github, target, pr, &checked.binding.head)
-    } else {
-        admit_publication(checked, body)?;
-        completion(checked, target, github, pr)
-    }
+    admit_publication(checked)?;
+    require_history(checked, target, github)?;
+    require_resolved_threads(github, target, pr, &checked.binding.head)
 }
 
 /// The assessment that `pr` last verified on this machine.
@@ -2205,12 +2491,9 @@ mod tests {
     #[test]
     fn a_published_document_refuses_local_workflow_evidence() {
         let recheck = || "pr-workflow check".to_owned();
-        crate::refuse_local_evidence("## Why\n\nA reason.\n\n@coderabbitai ignore\n", recheck)
-            .expect("the standing ignore line stays allowed");
         for body in [
             format!("Text.\n{PACKET_PREFIX} {{\"object\":\"o\",\"raw\":\"r\"}} -->\n"),
             format!("  {PACKET_PREFIX}{{}} -->"),
-            format!("Text.\n{}\n", crate::PAUSE_EXCLUSION),
         ] {
             let error = crate::refuse_local_evidence(&body, recheck).unwrap_err();
             assert!(
@@ -2247,6 +2530,176 @@ mod tests {
         Ok((binding, assessment, review))
     }
 
+    fn summary_fixture() -> Result<(Binding, Assessment, ReviewSummary)> {
+        let (binding, assessment, review) = review_fixture()?;
+        let metadata = review
+            .body
+            .replace("**Actionable comments posted: 0**\n", "")
+            .replace(
+                "<!-- This is an auto-generated comment by CodeRabbit for review status -->",
+                "",
+            )
+            .replace(
+                "<summary>📒 Files selected for processing (1)</summary>",
+                "<summary><strong> Files selected for processing: 1</strong></summary>",
+            );
+        let summary = ReviewSummary {
+            id: 1,
+            user: Some(Bot {
+                login: REVIEW_BOT.into(),
+            }),
+            updated_at: Some("2026-10-14T00:00:30Z".into()),
+            body: format!(
+                "<!-- coderabbit-ai-generated:v1 -->\n\n<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- recent_review_status_start -->\nNo actionable comments were generated in the recent review.\n<!-- recent_review_status_end -->\n{RECENT_REVIEW}\n{metadata}\n<!-- recent_review_end -->"
+            ),
+        };
+        Ok((binding, assessment, summary))
+    }
+
+    #[test]
+    fn automatic_incremental_reviews_accept_current_head_and_selected_changes() -> Result<()> {
+        let (binding, assessment, mut review) = review_fixture()?;
+        review.body = review
+            .body
+            .replace(&binding.base, &"d".repeat(40))
+            .replace("README.md", "changed.rs");
+        validate_pr_evidence(
+            &[review],
+            &[status(1, "success", "Review completed")],
+            &binding,
+            &assessment,
+            17,
+            no_comparison,
+        )
+    }
+
+    #[test]
+    fn automatic_incremental_clean_summaries_accept_provider_postprocessing() -> Result<()> {
+        let (binding, assessment, mut summary) = summary_fixture()?;
+        summary.body = summary
+            .body
+            .replace(&binding.base, &"d".repeat(40))
+            .replace("README.md", "changed.rs");
+        summary.updated_at = Some("2026-10-14T00:02:00Z".into());
+        validate_pr_evidence_with_summaries(
+            &[],
+            &[status(1, "success", "Review completed")],
+            &[summary],
+            &binding,
+            &assessment,
+            17,
+            no_comparison,
+        )
+    }
+
+    #[test]
+    fn clean_summaries_require_complete_current_source_metadata() -> Result<()> {
+        let (binding, _, mut summary) = summary_fixture()?;
+        let statuses = [status(1, "success", "Review completed")];
+        validate_clean_summary(&summary, &[], &statuses, &binding, 17)?;
+        let body = summary.body.clone();
+        for invalid in [
+            body.replace("coderabbit-ai-generated:v1", "unrecognized"),
+            body.replace(
+                "No actionable comments were generated in the recent review.",
+                "Review skipped.",
+            ),
+            body.replace("<!-- recent_review_status_end -->", ""),
+            body.replace(RECENT_REVIEW, &format!("{RECENT_REVIEW}\n{RECENT_REVIEW}")),
+            body.replace("<!-- recent_review_end -->", ""),
+            body.replace("00000000-0000-0000-0000-000000000001", "invalid-run"),
+            body.replace(&binding.head, &"e".repeat(40)),
+            body.replace(
+                "Files selected for processing: 1",
+                "Files selected for processing: 2",
+            ),
+            body.replace("* `README.md`", "* `README.md`\n* `README.md`"),
+            body.replace("</details>", ""),
+        ] {
+            summary.body = invalid;
+            assert!(validate_clean_summary(&summary, &[], &statuses, &binding, 17).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn clean_summaries_require_provider_identity_and_fresh_completion() -> Result<()> {
+        let (binding, _, _) = summary_fixture()?;
+        let statuses = [status(1, "success", "Review completed")];
+        for (id, author, updated) in [
+            (0, Some(REVIEW_BOT), Some("2026-10-14T00:00:30Z")),
+            (1, None, Some("2026-10-14T00:00:30Z")),
+            (1, Some("untrusted-user"), Some("2026-10-14T00:00:30Z")),
+            (1, Some(REVIEW_BOT), None),
+            (1, Some(REVIEW_BOT), Some("invalid-time")),
+        ] {
+            let (_, _, mut summary) = summary_fixture()?;
+            summary.id = id;
+            summary.user = author.map(|login| Bot {
+                login: login.into(),
+            });
+            summary.updated_at = updated.map(String::from);
+            assert!(validate_clean_summary(&summary, &[], &statuses, &binding, 17).is_err());
+        }
+        let (_, _, summary) = summary_fixture()?;
+        for statuses in [
+            vec![],
+            vec![status(1, "pending", "Review in progress")],
+            vec![status(1, "success", "Review skipped")],
+            vec![
+                status(1, "success", "Review completed"),
+                status(2, "failure", "Review failed"),
+            ],
+        ] {
+            assert!(validate_clean_summary(&summary, &[], &statuses, &binding, 17).is_err());
+        }
+        let (_, _, mut later) = review_fixture()?;
+        later.submitted_at = Some("2026-10-14T00:00:40Z".into());
+        assert!(validate_clean_summary(&summary, &[later], &statuses, &binding, 17).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn published_review_layout_preserves_source_and_complete_inventory() -> Result<()> {
+        let (binding, _, mut review) = review_fixture()?;
+        let body = format!(
+            "<!-- coderabbit-ai-generated:v1 -->\n\n**Actionable comments posted: 0**\n\n- **Run ID**: `189f0351-3902-4d47-bb7a-8f8f79c45069`\nReviewing files that changed from the base of the PR and between {} and {}.\n<details>\n<summary><picture><img src=\"icon.svg\"></picture> Files selected for processing: 1</summary>\n<dl>\n<dd>\n<br>\n\n* `README.md`\n\n</dd>\n</dl>\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit for review status -->\n\n<!-- coderabbit-review-publication v1 publication=4f08a048-9572-48c4-bc51-9fd7a20efccd attempt=8083a761-44ec-4a55-a9d4-a9bef65ae746 batch=1/1 -->",
+            binding.base, binding.head
+        );
+        review.body = body.clone();
+        validate_submitted_review(&review, &binding)?;
+        review.body = body.replace("**Actionable comments posted: 0**", "\n\n---");
+        validate_submitted_review(&review, &binding)?;
+        let (without_publication, _) = body
+            .rsplit_once("\n\n<!-- coderabbit-review-publication ")
+            .context("fixture publication metadata missing")?;
+        review.body = without_publication.replace("**Actionable comments posted: 0**", "");
+        validate_submitted_review(&review, &binding)?;
+        for invalid in [
+            body.replace("batch=1/1", "batch=1/2"),
+            body.replace("publication=4f08a048", "publication=invalid"),
+            body.replace("attempt=8083a761", "attempt=invalid"),
+            body.replace(
+                "Files selected for processing: 1",
+                "Files selected for processing: 2",
+            ),
+            body.replace("* `README.md`", "* `README.md`\n* `README.md`"),
+            body.replace(&binding.head, &"d".repeat(40)),
+            body.replace("for review status", "review in progress"),
+            body.replace("</details>", ""),
+            body.replace(
+                "<summary>",
+                "<summary> Files selected for processing: 1</summary>\n<summary>",
+            ),
+            body.replace("<!-- coderabbit-ai-generated:v1 -->", "Review skipped."),
+            format!("{body}\nUnexpected trailing content."),
+        ] {
+            review.body = invalid;
+            assert!(validate_submitted_review(&review, &binding).is_err());
+        }
+        Ok(())
+    }
+
     fn status(id: u64, state: &str, description: &str) -> CommitStatus {
         CommitStatus {
             id,
@@ -2258,6 +2711,151 @@ mod tests {
             description: description.into(),
             created_at: Some("2026-10-14T00:01:00Z".into()),
         }
+    }
+
+    fn check_run(id: u64, head: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id":id,"app":{"id":REVIEW_APP_ID,"slug":GRAPHQL_BOT},
+            "name":REVIEW_CONTEXT,"head_sha":head,
+            "status":"completed","conclusion":"success",
+            "started_at":"2026-10-14T00:01:00Z",
+            "completed_at":"2026-10-14T00:02:00Z",
+            "output":{"summary":CHECK_RUN_COMPLETION}
+        })
+    }
+
+    #[test]
+    fn check_runs_require_provider_head_complete_result_and_valid_times() -> Result<()> {
+        let (binding, _, _) = review_fixture()?;
+        for (field, value) in [
+            ("id", serde_json::json!(0)),
+            ("app", serde_json::json!({"id":1,"slug":GRAPHQL_BOT})),
+            (
+                "app",
+                serde_json::json!({"id":REVIEW_APP_ID,"slug":"other"}),
+            ),
+            ("app", serde_json::Value::Null),
+            ("name", serde_json::json!("unrelated check")),
+            ("head_sha", serde_json::json!("f".repeat(40))),
+            ("status", serde_json::json!("in_progress")),
+            ("status", serde_json::json!("queued")),
+            ("status", serde_json::json!("unknown")),
+            ("conclusion", serde_json::Value::Null),
+            ("conclusion", serde_json::json!("failure")),
+            ("conclusion", serde_json::json!("skipped")),
+            ("conclusion", serde_json::json!("neutral")),
+            ("conclusion", serde_json::json!("cancelled")),
+            ("started_at", serde_json::Value::Null),
+            ("started_at", serde_json::json!("unknown")),
+            ("completed_at", serde_json::Value::Null),
+            ("completed_at", serde_json::json!("unknown")),
+            ("completed_at", serde_json::json!("2026-10-14T00:00:00Z")),
+            ("output", serde_json::Value::Null),
+            (
+                "output",
+                serde_json::json!({"summary":"Result: Success - Review skipped"}),
+            ),
+            (
+                "output",
+                serde_json::json!({"summary":"Result: Success - Review partially completed"}),
+            ),
+        ] {
+            let mut run = check_run(1, &binding.head);
+            run[field] = value;
+            if let Ok(statuses) = include_check_runs(
+                vec![],
+                &[serde_json::from_value(run.clone())?],
+                &binding.head,
+            ) {
+                assert!(
+                    completed_pr_status(&statuses, &binding, 17).is_err(),
+                    "{run}"
+                );
+            }
+        }
+        let statuses = include_check_runs(
+            vec![],
+            &[serde_json::from_value(check_run(1, &binding.head))?],
+            &binding.head,
+        )?;
+        completed_pr_status(&statuses, &binding, 17)?;
+        Ok(())
+    }
+
+    #[test]
+    fn a_later_check_run_replaces_success_and_unrelated_apps_cannot_replace_it() -> Result<()> {
+        let (binding, _, _) = review_fixture()?;
+        let mut failed = check_run(2, &binding.head);
+        failed["conclusion"] = serde_json::json!("failure");
+        let statuses = include_check_runs(
+            vec![],
+            &[
+                serde_json::from_value(failed)?,
+                serde_json::from_value(check_run(1, &binding.head))?,
+            ],
+            &binding.head,
+        )?;
+        assert!(completed_pr_status(&statuses, &binding, 17).is_err());
+        let mut unrelated = check_run(3, &binding.head);
+        unrelated["app"]["id"] = serde_json::json!(1);
+        unrelated["status"] = serde_json::json!("in_progress");
+        let statuses = include_check_runs(
+            vec![],
+            &[
+                serde_json::from_value(unrelated)?,
+                serde_json::from_value(check_run(1, &binding.head))?,
+            ],
+            &binding.head,
+        )?;
+        completed_pr_status(&statuses, &binding, 17)?;
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_completion_formats_use_event_times_without_comparing_provider_ids() -> Result<()> {
+        let (binding, _, _) = review_fixture()?;
+        let mut legacy = status(u64::MAX, "pending", "Review in progress");
+        let statuses = include_check_runs(
+            vec![legacy],
+            &[serde_json::from_value(check_run(1, &binding.head))?],
+            &binding.head,
+        )?;
+        completed_pr_status(&statuses, &binding, 17)?;
+        legacy = status(1, "failure", "Review failed");
+        legacy.created_at = Some("2026-10-14T00:03:00Z".into());
+        let statuses = include_check_runs(
+            vec![legacy],
+            &[serde_json::from_value(check_run(u64::MAX, &binding.head))?],
+            &binding.head,
+        )?;
+        assert!(completed_pr_status(&statuses, &binding, 17).is_err());
+        for created in ["2026-10-14T00:02:00Z", "unknown"] {
+            let mut legacy = status(1, "failure", "Review failed");
+            legacy.created_at = Some(created.into());
+            assert!(
+                include_check_runs(
+                    vec![legacy],
+                    &[serde_json::from_value(check_run(1, &binding.head))?],
+                    &binding.head
+                )
+                .is_err()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn carried_check_run_completion_keeps_the_review_start_boundary() -> Result<()> {
+        let (binding, assessment, review) = earlier_review_fixture()?;
+        let mut run = check_run(1, &binding.head);
+        run["started_at"] = serde_json::json!("2026-10-13T23:59:00Z");
+        let statuses = include_check_runs(vec![], &[serde_json::from_value(run)?], &binding.head)?;
+        let error = validate_pr_evidence(&[review], &statuses, &binding, &assessment, 17, |_| {
+            Ok(compared_review(&binding, &[], true))
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("not created after"), "{error:#}");
+        Ok(())
     }
 
     fn no_comparison(_: &SubmittedReview) -> Result<ComparedReview> {
@@ -2307,8 +2905,8 @@ mod tests {
     }
 
     #[test]
-    fn empty_current_head_approval_reuses_the_prior_full_review() -> Result<()> {
-        let (binding, assessment, review) = earlier_review_fixture()?;
+    fn empty_current_head_approval_needs_no_prior_review_body() -> Result<()> {
+        let (binding, assessment, _) = earlier_review_fixture()?;
         let approval = SubmittedReview {
             id: 2,
             user: Bot {
@@ -2320,12 +2918,12 @@ mod tests {
             body: String::new(),
         };
         validate_pr_evidence(
-            &[review, approval],
+            &[approval],
             &[status(1, "success", "Review completed")],
             &binding,
             &assessment,
             17,
-            |_| Ok(compared_review(&binding, &["README.md"], false)),
+            no_comparison,
         )
     }
 
@@ -2541,24 +3139,23 @@ mod tests {
     }
 
     #[test]
-    fn critical_review_requires_full_range_and_severity_path_coverage() -> Result<()> {
-        let (binding, assessment, mut review) = review_fixture()?;
-        validate_submitted_review(&review, &binding, &assessment)?;
+    fn submitted_review_requires_current_head_and_complete_metadata() -> Result<()> {
+        let (binding, _, mut review) = review_fixture()?;
+        validate_submitted_review(&review, &binding)?;
         let original = review.body.clone();
         for body in [
-            original.replace(&binding.base, &"d".repeat(40)),
+            original.replace("**Actionable comments posted: 0**\n", ""),
             original.replace(&binding.head, &"e".repeat(40)),
-            original.replace("README.md", "other.md"),
             original.replace("* `README.md`", "* `README.md`\n* `README.md`"),
             format!("Review skipped due to rate limit.\n{original}"),
             "Pre-merge checks failed. Please resolve the failing checks before merging.".into(),
         ] {
             review.body = body;
-            assert!(validate_submitted_review(&review, &binding, &assessment).is_err());
+            assert!(validate_submitted_review(&review, &binding).is_err());
         }
         review.body = original;
         review.state = "DISMISSED".into();
-        assert!(validate_submitted_review(&review, &binding, &assessment).is_err());
+        assert!(validate_submitted_review(&review, &binding).is_err());
         Ok(())
     }
 

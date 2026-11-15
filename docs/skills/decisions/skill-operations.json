@@ -1,5 +1,5 @@
 {
-  "revision": "a7dbe2988a0e9719aa64f78e096d863c6330c843ea82943bc69d301db3cad190",
+  "revision": "c11b87d0280d35d94efd4190dbd17d923844d4608fa56e367b8aca991456cc9c",
   "outcome": "implemented",
   "reason": "Keep catalog discovery, dependency loading, observations, and evidence-backed maintenance separate from native installation.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [

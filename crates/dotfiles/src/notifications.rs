@@ -110,7 +110,7 @@ pub enum Action {
         #[arg(long)]
         output: PathBuf,
     },
-    /// Preserve an owner frequency override across ordinary profile applications.
+    /// Preserve a user frequency override across ordinary profile applications.
     Frequency { mode: Mode },
     /// Intentionally play one of the fixed prepared presets.
     Test {

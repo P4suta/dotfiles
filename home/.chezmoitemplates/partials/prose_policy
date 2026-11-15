@@ -3,6 +3,9 @@
 Use the shared editorial-assurance skill for replies, prose, documentation, comments, and authored artifacts.
 Use ideal-specification to derive durable writing rules from governing standards and intended outcomes.
 Follow the shared house policy under the dotfiles-managed prose configuration.
+Don't call the user `owner`, `Owner`, `オーナー`, or `所有者`.
+Address the user directly or describe the action without assigning a personal role.
+Preserve technical ownership terms, literal identifiers, and source quotations.
 Use canonical English terminology from the applicable technical specification or project's official documentation.
 Resolve a term's meaning and technical role before choosing its form, and keep one form per concept within its scope.
 Preserve the exact spelling and case of API identifiers, commands, UI labels, product names, and literal source quotations.

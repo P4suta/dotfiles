@@ -120,7 +120,7 @@ pub fn report(records: &str) -> Option<String> {
         )
         .ok()?;
     }
-    report.push_str("Next action: report these hook failures to the owner as dotfiles defects, or propose a fix.\n");
+    report.push_str("Next action: report these hook failures to the user as dotfiles defects, or propose a fix.\n");
     Some(report)
 }
 
@@ -158,7 +158,7 @@ mod tests {
             report,
             "The dotfiles `claude-bash` hook failed 2 times since the last session start. Most recent cause: panicked at main.rs\n\
              The dotfiles `issue-guard` hook failed once since the last session start. Most recent cause: no output\n\
-             Next action: report these hook failures to the owner as dotfiles defects, or propose a fix.\n"
+             Next action: report these hook failures to the user as dotfiles defects, or propose a fix.\n"
         );
         assert_eq!(super::report(&take(&log)?), None);
         Ok(())

@@ -23,7 +23,7 @@ pub struct Omitted {
 }
 
 const TOOLCHAIN: &str = "builds a full language toolchain that the rehearsal host does not need to prove orchestration; native application exercises it";
-const PRIVATE_SOURCE: &str = "clones a private repository with the owner's GitHub credentials, which a disposable host must not hold";
+const PRIVATE_SOURCE: &str = "clones a private repository with the user's GitHub credentials, which a disposable host must not hold";
 
 /// The setup scripts the rehearsal host of `profile` skips.
 #[must_use]
@@ -259,7 +259,7 @@ pub(crate) fn seed_history(home: &Path) -> Result<Vec<(PathBuf, Vec<u8>)>> {
 ///
 /// # Errors
 ///
-/// Returns an error unless the caller sets `disposable_host` and either `CI` holds `true` or `DOTFILES_DISPOSABLE_HOST` holds `1` on a local host the owner gave up.
+/// Returns an error unless the caller sets `disposable_host` and either `CI` holds `true` or `DOTFILES_DISPOSABLE_HOST` holds `1` on a local host the user gave up.
 /// Returns an error when an apply or verification round fails, or when installation changed the seeded machine-local history.
 /// Returns an error when the repeated round would rerun a script whose inputs stayed the same.
 pub fn run(root: &Path, disposable_host: bool) -> Result<()> {

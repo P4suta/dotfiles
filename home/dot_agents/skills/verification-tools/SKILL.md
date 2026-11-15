@@ -45,7 +45,7 @@ Use `executable-policy` to verify that the actual gate rejects a representative 
 Apply the bounded-tool rule in `formal-assurance` through the project's bounded container entrypoint or `dotfiles bounded run`, and keep GitHub Actions native.
 Use `resource-coordination` for expensive campaigns, because adopting a tool grants no unbounded fuzz run or paid service.
 
-When a new tool or configuration proves useful, inventory the owner's active projects for the same uncovered property.
+When a new tool or configuration proves useful, inventory the user's active projects for the same uncovered property.
 Carry the proven behavior to compatible projects in small independent changes, and adapt language versions, targets, and check entry points.
 Track adoption, incompatibility with concrete evidence, and pending work instead of assuming every repository migrated.
 New projects inherit the current capability baseline, and an old project's absence from a recent task grants no permanent exemption.

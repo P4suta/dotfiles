@@ -49,7 +49,7 @@ See [Apple's Developer ID certificate guide](https://developer.apple.com/help/ac
 
 Match PKCS12 validation to the importer the release workflow uses.
 The legacy `security import` command calls `SecKeychainItemImport` and encodes its `-P` passphrase as ASCII, so a memory-only `SecPKCS12Import` success proves nothing about it.
-For such workflows, use a Rust native-import helper with the owner's protected input and the expected leaf certificate's SHA-256.
+For such workflows, use a Rust native-import helper with the user's protected input and the expected leaf certificate's SHA-256.
 Require a native import, the expected leaf backed by its private key, cleanup of the keychain and temporary directory, and an unchanged search list.
 Use an encrypted private temporary keychain, and leave the login keychain, default keychain, and trust settings unchanged.
 

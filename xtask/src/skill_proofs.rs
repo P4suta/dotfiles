@@ -1125,7 +1125,7 @@ pub(crate) fn verified_image_id(image: &str) -> Result<String> {
         .to_owned())
 }
 
-/// Runs the complete proof campaign through the owner's bounded route or native CI.
+/// Runs the complete proof campaign through the user's bounded route or native CI.
 ///
 /// # Errors
 ///
@@ -1142,7 +1142,7 @@ pub fn verify(root: &Path) -> Result<()> {
 pub fn verify_window(root: &Path, sources: &[String], window: std::num::NonZeroU32) -> Result<()> {
     ensure!(
         dotfiles::bounded::requires_container() || cfg!(windows),
-        "an owner proof window requires the bounded container route"
+        "a local proof window requires the bounded container route"
     );
     selected_manifest(root, sources)?;
     let campaign = if sources.is_empty() {

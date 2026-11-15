@@ -1,7 +1,7 @@
 {
-  "revision": "129a62e1c35a78429b7bc3810b81cf7a145ec992306f86b02b65a942092cbe3b",
+  "revision": "c5edb95d7b7729a0703c19906d4ba0d6c632a78f179167fa435f05047a773e50",
   "outcome": "implemented",
-  "reason": "Support an explicit package-scoped Hex token path when native identity remains unavailable or unsuitable.\nVerify production availability before directing the owner through identity registration.\nPreparation requires no live publishing credential, and delivery evidence grants no publication authority.",
+  "reason": "Support an explicit package-scoped Hex token path when native identity remains unavailable or unsuitable.\nVerify production availability before directing the user through identity registration.\nPreparation requires no live publishing credential, and delivery evidence grants no publication authority.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "home/dot_agents/skills/registry-publishing/SKILL.md",
     "docs/adr/purpose-scoped-doppler-workload-identities.md"

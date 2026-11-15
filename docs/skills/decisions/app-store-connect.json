@@ -1,0 +1,11 @@
+{
+  "revision": "059bfd95c37b50e59d16d414c01dc9531aeb46acf20d5255c1574f63f868c35b",
+  "outcome": "implemented",
+  "reason": "Check every rejected item before a ready handoff while preserving review history and separate resubmission authority.",
+  "evidence": [
+    "home/dot_agents/skills/app-store-connect/SKILL.md",
+    "home/dot_agents/skills/app-store-connect/references/creative-assets.md",
+    "home/dot_agents/skills/app-store-connect/references/review-recovery.md"
+  ],
+  "revisit": null
+}

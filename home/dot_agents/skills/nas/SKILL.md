@@ -9,7 +9,7 @@ metadata:
 
 # NAS artifacts
 
-Resolve the storage goal and use the owner's existing authorized NAS connection.
+Resolve the storage goal and use the user's existing authorized NAS connection.
 Keep large datasets, downloaded source documents, generated models, and private operational receipts out of public Git.
 Keep reproducible commands, evaluated results, small required evidence, and an archive manifest in the project.
 Moving evidence to private storage must leave every public claim supported and every required gate passing.

@@ -93,7 +93,7 @@ pub fn generation(assets: LicenseAssets) -> Generation {
 
 /// The first drift to fix.
 /// The license and the consent decide what the generated files may say, so they come first.
-/// The description comes last, because only the owner's account changes it.
+/// The description comes last, because only the user's account changes it.
 #[must_use]
 #[expect(
     clippy::fn_params_excessive_bools,

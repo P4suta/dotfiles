@@ -9,7 +9,7 @@ description: >-
 
 Define the complete experience for end users, library consumers, maintainers, and people diagnosing failures.
 Derive the observable behavior, invariants, transitions, and completion evidence from that experience before optimizing around the current implementation.
-Choose a coherent design within the authorized goal without asking the owner about routine details.
+Choose a coherent design within the authorized goal without asking the user about routine details.
 
 Inspect the affected producers, consumers, variants, platforms, and verification mechanisms together.
 Find shared causes and the authoritative boundaries that remove a whole defect family.

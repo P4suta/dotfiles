@@ -374,7 +374,7 @@ pub fn read_cli_receipt(path: &Path) -> Result<SignedReviewReceipt> {
     json(&read_bounded(path, CLI_RECEIPT_LIMIT)?)
 }
 
-/// Authenticates the owner receipt and rechecks its original completion at this exact scope.
+/// Authenticates the signed review receipt and rechecks its original completion at this exact scope.
 ///
 /// # Errors
 /// Refuses invalid signatures, stale producer or scope, mismatched Git closure, or incomplete review output.
@@ -388,7 +388,7 @@ pub fn require_cli_evidence(
 }
 
 /// Reads authenticated historical findings without supplying current review completion credit.
-/// The owner signature attests the original guarded producer record.
+/// The receipt signature attests the original guarded producer record.
 ///
 /// # Errors
 /// Refuses invalid signatures, another original scope, unsupported producers, or incomplete raw output.

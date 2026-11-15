@@ -745,7 +745,7 @@ fn script_refusal(
     Ok(findings)
 }
 
-/// Appends an admitted bypass to the owner's Git bypass log, or under unit tests to the thread's own record.
+/// Appends an admitted bypass to the user's Git bypass log, or under unit tests to the thread's own record.
 fn record_bypass(reason: &str, words: &[String]) {
     #[cfg(not(test))]
     dotguard::bypass::record("bypassed", dotguard::bypass::Rule::Legacy, reason, words);
@@ -1619,7 +1619,7 @@ mod tests {
     }
 
     thread_local! {
-        /// The bypasses a test admitted, which stay out of the owner's Git bypass log.
+        /// The bypasses a test admitted, which stay out of the user's Git bypass log.
         pub(super) static BYPASSES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
     }
 

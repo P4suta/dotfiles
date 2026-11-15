@@ -46,6 +46,9 @@ fn reply_checks_need_no_catalog_request_or_evidence_but_still_check_language() -
     ] {
         let mut child = fixture_process::command(env!("CARGO_BIN_EXE_dotfiles"), home.path())
             .current_dir(home.path())
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .env("PROSE_CONFIG", home.path().join(".config/prose"))
             .args(["assure", "reply", "--reply-language", "Japanese"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

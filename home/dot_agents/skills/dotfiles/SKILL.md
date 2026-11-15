@@ -9,7 +9,7 @@ metadata:
 
 # Dotfiles across machines
 
-A shared dotfiles change targets the owner's Mac, Linux, and Windows hosts unless the user narrows it.
+A shared dotfiles change targets the user's Mac, Linux, and Windows hosts unless the user narrows it.
 Keep the intended behavior on each host, with its own paths, executables, shell syntax, and installation methods.
 For a change specific to one OS, state why the other hosts need nothing.
 

@@ -1,7 +1,7 @@
 ---
 name: oss-readme
 description: >-
-  Write the repository.toml that generates an owner repository's README, license files, and GitHub description.
+  Write the repository.toml that generates a personal repository's README, license files, and GitHub description.
   Use for README changes, not architecture records or a full documentation site.
 metadata:
   tools: "tools.toml"

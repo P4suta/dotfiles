@@ -27,7 +27,7 @@ pub const fn runs(freshness: Freshness) -> bool {
 /// The origin of the checkout to compare with, most specific first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Origin {
-    /// The owner or a caller named it.
+    /// The user or a caller named it.
     Explicit,
     /// The dotfiles checkout that contains the working directory of the tool.
     WorkingCopy,
@@ -50,7 +50,7 @@ pub const fn origin(explicit: bool, working_copy: bool, build_checkout: bool) ->
 }
 
 /// The rebuild touches only a recorded installation from this checkout whose content no longer matches.
-/// A tool that the owner never installed stays absent.
+/// A tool that the user never installed stays absent.
 #[must_use]
 pub const fn reinstalls(recorded: bool, source_matches: bool, recorded_matches: bool) -> bool {
     recorded && source_matches && !recorded_matches

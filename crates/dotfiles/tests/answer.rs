@@ -38,10 +38,14 @@ fn the_check_help_names_the_evidence_format_reference() {
     assert!(stdout.contains("references/evidence-format.md"), "{stdout}");
 }
 use std::io::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 
 const PROPOSAL_PLAN: &str = "<proposed_plan>\n# Ownership verification\n\n## Changes\n\nAdd the supplied configuration.\n\n```json\n{\"enabled\":true}\n```\n</proposed_plan>\n";
+
+fn prose_config() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/prose")
+}
 
 fn proposal_evidence(draft: &str) -> serde_json::Value {
     let claims: Vec<_> = draft
@@ -111,6 +115,7 @@ fn the_real_hook_binds_a_checked_plan_to_its_exact_draft_and_request() {
         .arg(&evidence)
         .env("HOME", home.path())
         .env("USERPROFILE", home.path())
+        .env("PROSE_CONFIG", prose_config())
         .output()
         .unwrap();
     assert!(
@@ -198,6 +203,7 @@ fn hook(home: &Path, point: &str, input: &str) -> Output {
         .args(["answer", point])
         .env("HOME", home)
         .env("USERPROFILE", home)
+        .env("PROSE_CONFIG", prose_config())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -244,6 +250,7 @@ fn the_real_hook_accepts_only_the_current_checked_draft() {
         .arg(&evidence)
         .env("HOME", home.path())
         .env("USERPROFILE", home.path())
+        .env("PROSE_CONFIG", prose_config())
         .output()
         .unwrap();
     assert!(

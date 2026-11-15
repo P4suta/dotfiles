@@ -34,21 +34,21 @@ Keep project secret names, credential references, signing identities, fingerprin
 ## Handle credentials through protected inputs
 
 Keep private keys, certificate exports, passwords, and TOTP secrets in 1Password or another approved credential store.
-The owner manages 1Password, so never open the vault, list items, read fields, or inspect secret QR codes.
-Prepare named Doppler inputs, and let the owner enter the values through the protected UI.
+The user manages 1Password, so never open the vault, list items, read fields, or inspect secret QR codes.
+Prepare named Doppler inputs, and let the user enter the values through the protected UI.
 Use `doppler` for purpose-scoped CI delivery, and confirm readiness through names-only metadata.
 Keep one canonical credential per shared signing identity and reference only the fields each repository and stage needs.
 Separate Windows signing, macOS signing, and notarization completion credentials.
 Keep public publisher and certificate expectations with each project, and keep machine keychains local.
 Never paste secrets into chat, commits, reports, command arguments, or shell history.
 
-When a project still needs a GitHub secret, have the owner run `gh secret set NAME --repo OWNER/REPO --env ENVIRONMENT` with its hidden prompt.
+When a project still needs a GitHub secret, have the user run `gh secret set NAME --repo OWNER/REPO --env ENVIRONMENT` with its hidden prompt.
 Never pipe an unverified or empty credential lookup into `gh secret set`, because `pipefail` reports the failure only after the empty value overwrites the secret.
 Create sensitive temporary files with private permissions, and remove them afterward.
 Confirm secret names with `gh secret list`.
 
 Keep account login MFA, eSigner certificate TOTP, and enrollment PINs distinct.
-Have the owner recover an existing eSigner enrollment secret instead of resetting it, because a reset breaks other machines' signing automation.
+Have the user recover an existing eSigner enrollment secret instead of resetting it, because a reset breaks other machines' signing automation.
 
 ## Finish the authorized signing work
 

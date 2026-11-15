@@ -51,7 +51,7 @@ fn merge(existing: &str, key: &str) -> crate::host_setup_rules::AuthorizedKeys {
 }
 
 /// `/inheritance:r` drops inherited ACEs, and `/grant:r` replaces instead of adding.
-/// The owner needs a second icacls call, because it rejects `/setowner` together with `/grant`, with exit 87.
+/// Setting the file owner needs a second icacls call, because it rejects `/setowner` together with `/grant`, with exit 87.
 fn restrict(path: &Path) -> Result<()> {
     let mut acl = env::command("icacls.exe");
     acl.arg(path)

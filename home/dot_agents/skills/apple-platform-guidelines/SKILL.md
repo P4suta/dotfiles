@@ -16,7 +16,9 @@ Record deliberate departures with their reason and verification limits.
 For macOS, load [macOS platform guidelines](../macos-platform-guidelines/SKILL.md).
 For iOS, iPadOS, tvOS, watchOS, or visionOS, read [platform behavior](references/platform-behavior.md).
 Read [shared sources](references/shared-sources.md) for feedback, privacy, logging, localization, or networking decisions.
-Apply `source-bound-interface-design` and the owner's visual preferences within the current artifact's explicit requirements.
+Read [interface tests on a simulator](references/ui-testing.md) before writing or filtering UI tests.
+For an artifact that takes Apple's system design by explicit choice, load [liquid-glass-design](../liquid-glass-design/SKILL.md).
+Apply `source-bound-interface-design` and the user's visual preferences within the current artifact's explicit requirements.
 Prefer native system behavior when the artifact calls for standard platform colors, selection, materials, or accessibility accommodations.
 Preserve system-owned chrome and the platform's default control metrics and placement.
 Keep app content enlargement separate from window and navigation controls owned by the system.

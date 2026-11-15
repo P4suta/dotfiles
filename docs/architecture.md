@@ -92,7 +92,7 @@ An [explicit machine-local experimental opt-in](reference/experimental-skill-mai
 The opt-in leaves required repository verification and historical maintenance records unchanged.
 Ordinary agents read the applicable skill instructions directly.
 
-`home/dot_config/assure/shapes.toml` names the code shapes every repository on these machines must verify: pure decisions, protocols, and parsers, each with the signals that find it and the owner it needs.
+`home/dot_config/assure/shapes.toml` names the code shapes every repository on these machines must verify: pure decisions, protocols, and parsers, each with the signals that find it and the verification owner it needs.
 The same gate applies the anti-pattern catalog beside it, and counts each finding as a gap.
 The TypeScript number rule leaves declaration files, tests, stubs, and fixtures to their generators and test checks.
 For generated TypeScript, the survey resolves repository `.gitattributes` from the same working tree, index, or commit as the source.
@@ -102,18 +102,18 @@ The isolated context ignores owner and system attribute overrides.
 Only `linguist-generated` set or `true` omits TypeScript from this catalog, and other values keep the ordinary checks.
 Git's attribute semantics remain an external assumption checked by native regression fixtures, while the pure marker decision has a source-bound proof obligation.
 The attribute fuzz corpus uses line-separated fields that the target converts to NUL separators and checks through decoding and canonical marker encoding.
-The owner's configuration names each repository's owners and budgets under `~/.config/assure/repos/`, as [the owner-map decision](adr/keep-the-assure-owner-map-out-of-projects.md) describes.
+The user's configuration names each repository's owners and budgets under `~/.config/assure/repos/`, as [the owner-map decision](adr/keep-the-assure-owner-map-out-of-projects.md) describes.
 An exemption sits in the comment block that precedes the site it exempts.
 Managed sessions run `dotfiles assure remind` and require a short reason based on completed project checks.
 Agents resolve required blocked checks or ask the user for a concrete decision before completion.
 The [confirmation decision](adr/confirm-verification-with-a-short-reason.md) removes automatic answer-evidence submissions and owner-side code-shape holds from completion and publication.
 Explicit `dotfiles assure start`, `dotfiles assure stop`, and answer-evidence commands keep their inspection contracts.
-Claude Code and Codex pass the owner's `reply_language` to `dotfiles assure reply` to check final reply prose, with at most one continuation, as [the language decision](adr/check-owner-reply-language-at-stop.md) describes.
+Claude Code and Codex pass the user's `reply_language` to `dotfiles assure reply` to check final reply prose, with at most one continuation, as [the language decision](adr/check-owner-reply-language-at-stop.md) describes.
 The hook and every prose channel share the sentence layout rules in `crates/rules/src/prose_rules.rs`.
 They refuse two sentences on one line and a sentence that wraps across adjacent prose lines.
 They report the first line and tell writers to split long sentences when a channel limits line length.
 Headings, labels ending in a colon, lists, tables, code, quotes, and front matter keep their structural line rules.
-Project-owned hooks, required checks, reviews, signatures, and owner authorization remain effective.
+Project-owned hooks, required checks, reviews, signatures, and user authorization remain effective.
 Reply, commit, push, and PR readiness gates check changed personal ADR content without an optional catalog or execution plan.
 The optional catalog checks account for inherited code, as [the change-provenance decision](adr/assurance-follows-change-provenance.md) describes.
 
@@ -135,7 +135,7 @@ It doesn't authenticate the committed change's issue authority.
 The edit guard and staged pre-commit check enforce that authority before publication.
 The [lightweight hosted workflow](adr/native-verification-with-lightweight-ci.md) reports its checked-out commit and tree on all three OS families and preserves required status propagation.
 It repeats no native tests, proofs, or provisioning rehearsals.
-For a pull request from someone other than the owner, such as a Renovate update, its [dependency gate](adr/gate-pull-requests-that-skip-local-hooks.md) installs Rust and compiles the workspace and checks the toolchain pins.
+For a pull request from someone other than the repository owner, such as a Renovate update, its [dependency gate](adr/gate-pull-requests-that-skip-local-hooks.md) installs Rust and compiles the workspace and checks the toolchain pins.
 Its successful status doesn't independently establish native verification or issue authority.
 The [candidate publication policy](adr/optional-native-verification-before-publication.md) makes native verification optional for dotfiles.
 Pre-push and PR readiness read this policy from the exact candidate commit, and missing policy still requires native evidence.

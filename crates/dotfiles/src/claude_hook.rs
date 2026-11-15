@@ -1473,7 +1473,7 @@ mod tests {
                 arguments
             };
             assert!(blocked.message.contains(evidence), "{}", blocked.message);
-            assert!(blocked.message.contains("Next action: ask the owner to run it; a tailscale command can open a sign-in window on the owner's desktop"), "{}", blocked.message);
+            assert!(blocked.message.contains("Next action: ask the user to run it; a tailscale command can open a sign-in window on the user's desktop"), "{}", blocked.message);
         }
     }
 
@@ -1510,7 +1510,7 @@ mod tests {
             let message = refused(command);
             assert!(message.contains("`up`"), "{command}: {message}");
             assert!(
-                message.contains("ask the owner to run it"),
+                message.contains("ask the user to run it"),
                 "{command}: {message}"
             );
         }
@@ -1565,7 +1565,7 @@ mod tests {
         assert!(message.contains("`ls` is a legacy command"), "{message}");
         assert!(message.contains("storage-scout"), "{message}");
         assert!(message.contains("Edit or Write tool"), "{message}");
-        assert!(message.contains("ask the owner to run it"), "{message}");
+        assert!(message.contains("ask the user to run it"), "{message}");
     }
 
     #[test]

@@ -11,7 +11,7 @@ const INSTALLATIONS: &str = "installs/gh";
 const LATEST: &str = "latest";
 const BIN: &str = "bin";
 
-/// The owner's home used only by the native credential lookup child.
+/// The user's home used only by the native credential lookup child.
 pub const CREDENTIAL_HOME: &str = "DOTFILES_GITHUB_CREDENTIAL_HOME";
 
 fn direct(candidate: &Path, name: &OsStr) -> io::Result<Option<PathBuf>> {

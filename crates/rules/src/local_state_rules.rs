@@ -1,7 +1,7 @@
-//! Which repository paths hold the owner's local workflow state, which no commit in any repository may add or change.
+//! Which repository paths hold the user's local workflow state, which no commit in any repository may add or change.
 
 /// The directory an earlier `pr-workflow` kept its issue contexts in, inside the working tree.
-/// Workflow evidence now lives in the owner's state directory, so nothing under this name belongs in a repository.
+/// Workflow evidence now lives in the user's state directory, so nothing under this name belongs in a repository.
 pub const PR_WORKFLOW: &[u8] = b".pr-workflow";
 
 /// Whether `path`, a repository-relative path with `/` separators, names the local state directory or lies inside it at any depth.

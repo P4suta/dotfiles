@@ -433,7 +433,6 @@ fn registered_context(
         state::current(root, context, repository, &context.branch)?;
         let target = Target {
             repo: repository.into(),
-            generation: super::Generation::Local,
             title_policy: None,
             issue: context.issue,
             cli_receipt: None,

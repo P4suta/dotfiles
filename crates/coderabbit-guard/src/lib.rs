@@ -1,4 +1,4 @@
-//! The `CodeRabbit` guard: the local review budget, the owner's pauses, and the pinned runtime every invocation goes through.
+//! The `CodeRabbit` guard: the local review budget, the user's pauses, and the pinned runtime every invocation goes through.
 
 mod committed;
 mod receipt;
@@ -215,8 +215,8 @@ pub fn usage_query(args: &[String]) -> bool {
     review_rules::usage_query(&words(args))
 }
 
-/// Run a guarded review only while the owner leaves CLI use unpaused.
-/// The guard reads the pause through `pause` while it holds the ledger lock, so a pause the owner sets before a reservation always stops that reservation.
+/// Run a guarded review only while the user leaves CLI use unpaused.
+/// The guard reads the pause through `pause` while it holds the ledger lock, so a pause the user sets before a reservation always stops that reservation.
 ///
 /// # Errors
 ///
@@ -242,7 +242,7 @@ pub fn execute_admitted(
 }
 
 /// Whether `specs/review_ledger.qnt` lets a guard that holds the ledger lock reserve under `scope`.
-/// The step function takes the lock, the owner's pause when the scope covers CLI use, the read under the lock, and the reservation.
+/// The step function takes the lock, the user's pause when the scope covers CLI use, the read under the lock, and the reservation.
 fn pause_admits(scope: PauseScope) -> bool {
     let mut events = vec![Event::Lock(0)];
     if cli_reviews_paused(scope) {
@@ -262,7 +262,7 @@ fn pause_admits(scope: PauseScope) -> bool {
 fn admit(scope: PauseScope, local_status: bool) -> Result<()> {
     ensure!(
         service_access(scope, local_status),
-        "CodeRabbit CLI use is paused by the owner (pause scope {}); run `coderabbit --guard-status --json` and wait for the owner to resume",
+        "CodeRabbit CLI use is paused by the user (pause scope {}); run `coderabbit --guard-status --json` and wait for the user to resume",
         scope.name()
     );
     Ok(())
@@ -404,7 +404,7 @@ pub fn validate_policy(text: &str) -> Result<(String, String)> {
     Ok((organization.into(), version.into()))
 }
 
-/// Read the owner's persistent pause markers, where `paused` marks every scope.
+/// Read the user's persistent pause markers, where `paused` marks every scope.
 ///
 /// # Errors
 ///

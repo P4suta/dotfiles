@@ -36,7 +36,7 @@ Import accepts prior selections only for that same issue and branch, with every 
 Import replaces those selections with the reviewed baseline scopes, so include every scope needed for future edits.
 Every imported artifact must fall within the explicit scopes.
 Alternate indexes and index flags that hide working changes refuse.
-The existing signing identity attests the baseline using trusted owner signers outside the project from the owner's global Git configuration.
+The existing signing identity attests the baseline using trusted owner signers outside the project from the user's global Git configuration.
 Project-local allowlists supply no trust.
 The evidence object has no parent and updates no branch or ref.
 
@@ -63,7 +63,7 @@ A closed issue, changed branch, unrelated real source, unregistered edit, or alt
 
 Issue records and history remain in owner-local storage outside the project.
 Repository issue files can't grant edit authority.
-Local records rely on state that the owner controls.
+Local records rely on state that the user controls.
 Their hashes identify history records without signatures.
 An explicit initial import also retains a signed artifact baseline, which the provider verifies when it reads the active record.
 An unborn selection binds the actual named branch and Git directory.

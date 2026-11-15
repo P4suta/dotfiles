@@ -49,15 +49,15 @@ Heading: groups the language lines.
 
 > {{ $language := includeTemplate "partials/reply_language" . -}}
 
-Directive: read the owner's configured reply language.
+Directive: read the user's configured reply language.
 
 > {{ if eq $language "Japanese" -}}
 
-Directive: select the Japanese line from the owner's configured reply language.
+Directive: select the Japanese line from the user's configured reply language.
 
 > - Reply in Japanese.
 
-Judgment: the owner chooses a reply language.
+Judgment: the user chooses a reply language.
 The Stop hook enforces that choice in Claude Code and Codex.
 
 > {{ else -}}
@@ -66,7 +66,7 @@ Directive: select the English line for the other supported language.
 
 > - Reply in English.
 
-Judgment: the owner can choose English through the same data value.
+Judgment: the user can choose English through the same data value.
 
 > {{ end -}}
 
@@ -182,9 +182,9 @@ Judgment: applicability needs the actual task and governing source.
 
 Judgment: actual implementation and checks establish whether the agent has applied the rule.
 
->   Preserve the source's normative status and identify stronger adoption as owner policy.
+>   Preserve the source's normative status and identify stronger adoption as personal policy.
 
-Judgment: the source's language and the owner's policy determine normative status.
+Judgment: the source's language and the personal policy determine normative status.
 
 >   Resolve conflicts and justify exclusions explicitly.
 
@@ -208,20 +208,28 @@ Judgment: the agent distinguishes reusable guidance from task-specific observati
 
 > - Keep experimental skill maintenance off by default, and don't run or require its loading, observation, analysis, triage, or checks without this machine's explicit opt-in.
 
-Judgment: the owner controls each machine's opt-in, and verification duties still apply without skill maintenance.
+Judgment: the user controls each machine's opt-in, and verification duties still apply without skill maintenance.
 
-> - Keep the CodeRabbit CLI and PR review pools separate, apply adaptive thresholds where they apply, and hold a push or PR update while review capacity stays unverified.
+> - Keep the CodeRabbit CLI and PR review pools separate, and apply capacity checks to explicitly requested reviews.
 
-Follow-up F7: the CodeRabbit CLI has no review allowance, so the guard enforces its local hourly and daily limits for a CLI review in `crates/coderabbit-guard/src/lib.rs`.
-No gate represents the PR review pool or its thresholds, or holds a push on its capacity.
+Judgment: the requested review determines its pool and capacity requirements.
+The CLI guard enforces its local limits in `crates/coderabbit-guard/src/lib.rs`.
 
-> - Never declare a PR complete while supported review findings, required checks, or a review of its current head remain outstanding.
+>   Use automatic incremental PR reviews without requiring manual commands or a full review.
 
-Judgment: whether a finding has support requires checking the code.
+Judgment: automatic review eligibility and completion depend on the provider's actual state.
 
-> - Commit, push, reply to or resolve PR threads, request reviews, and merge only when the owner asks.
+> - Resolve supported review findings and pass required checks before declaring a PR complete.
 
-Judgment: authorization comes from the owner's own messages, and no tool separates them from an agent's.
+Judgment: finding support and applicable checks require review of the current change.
+
+>   Honor an explicit instruction to merge despite an unavailable optional CodeRabbit review, while preserving repository-required reviews and publication holds.
+
+Judgment: the user's instruction grants merge authority, and repository requirements and publication holds keep their scope.
+
+> - Commit, push, reply to or resolve PR threads, request reviews, and merge only when the user asks.
+
+Judgment: authorization comes from the user's own messages, and no tool separates them from an agent's.
 
 > - Use japanese-lexicon to verify Japanese readings and romanizations with identified public lexical records or major dictionaries and a named spelling standard.
 
@@ -297,8 +305,22 @@ Judgment: a rule's authority and scope need source interpretation.
 
 > Follow the shared house policy under the dotfiles-managed prose configuration.
 
-Judgment: the owner selects a shared style.
+Judgment: style selection requires an explicit preference.
 `crates/prose/src/house.rs` enforces its configured rules.
+
+> Don't call the user `owner`, `Owner`, `オーナー`, or `所有者`.
+
+Judgment: distinguishing every personal reference from technical ownership requires semantic review.
+`Dotfiles.UserAddress` rejects known personal ownership labels in replies and persisted prose.
+
+> Address the user directly or describe the action without assigning a personal role.
+
+Judgment: the sentence's actor and recipient determine direct address.
+
+> Preserve technical ownership terms, literal identifiers, and source quotations.
+
+Judgment: technical ownership requires its domain meaning.
+The shared Vale rule preserves code and block quotations.
 
 > Use canonical English terminology from the applicable technical specification or project's official documentation.
 
@@ -318,11 +340,11 @@ Judgment: the requested language depends on the current user and document.
 
 > Follow the selected Japanese orthography guide from the Japan Translation Federation, with the explicit house choices in the editorial-assurance references.
 
-Judgment: applying the guide requires interpreting its scope and the owner's choices.
+Judgment: applying the guide requires interpreting its scope and the user's choices.
 
 > Don't use Japanese demonstratives in authored explanations or replies.
 
-Judgment: the owner prohibits Japanese demonstratives in authored prose.
+Judgment: the user prohibits Japanese demonstratives in authored prose.
 `crates/prose/src/house.rs` rejects the configured spellings after native annotation.
 
 > Name the actual object, operation, condition, or result.
@@ -535,11 +557,11 @@ Judgment: the message can describe only what the agent has read.
 
 >    With nothing staged, show `git status` and ask what to stage.
 
-Judgment: what belongs in a commit stays the owner's decision.
+Judgment: what belongs in a commit stays the user's decision.
 
 >    Never stage anything yourself.
 
-Judgment: what belongs in a commit stays the owner's decision.
+Judgment: what belongs in a commit stays the user's decision.
 
 > 2. Write an English Conventional Commit message:
 
@@ -663,20 +685,20 @@ Experimental skill maintenance stays off until the machine's explicit opt-in.
 | Load `ci-budget` before an authorized push or PR update. | Gate and skill | The pre-push dispatcher refuses while `~/.config/git/push-paused` exists in `crates/dotfiles/src/hooks.rs`, and `ci-budget` states the local checks. |
 | Load `coderabbit-review` for an initial substantive PR. | Gate and skill | The CodeRabbit guard admits a CLI review only within its local limits in `crates/coderabbit-guard/src/lib.rs`, and `coderabbit-review` states the trigger. |
 | Use `floor(capacity * 0.9 * 0.8)` budgets and hold publication on unverified capacity. | Gate | The floored budget in `crates/rules/src/review_rules.rs` applies where a review pool has an allowance, and the CLI pool has none. |
-| Elapsed time alone gives no permission to push. | Merged | Merged into `while review capacity stays unverified`. |
-| Honor an owner-imposed CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `crates/rules/src/review_rules.rs`, with a Kani proof. |
+| Elapsed time alone gives no permission to push. | Merged | Merged into `Commit, push, reply to or resolve PR threads`. |
+| Honor an explicit CodeRabbit pause. | Gate | The CodeRabbit guard refuses every service call while paused in `crates/rules/src/review_rules.rs`, with a Kani proof. |
 | Use `reliability` for intermittent failures. | Skill | `reliability` states the trigger in its description and the rule in its body. |
 | Load `dotfiles` for dotfiles changes. | Skill | `dotfiles` states the trigger and the rule in its description. |
 | Prefer `skill-ops load NAME` for shared skills. | Gate and skill | The `skill-ops stop` hook refuses completion with pending maintenance in `crates/skill-ops/src/main.rs` and names `skill-operations`. |
-| Commit and push only on request. | Merged | Merged into `only when the owner asks`. |
+| Commit and push only on request. | Merged | Merged into `only when the user asks`. |
 | CodeRabbit automatically reviews ready PRs. | Skill | `coderabbit-review` states it once. |
 | Load `coderabbit-review` on an existing PR or an authorized PR update. | Skill | `coderabbit-review` states the trigger in its description and the inspection in its body. |
 | Wait for the automatic review of the final pushed head. | Skill | `coderabbit-review` states it once. |
 | Explain unsupported findings with concrete evidence. | Skill | `coderabbit-review` states it once. |
-| The PR completion line, before the current wording. | Merged | Reworded as `Never declare a PR complete`. |
+| The PR completion line, before the current wording. | Merged | Reworded as `Resolve supported review findings and pass required checks`. |
 | A passing CodeRabbit check alone doesn't establish a completed review. | Skill | `coderabbit-review` states it once. |
 | Use the existing PR review before requesting a CLI review of the same diff. | Gate and skill | `coderabbit-review` states the order, and the guard enforces the local CLI limits in `crates/coderabbit-guard/src/lib.rs`. |
-| Commit, push, PR replies, thread resolution, manual review triggers, and merge still require authorization. | Merged | Merged into `only when the owner asks`. |
+| Commit, push, PR replies, thread resolution, manual review triggers, and merge still require authorization. | Merged | Merged into `only when the user asks`. |
 | The former nine-sentence prose rules and their rationale. | Gate | The global pre-commit hook runs `ocomment fix --tidy --staged`, which reflows a touched paragraph in `home/dot_config/lefthook/global.yml`. |
 | Use the `multi-machine` skill for remote execution. | Skill | `multi-machine` and `domyjob` state the trigger in their descriptions. |
 | The template actions that rendered the machine-local notes file into every instruction file. | Merged | The retained line names the file to read instead: `when it exists, before operating another host`. |
@@ -717,12 +739,6 @@ A repository opts out with `git config guard.commits off` when its own instructi
 ### F4:
 
 The managed agent permission profiles deny `gh pr create`, `gh pr edit`, and `gh pr ready`, and the denial names the matching `pr-workflow` command.
-
-### F7:
-
-The pre-push dispatcher asks the CodeRabbit guard for the PR review pool's capacity before pushing a branch with an open PR.
-It keeps that capacity apart from the CLI pool, with the applicable adaptive threshold.
-It refuses the push when the capacity stays unverified or runs out, and it names the pool and the capacity it found.
 
 ### F8:
 

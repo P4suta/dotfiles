@@ -95,7 +95,7 @@
       "description": "The license state the repository already declares or the generator creates.",
       "oneOf": [
         {
-          "description": "Generate the owner's existing dual-license files.",
+          "description": "Generate the user's existing dual-license files.",
           "type": "string",
           "const": "MIT OR Apache-2.0"
         },

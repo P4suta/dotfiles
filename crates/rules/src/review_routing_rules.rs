@@ -63,19 +63,13 @@ pub struct SevereRisk {
 }
 
 #[must_use]
-pub const fn route(level: ReviewLevel) -> ReviewRoute {
-    match level {
-        ReviewLevel::Low | ReviewLevel::Medium | ReviewLevel::High => ReviewRoute::None,
-        ReviewLevel::Critical => ReviewRoute::Pr,
-    }
+pub const fn route(_: ReviewLevel) -> ReviewRoute {
+    ReviewRoute::Pr
 }
 
 #[must_use]
-pub const fn repository_route(level: ReviewLevel, policy: ReviewPolicy) -> ReviewRoute {
-    match policy {
-        ReviewPolicy::Importance => route(level),
-        ReviewPolicy::AlwaysPr => ReviewRoute::Pr,
-    }
+pub const fn repository_route(level: ReviewLevel, _: ReviewPolicy) -> ReviewRoute {
+    route(level)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -260,23 +254,12 @@ mod proofs {
 
     pub fn spec_route(level: ReviewLevel) {
         let actual = route(level);
-        assert_eq!(
-            actual == ReviewRoute::None,
-            matches!(
-                level,
-                ReviewLevel::Low | ReviewLevel::Medium | ReviewLevel::High
-            )
-        );
-        assert_ne!(actual, ReviewRoute::Cli);
-        assert_eq!(actual == ReviewRoute::Pr, level == ReviewLevel::Critical);
+        assert_eq!(actual, ReviewRoute::Pr);
     }
 
     pub fn spec_repository_route(level: ReviewLevel, policy: ReviewPolicy) {
         let selected = repository_route(level, policy);
-        match policy {
-            ReviewPolicy::Importance => assert_eq!(selected, route(level)),
-            ReviewPolicy::AlwaysPr => assert_eq!(selected, ReviewRoute::Pr),
-        }
+        assert_eq!(selected, ReviewRoute::Pr);
     }
 
     #[cfg(kani)]
@@ -286,7 +269,7 @@ mod proofs {
         let policy = kani::any();
         let selected = repository_route(level, policy);
         kani::cover!(policy == ReviewPolicy::AlwaysPr && selected == ReviewRoute::Pr);
-        kani::cover!(policy == ReviewPolicy::Importance && selected != ReviewRoute::Pr);
+        kani::cover!(policy == ReviewPolicy::Importance && selected == ReviewRoute::Pr);
         spec_repository_route(level, policy);
         spec_completion(selected, kani::any(), kani::any(), kani::any(), kani::any());
     }
@@ -350,11 +333,10 @@ mod proofs {
     fn every_level_selects_exactly_one_review_route() {
         let level = kani::any();
         let selected = route(level);
-        kani::cover!(selected == ReviewRoute::None, "no review route is selected");
-        kani::cover!(
-            matches!(selected, ReviewRoute::Cli | ReviewRoute::Pr),
-            "one severe review route is selected"
-        );
+        kani::cover!(level == ReviewLevel::Low && selected == ReviewRoute::Pr);
+        kani::cover!(level == ReviewLevel::Medium && selected == ReviewRoute::Pr);
+        kani::cover!(level == ReviewLevel::High && selected == ReviewRoute::Pr);
+        kani::cover!(level == ReviewLevel::Critical && selected == ReviewRoute::Pr);
         spec_route(level);
     }
 

@@ -4,7 +4,7 @@
 
 Use [windows](https://developer.apple.com/design/human-interface-guidelines/windows) and [panels](https://developer.apple.com/design/human-interface-guidelines/panels) to choose primary and auxiliary surfaces.
 Keep system-defined window states and native accessibility behavior.
-The owner's default is a standard title bar with unchanged system window buttons and their default metrics and placement.
+The user's default is a standard title bar with unchanged system window buttons and their default metrics and placement.
 AppKit's [utilityWindow](https://developer.apple.com/documentation/appkit/nswindow/stylemask-swift.struct/utilitywindow) style uses a utility title bar.
 Use a normal titled window or panel for the main task.
 Floating behavior alone doesn't justify changing the window chrome.

@@ -9,7 +9,7 @@ description: >-
 
 Start from the observable property callers need and the states that would violate it.
 Choose the smallest representation whose supported API makes those invalid combinations unconstructible.
-Choose a coherent default from the needs of library consumers, maintainers, operators, and end users instead of asking the owner to settle routine implementation choices.
+Choose a coherent default from the needs of library consumers, maintainers, operators, and end users instead of asking the user to settle routine implementation choices.
 
 Use domain newtypes to separate interchangeable primitives, exhaustive enums for distinct cases, and private fields with checked constructors for validated inputs.
 Represent mutually exclusive states with enum variants instead of independent booleans or unrelated optional fields.

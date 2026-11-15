@@ -1,3 +1,5 @@
+mod lockfile;
+
 use super::Found;
 use super::report::Record;
 use super::report::{Dependency, Document};
@@ -59,10 +61,32 @@ pub(super) fn covers(records: &[Record], record: &Record, found: Option<&Found>)
     let Some(source) = super::mise::source(found, &record.file) else {
         return false;
     };
-    binds(records, record, &source)
+    let locked = record.dependency.locked_version.clone().or_else(|| {
+        requires_npm_lock(record)
+            .then(|| lockfile::version(found, record, &source))
+            .flatten()
+    });
+    binds(records, record, &source, locked.as_deref())
 }
 
-fn binds(records: &[Record], record: &Record, source: &str) -> bool {
+pub(super) fn requires_npm_lock(record: &Record) -> bool {
+    let dependency = &record.dependency;
+    record.manager == "npm"
+        && dependency.enabled
+        && dependency.warnings.is_empty()
+        && dependency.updates.is_empty()
+        && dependency.current_digest.is_none()
+        && dependency.locked_version.is_none()
+        && dependency.skip_reason.as_deref() == Some("unspecified-version")
+        && dependency.package_name.as_deref() == Some(dependency.dep_name.as_str())
+        && dependency
+            .current_value
+            .as_deref()
+            .and_then(|value| official_tarball_version(&dependency.dep_name, value))
+            .is_some()
+}
+
+fn binds(records: &[Record], record: &Record, source: &str, locked: Option<&str>) -> bool {
     let dependency = &record.dependency;
     if !dependency.enabled
         || !dependency.warnings.is_empty()
@@ -128,7 +152,7 @@ fn binds(records: &[Record], record: &Record, source: &str) -> bool {
         unique: matching.len() == 1,
         source: verified.datasource.as_deref() == Some("git-tags")
             && verified.package_name.as_deref() == Some(SHEETJS_REPOSITORY),
-        version: dependency.locked_version.as_deref() == Some(version)
+        version: locked == Some(version)
             && verified.current_value.as_deref() == Some(version)
             && verified.current_version.as_deref() == Some(version),
         lookup: lookup_evidence(LookupFacts {
@@ -149,6 +173,15 @@ mod tests {
 
     const SOURCE: &str =
         r#"{"devDependencies":{"xlsx":"https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"}}"#;
+
+    fn binds(records: &[Record], record: &Record, source: &str) -> bool {
+        super::binds(
+            records,
+            record,
+            source,
+            record.dependency.locked_version.as_deref(),
+        )
+    }
 
     fn record(manager: &str, dependency: serde_json::Value) -> Record {
         Record {
@@ -239,6 +272,152 @@ mod tests {
             serde_json::from_value(json!([{"updateType":"patch","newValue":"0.20.4"}])).unwrap();
         assert!(binds(&records, &records[0], SOURCE));
         assert_eq!(records[1].dependency.updates.len(), 1);
+    }
+
+    const URL: &str = "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz";
+
+    struct WorkspaceFixture {
+        directory: tempfile::TempDir,
+        found: Found,
+        report: serde_json::Value,
+    }
+
+    impl WorkspaceFixture {
+        fn new() -> Self {
+            let directory = tempfile::tempdir().unwrap();
+            let mut fixture = Self {
+                found: Found {
+                    repository: directory.path().to_str().unwrap().to_owned(),
+                    changed_files: vec!["data/package.json".into(), "package-lock.json".into()],
+                    added_by_file: BTreeMap::default(),
+                    baselines_by_file: BTreeMap::default(),
+                    offered: None,
+                    scope_unknown: false,
+                },
+                directory,
+                report: json!({"repositories":{"local":{"packageFiles":{
+                    "npm":[{"packageFile":"data/package.json","managerData":{"npmLock":"package-lock.json"},"deps":[
+                        {"depName":"xlsx","currentValue":URL,"lockedVersion":null,"packageName":"xlsx","depType":"dependencies","skipReason":"unspecified-version","updates":[]}
+                    ]}],
+                    "regex":[{"packageFile":"data/package.json","deps":[
+                        {"depName":"sheetjs","packageName":SHEETJS_REPOSITORY,"datasource":"git-tags","currentValue":"0.20.3","currentVersion":"0.20.3","replaceString":format!("\"xlsx\":\"{URL}\""),"updates":[],"warnings":[]}
+                    ]}]
+                }}}}),
+            };
+            fixture.git(&["init", "--initial-branch=main", "--template="]);
+            fixture.git(&["config", "user.name", "Fixture"]);
+            fixture.git(&["config", "user.email", "fixture@example.invalid"]);
+            for (path, content) in [
+                (
+                    "package.json",
+                    json!({"name":"fixture-root","workspaces":["data"]}),
+                ),
+                (
+                    "data/package.json",
+                    json!({"name":"@fixture/data","dependencies":{"xlsx":URL}}),
+                ),
+                (
+                    "package-lock.json",
+                    json!({"lockfileVersion":3,"packages":{
+                        "":{"name":"fixture-root","workspaces":["data"]},
+                        "data":{"name":"@fixture/data","dependencies":{"xlsx":URL}},
+                        "node_modules/@fixture/data":{"resolved":"data","link":true},
+                        "node_modules/xlsx":{"version":"0.20.3","resolved":URL}
+                    }}),
+                ),
+            ] {
+                fixture.write(path, &content);
+            }
+            fixture.snapshot();
+            fixture
+        }
+
+        fn git(&self, arguments: &[&str]) -> String {
+            let mut words = vec!["-C", self.found.repository.as_str()];
+            words.extend(arguments);
+            crate::real_git::capture(&words).unwrap().trim().to_owned()
+        }
+
+        fn write(&self, path: &str, content: &serde_json::Value) {
+            let path = self.directory.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content.to_string()).unwrap();
+        }
+
+        fn lock(&self) -> serde_json::Value {
+            serde_json::from_slice(
+                &std::fs::read(self.directory.path().join("package-lock.json")).unwrap(),
+            )
+            .unwrap()
+        }
+
+        fn snapshot(&mut self) {
+            self.git(&["add", "--all"]);
+            let tree = self.git(&["write-tree"]);
+            self.found.offered = Some(self.git(&["commit-tree", &tree, "-m", "fixture"]));
+        }
+
+        fn check(&self, report: &serde_json::Value) -> bool {
+            super::super::report::parse_for_push(
+                &serde_json::to_vec(report).unwrap(),
+                "minor patch pin pinDigest",
+                &self.found,
+            )
+            .is_ok()
+        }
+    }
+
+    #[test]
+    fn workspace_tarballs_use_the_offered_npm_lock_when_the_report_omits_its_version() {
+        let mut fixture = WorkspaceFixture::new();
+        assert!(fixture.check(&fixture.report));
+        let mut lock = fixture.lock();
+        lock["packages"]["node_modules/xlsx"]["version"] = json!("0.20.2");
+        fixture.write("package-lock.json", &lock);
+        fixture.git(&["add", "package-lock.json"]);
+        assert!(fixture.check(&fixture.report));
+        fixture.snapshot();
+        assert!(!fixture.check(&fixture.report));
+    }
+
+    #[test]
+    fn missing_or_conflicting_npm_ownership_never_substitutes_another_lock() {
+        let fixture = WorkspaceFixture::new();
+        assert!(fixture.check(&fixture.report));
+        for metadata in [
+            json!({"npmLock":null}),
+            json!({"npmLock":true}),
+            json!({"npmLock":"../package-lock.json"}),
+            json!({"npmLock":"other/package-lock.json"}),
+            json!({"npmLock":"data/package-lock.json"}),
+            json!("not an object"),
+        ] {
+            let mut broken = fixture.report.clone();
+            broken["repositories"]["local"]["packageFiles"]["npm"][0]["managerData"] = metadata;
+            assert!(!fixture.check(&broken));
+        }
+        let mut conflicting = fixture.report.clone();
+        conflicting["repositories"]["local"]["packageFiles"]["npm"][0]["lockFiles"] =
+            json!(["different/package-lock.json"]);
+        assert!(!fixture.check(&conflicting));
+        let mut explicit = fixture.report.clone();
+        explicit["repositories"]["local"]["packageFiles"]["npm"][0]["deps"][0]["lockedVersion"] =
+            json!("0.20.2");
+        assert!(!fixture.check(&explicit));
+    }
+
+    #[test]
+    fn shrinkwrap_takes_precedence_over_package_lock_in_the_offered_revision() {
+        let mut fixture = WorkspaceFixture::new();
+        assert!(fixture.check(&fixture.report));
+        fixture.write("npm-shrinkwrap.json", &fixture.lock());
+        assert!(fixture.check(&fixture.report));
+        fixture.snapshot();
+        assert!(!fixture.check(&fixture.report));
+        let mut report = fixture.report.clone();
+        report["repositories"]["local"]["packageFiles"]["npm"][0]["managerData"]["npmLock"] =
+            json!("npm-shrinkwrap.json");
+        assert!(fixture.check(&report));
     }
 
     #[test]

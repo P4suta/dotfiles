@@ -114,7 +114,7 @@ impl Policy {
         })
     }
 
-    /// Read the owner's installed policy, using the compiled source policy before first installation.
+    /// Read the user's installed policy, using the compiled source policy before first installation.
     ///
     /// # Errors
     ///

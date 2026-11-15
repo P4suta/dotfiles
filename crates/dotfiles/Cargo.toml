@@ -34,7 +34,9 @@ dotguard = { path = "../dotguard" }
 flate2 = "1.1.10"
 model = { path = "../model" }
 platform = { path = "../platform" }
+percent-encoding = "2.3"
 prose = { path = "../prose" }
+pulldown-cmark = "0.13"
 quote = "1.0.47"
 rules = { path = "../rules" }
 same-file = "=1.0.6"

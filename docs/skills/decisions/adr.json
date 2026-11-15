@@ -1,7 +1,7 @@
 {
-  "revision": "116ef8c7532ffed1560da5a345d5c5b03e749a7ee3bfcbb20705b149190227eb",
+  "revision": "ba950f74ee85b387fcbe569761d4e4cfbfa891f1441987033480e582d51f127b",
   "outcome": "implemented",
-  "reason": "The shared checker rejects oversized or incomplete changed records at write, completion, and publication boundaries. The skill keeps architecture rationale, alternatives, confirmation, and owner acceptance distinct from structural admission, while untouched historical records and external repository conventions remain intact.",
+  "reason": "The shared checker rejects oversized or incomplete changed records at write, completion, and publication boundaries. The skill keeps architecture rationale, alternatives, confirmation, and user acceptance distinct from structural admission, while untouched historical records and external repository conventions remain intact.\nPersonal references now name the user without changing scope, authorization, or technical ownership.",
   "evidence": [
     "home/dot_agents/skills/adr/SKILL.md",
     "home/.chezmoitemplates/partials/agent_policy",

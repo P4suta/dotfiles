@@ -1,5 +1,8 @@
 //! Inspects the exact literal arguments of GitHub publication commands.
 
+mod attachments;
+mod binary_upload;
+
 use crate::body_rules::{
     EscapeStep, Quote, RestArgument, RestRead, WordStep, escape_step, rest_read, word_step,
 };
@@ -14,6 +17,8 @@ use std::path::Path;
 /// The byte budget for a literal body or one JSON input.
 pub const MAX_BODY_INPUT: usize = 1024 * 1024;
 const MAX_BODIES: usize = 64;
+const GITHUB_ORIGIN: &str = "https://github.com";
+const GITHUB_HOST: &str = "github.com";
 
 /// Decodes a parsed shell word when its quoting and values are static.
 #[must_use]
@@ -179,6 +184,7 @@ pub(crate) enum Body {
     Text {
         channel: prose::Channel,
         text: String,
+        repository: Option<String>,
     },
     Unreadable(String),
 }
@@ -187,6 +193,8 @@ pub(crate) enum Body {
 enum Input {
     Text(String),
     File { path: String, json: bool },
+    Attachment(String),
+    BinaryAttachment(binary_upload::Upload),
 }
 
 struct Target<'a> {
@@ -202,6 +210,7 @@ pub struct Publication {
     channel: prose::Channel,
     inputs: Vec<Input>,
     direct: bool,
+    repository: Option<String>,
 }
 
 /// Decodes exact static shell words without reading a file or executing a command.
@@ -224,7 +233,68 @@ pub fn decode(spellings: &[&str]) -> Result<Option<Publication>> {
         channel: target.channel,
         inputs: inputs(&target)?,
         direct: start == 0,
+        repository: explicit_repository(&values[start + 1..])?,
     }))
+}
+
+fn explicit_repository(arguments: &[String]) -> Result<Option<String>> {
+    let api = target(arguments)?.is_some_and(|target| target.api);
+    let mut repository = None;
+    let mut index = 0;
+    while let Some(argument) = arguments.get(index) {
+        let candidate = if let Some(value) = option(arguments, &mut index, "--repo", Some("-R"))? {
+            platform::source_identity::github_slug(&value).or_else(|| {
+                platform::source_identity::github_slug(&format!("{GITHUB_ORIGIN}/{value}"))
+            })
+        } else if let Some(host) = option(arguments, &mut index, "--hostname", None)? {
+            if host != GITHUB_HOST {
+                return Ok(None);
+            }
+            continue;
+        } else if matches!(
+            argument.as_str(),
+            "--body"
+                | "-b"
+                | "--body-file"
+                | "-F"
+                | "--title"
+                | "-t"
+                | "--field"
+                | "-f"
+                | "--raw-field"
+                | "--input"
+                | "--jq"
+                | "-q"
+                | "--template"
+        ) {
+            index += 2;
+            continue;
+        } else if metadata_option(arguments, &mut index)?.is_some() {
+            continue;
+        } else {
+            index += 1;
+            argument
+                .trim_start_matches('/')
+                .strip_prefix("repos/")
+                .filter(|_| api)
+                .and_then(|path| {
+                    let mut parts = path.split('/');
+                    let owner = parts.next()?;
+                    let name = parts.next()?;
+                    platform::source_identity::github_slug(&format!(
+                        "{GITHUB_ORIGIN}/{owner}/{name}"
+                    ))
+                })
+        };
+        if let Some(candidate) = candidate {
+            ensure!(
+                repository.as_ref().is_none_or(|prior| prior == &candidate),
+                "GitHub destination is ambiguous"
+            );
+            repository = Some(candidate);
+        }
+    }
+    Ok(repository)
 }
 
 fn option(
@@ -497,6 +567,7 @@ fn target(arguments: &[String]) -> Result<Option<Target<'_>>> {
 
 enum ArgumentInput {
     Body(Input),
+    Attachment(String),
     Metadata,
     Unmatched,
 }
@@ -559,6 +630,12 @@ fn publication_input(target: &Target<'_>, index: &mut usize) -> Result<ArgumentI
     }
     if let Some(path) = option(target.arguments, index, "--body-file", Some("-F"))? {
         return Ok(ArgumentInput::Body(Input::File { path, json: false }));
+    }
+    if matches!(target.verb, "create" | "edit" | "comment")
+        && let Some(file) = option(target.arguments, index, "--attach", None)?
+    {
+        ensure!(!file.is_empty(), "GitHub attachment option has no file");
+        return Ok(ArgumentInput::Attachment(file));
     }
     if matches!(target.verb, "close" | "reopen")
         && let Some(text) = option(target.arguments, index, "--comment", Some("-c"))?
@@ -626,9 +703,20 @@ fn reject_implicit_source(argument: &str) -> Result<()> {
 }
 
 fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
+    if target.api
+        && let Some(upload) = binary_upload::parse(target.arguments)
+    {
+        return Ok(vec![Input::BinaryAttachment(upload)]);
+    }
+    body_inputs(target)
+}
+
+fn body_inputs(target: &Target<'_>) -> Result<Vec<Input>> {
     let mut found = Vec::new();
     let mut index = 0;
     let mut implicit = matches!(target.verb, "create" | "comment" | "review" | "edit");
+    let mut has_attachments = false;
+    let mut has_body = false;
     let mut review_approval = false;
     let mut review_comment = false;
     while index < target.arguments.len() {
@@ -642,7 +730,13 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
         reject_implicit_source(argument)?;
         match publication_input(target, &mut index)? {
             ArgumentInput::Body(input) => {
+                has_body = true;
                 found.push(input);
+                continue;
+            }
+            ArgumentInput::Attachment(value) => {
+                has_attachments = true;
+                found.push(Input::Attachment(value));
                 continue;
             }
             ArgumentInput::Metadata => continue,
@@ -709,7 +803,7 @@ fn inputs(target: &Target<'_>) -> Result<Vec<Input>> {
         implicit = !review_approval || review_comment;
     }
     ensure!(
-        !implicit || !found.is_empty(),
+        !(implicit || has_attachments) || has_body,
         "GitHub body depends on interactive or implicit input"
     );
     ensure!(
@@ -753,6 +847,94 @@ fn read_file(path: &str, directory: Option<&Path>) -> Result<String> {
     String::from_utf8(bytes).context("GitHub body input is not UTF-8")
 }
 
+fn resolve_publication(
+    selected: Publication,
+    stdin: Option<&str>,
+    directory: Option<&Path>,
+    files_safe: bool,
+) -> Result<Vec<Body>> {
+    let mut bodies = Vec::new();
+    let mut attachment_arguments = Vec::new();
+    let mut body_file = None;
+    for input in selected.inputs {
+        let (text, json) = match input {
+            Input::Text(text) => (text, false),
+            Input::BinaryAttachment(upload) => {
+                ensure!(
+                    files_safe && selected.direct,
+                    "GitHub binary attachment has an uncertain execution context"
+                );
+                let directory = directory
+                    .filter(|path| path.is_absolute())
+                    .context("GitHub binary attachment has no known execution directory")?;
+                upload.verify(directory)?;
+                continue;
+            }
+            Input::Attachment(value) => {
+                attachment_arguments.push(value);
+                continue;
+            }
+            Input::File { path, json } if path == "-" => (
+                stdin
+                    .context("GitHub standard input is unavailable")?
+                    .to_owned(),
+                json,
+            ),
+            Input::File { path, json } => {
+                ensure!(
+                    files_safe && selected.direct,
+                    "GitHub file input has an uncertain execution context"
+                );
+                let text = read_file(&path, directory)?;
+                body_file = Some(path);
+                (text, json)
+            }
+        };
+        ensure!(
+            text.len() <= MAX_BODY_INPUT && !text.contains('\0'),
+            "GitHub body is oversized or contains NUL"
+        );
+        let texts = if json {
+            json_bodies(&text)?
+        } else {
+            vec![text]
+        };
+        bodies.extend(texts.into_iter().map(|text| Body::Text {
+            channel: selected.channel,
+            text,
+            repository: selected.repository.clone(),
+        }));
+        ensure!(
+            bodies.len() <= MAX_BODIES,
+            "GitHub body inspection exceeds its body-count limit"
+        );
+    }
+    if !attachment_arguments.is_empty() {
+        ensure!(
+            files_safe && selected.direct,
+            "GitHub attachment has an uncertain execution context"
+        );
+        let directory = directory
+            .filter(|path| path.is_absolute())
+            .context("GitHub attachment has no known execution directory")?;
+        let [Body::Text { text, .. }] = bodies.as_mut_slice() else {
+            anyhow::bail!("GitHub attachments require one explicit body");
+        };
+        let projected =
+            attachments::project(&attachment_arguments, text, body_file.as_deref(), directory)?;
+        ensure!(
+            projected.len() <= MAX_BODY_INPUT && !projected.contains('\0'),
+            "GitHub body is oversized or contains NUL"
+        );
+        *text = projected;
+        ensure!(
+            bodies.len() <= MAX_BODIES,
+            "GitHub body inspection exceeds its body-count limit"
+        );
+    }
+    Ok(bodies)
+}
+
 pub(crate) fn collect(
     words: &[String],
     spellings: Option<&[&str]>,
@@ -770,43 +952,7 @@ pub(crate) fn collect(
         let spellings = spellings.context("GitHub argument spelling is unavailable")?;
         let selected =
             decode(spellings)?.context("GitHub command identity changed during inspection")?;
-        let mut bodies = Vec::new();
-        for input in selected.inputs {
-            let (text, json) = match input {
-                Input::Text(text) => (text, false),
-                Input::File { path, json } if path == "-" => (
-                    stdin
-                        .context("GitHub standard input is unavailable")?
-                        .to_owned(),
-                    json,
-                ),
-                Input::File { path, json } => {
-                    ensure!(
-                        files_safe && selected.direct,
-                        "GitHub file input has an uncertain execution context"
-                    );
-                    (read_file(&path, directory)?, json)
-                }
-            };
-            ensure!(
-                text.len() <= MAX_BODY_INPUT && !text.contains('\0'),
-                "GitHub body is oversized or contains NUL"
-            );
-            let texts = if json {
-                json_bodies(&text)?
-            } else {
-                vec![text]
-            };
-            bodies.extend(texts.into_iter().map(|text| Body::Text {
-                channel: selected.channel,
-                text,
-            }));
-            ensure!(
-                bodies.len() <= MAX_BODIES,
-                "GitHub body inspection exceeds its body-count limit"
-            );
-        }
-        Ok(bodies)
+        resolve_publication(selected, stdin, directory, files_safe)
     };
     resolve().unwrap_or_else(|error| vec![Body::Unreadable(format!("{error:#}"))])
 }
@@ -850,9 +996,25 @@ pub(crate) fn refusals(
     };
     let mut messages = Vec::new();
     for (index, body) in bodies.iter().enumerate() {
-        let Body::Text { channel, text } = body else {
+        let Body::Text {
+            channel,
+            text,
+            repository,
+        } = body
+        else {
             continue;
         };
+        let projected = match platform::contribution::project(repository.as_deref(), text) {
+            Ok(projected) => projected,
+            Err(error) => {
+                messages.extend(decision(
+                    Inspection::Unreadable,
+                    &format!("contribution notice: {error:#}"),
+                ));
+                continue;
+            }
+        };
+        let text = projected.as_ref();
         if matches!(
             crate::body_rules::verdict(dotguard::attribution::find(text).is_some()),
             crate::body_rules::Verdict::Refuse(_)
@@ -891,6 +1053,66 @@ pub(crate) fn refusals(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notice_destinations_require_explicit_unambiguous_arguments() -> Result<()> {
+        for arguments in [
+            vec![
+                "issue",
+                "comment",
+                "1",
+                "--repo",
+                "dotnet/runtime",
+                "--body",
+                "--repo",
+            ],
+            vec![
+                "-Rdotnet/runtime",
+                "issue",
+                "comment",
+                "1",
+                "--body",
+                "Text.",
+            ],
+            vec![
+                "api",
+                "repos/dotnet/runtime/issues/1/comments",
+                "-f",
+                "body=Text.",
+            ],
+        ] {
+            let arguments: Vec<_> = arguments.into_iter().map(str::to_owned).collect();
+            assert_eq!(
+                explicit_repository(&arguments)?.as_deref(),
+                Some("dotnet/runtime")
+            );
+        }
+        let ambiguous = ["--repo", "dotnet/runtime", "-R", "example/runtime"].map(str::to_owned);
+        assert!(explicit_repository(&ambiguous).is_err());
+        let implicit = ["issue", "comment", "1", "--body", "--repo"].map(str::to_owned);
+        assert_eq!(explicit_repository(&implicit)?, None);
+        let other_host = [
+            "api",
+            "repos/dotnet/runtime/issues/1/comments",
+            "--hostname",
+            "example.com",
+        ]
+        .map(str::to_owned);
+        assert_eq!(explicit_repository(&other_host)?, None);
+        let label = [
+            "issue",
+            "create",
+            "--label",
+            "repos/dotnet/runtime",
+            "--body",
+            "Text.",
+        ]
+        .map(str::to_owned);
+        assert_eq!(explicit_repository(&label)?, None);
+        let preview = ["api", "graphql", "--preview", "repos/dotnet/runtime"].map(str::to_owned);
+        assert_eq!(explicit_repository(&preview)?, None);
+        Ok(())
+    }
 
     #[test]
     fn explicit_github_reads_do_not_require_publication_spellings() {
@@ -1331,5 +1553,57 @@ mod tests {
             "comments": (0..=MAX_BODIES).map(|_| serde_json::json!({"body": "Body."})).collect::<Vec<_>>()
         });
         assert!(json_bodies(&too_many.to_string()).is_err());
+    }
+
+    #[test]
+    fn appended_media_cannot_expand_the_body_input_budget() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        std::fs::write(
+            directory.path().join("body.md"),
+            "x".repeat(MAX_BODY_INPUT - 10),
+        )?;
+        std::fs::write(directory.path().join("image.png"), b"fixture")?;
+        let spellings = [
+            "gh",
+            "pr",
+            "create",
+            "--body-file",
+            "body.md",
+            "--attach",
+            "image.png",
+        ];
+        let words: Vec<String> = spellings.iter().map(|word| (*word).to_owned()).collect();
+        let bodies = collect(&words, Some(&spellings), None, Some(directory.path()), true);
+        assert!(
+            matches!(&bodies[..], [Body::Unreadable(message)] if message.contains("oversized"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn attachment_files_need_a_known_execution_directory() {
+        let spellings = [
+            "gh",
+            "pr",
+            "create",
+            "--body",
+            "'The check passed.'",
+            "--attach",
+            "image.png",
+        ];
+        let words = [
+            "gh",
+            "pr",
+            "create",
+            "--body",
+            "The check passed.",
+            "--attach",
+            "image.png",
+        ]
+        .map(str::to_owned);
+        let bodies = collect(&words, Some(&spellings), None, None, true);
+        assert!(
+            matches!(&bodies[..], [Body::Unreadable(message)] if message.contains("known execution directory"))
+        );
     }
 }

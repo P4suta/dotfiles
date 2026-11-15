@@ -309,13 +309,13 @@ fn gate_ref(remote: &str, input: &str) -> i32 {
 }
 
 /// The refusal records no opt-out, so it names no bypass.
-/// The cause lists them for the owner.
+/// The cause lists them for the user.
 fn outdated_refusal(blocked: &[String]) -> Refusal {
     let mut refusal = Refusal::new(
         "push.dependencies",
         "this push changes dependencies that are not on their latest non-major release.\n\
          Bump them to the listed versions (SHA-pinned actions: update both the hash and the version comment), then push again.\n\
-         Unrecorded opt-outs for the owner: RENOVATE_LOCAL_SKIP=1 for one push, git config renovate.localSkip true for this repository, or RENOVATE_LOCAL_UPDATE_TYPES to narrow what blocks.",
+         Unrecorded opt-outs for the user: RENOVATE_LOCAL_SKIP=1 for one push, git config renovate.localSkip true for this repository, or RENOVATE_LOCAL_UPDATE_TYPES to narrow what blocks.",
         "dotguard renovate run",
     );
     for dependency in blocked {

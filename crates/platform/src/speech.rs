@@ -139,7 +139,7 @@ pub fn frequency_text(value: Frequency) -> &'static str {
     }
 }
 
-/// Reads the owner's override before the managed notification frequency.
+/// Reads the user's override before the managed notification frequency.
 ///
 /// # Errors
 ///

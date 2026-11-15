@@ -1,4 +1,4 @@
-//! Which forced Git operations lose nothing the owner keeps.
+//! Which forced Git operations lose nothing the user keeps.
 
 /// The ref namespaces whose deletion loses work: branches, tags, notes, and the stash.
 const PROTECTED: [&[u8]; 4] = [b"refs/heads/", b"refs/tags/", b"refs/notes/", b"refs/stash"];
@@ -21,7 +21,7 @@ pub const fn throwaway_admits(under_temporary: Option<bool>, pushes: bool) -> bo
 }
 
 /// Whether the guard admits `git checkout --force -- <paths>`, which Lefthook runs to hide the unstaged hunks of partly staged files.
-/// Only the bare pathspec form qualifies, and only when Lefthook's saved patch holds every unstaged change of those paths, so the owner keeps every hunk it discards.
+/// Only the bare pathspec form qualifies, and only when Lefthook's saved patch holds every unstaged change of those paths, so the user keeps every hunk it discards.
 #[must_use]
 pub const fn saved_discard_admits(pathspec_only: bool, saved: Option<bool>) -> bool {
     pathspec_only && matches!(saved, Some(true))

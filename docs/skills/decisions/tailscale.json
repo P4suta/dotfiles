@@ -1,5 +1,5 @@
 {
-  "revision": "e3da4a99f376ca3a001dc7397086381ea2f208cf7a9f02a32c40518db9ee8666",
+  "revision": "30ba05e1c6e5822b5d4178ce271060fa55401d25bcde18896248ef1b041c280a",
   "outcome": "implemented",
   "reason": "Keep reachability and narrow access decisions separate from authenticated remote job transport.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [

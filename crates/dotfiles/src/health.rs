@@ -165,7 +165,7 @@ fn recent_events() -> Result<(Option<Events>, Vec<String>)> {
     Ok((Some(total), evidence))
 }
 
-/// The append-only incident log, which lets the owner compare stalls across incidents.
+/// The append-only incident log, which lets the user compare stalls across incidents.
 #[must_use]
 pub fn incidents(home: &Path) -> PathBuf {
     home.join(".local/state/start-health/incidents.jsonl")

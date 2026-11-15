@@ -1,5 +1,5 @@
 {
-  "revision": "b358c0e60ed1ab6dfa796e2de909ef07dc6cd2ef500bf28e757e83e9d257cf75",
+  "revision": "74463cec206e88c1d84db57fec22aad2b5e6ca7c9a43f8888b53751eb8a69355",
   "outcome": "implemented",
   "reason": "Route README and licensing work through checked repository metadata and its generator; retain judgment about purpose and working examples.\nThe tool bindings are part of the catalog revision, and inventory tests reject missing coverage, changed pins, and incompatible profiles.",
   "evidence": [

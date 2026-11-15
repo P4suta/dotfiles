@@ -11,7 +11,7 @@ const HEADS: usize = PUSHES as usize + 1;
 /// What the required checks of one head have reported.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub enum Report {
-    /// Some check hasn't finished, or no check reported.
+    /// Some reported check hasn't finished.
     Pending,
     /// Every reported check passed, but a required check hasn't reported.
     Partial,
@@ -21,12 +21,12 @@ pub enum Report {
     Failed,
 }
 
-/// The report of a head from its rollup: the checks it lists, how many haven't finished or failed, and how many required checks it lacks or hasn't passed.
+/// The report of a head from its unfinished, failed, and missing required checks.
 #[must_use]
-pub const fn report(total: usize, unfinished: usize, failed: usize, missing: usize) -> Report {
+pub const fn report(unfinished: usize, failed: usize, missing: usize) -> Report {
     if failed > 0 {
         Report::Failed
-    } else if total == 0 || unfinished > 0 {
+    } else if unfinished > 0 {
         Report::Pending
     } else if missing > 0 {
         Report::Partial
@@ -223,12 +223,12 @@ mod proofs {
         Phase::Returned,
     ];
 
-    /// A failure decides first, then an unfinished or empty rollup, then a missing required check.
-    pub fn spec_report(total: usize, unfinished: usize, failed: usize, missing: usize) -> Report {
-        let decided = report(total, unfinished, failed, missing);
+    /// A failure decides first, then an unfinished check, then a missing required check.
+    pub fn spec_report(unfinished: usize, failed: usize, missing: usize) -> Report {
+        let decided = report(unfinished, failed, missing);
         let expected = if failed > 0 {
             Report::Failed
-        } else if total == 0 || unfinished > 0 {
+        } else if unfinished > 0 {
             Report::Pending
         } else if missing > 0 {
             Report::Partial
@@ -324,7 +324,7 @@ mod proofs {
     #[cfg(kani)]
     #[kani::proof]
     fn a_failure_then_an_unfinished_check_then_a_missing_required_check_decides_the_report() {
-        let decided = spec_report(kani::any(), kani::any(), kani::any(), kani::any());
+        let decided = spec_report(kani::any(), kani::any(), kani::any());
         kani::cover!(decided == Report::Partial);
         kani::cover!(decided == Report::Complete);
     }
@@ -428,12 +428,10 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore = "Miri takes seconds over every report and head")]
     fn every_report_and_head_pair_meets_its_specification() {
-        for total in 0..3 {
-            for unfinished in 0..3 {
-                for failed in 0..3 {
-                    for missing in 0..3 {
-                        proofs::spec_report(total, unfinished, failed, missing);
-                    }
+        for unfinished in 0..3 {
+            for failed in 0..3 {
+                for missing in 0..3 {
+                    proofs::spec_report(unfinished, failed, missing);
                 }
             }
         }

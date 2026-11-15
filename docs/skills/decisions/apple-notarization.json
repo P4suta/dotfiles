@@ -1,5 +1,5 @@
 {
-  "revision": "970db2c3b90a883feffdf70859454e7e3be7d0174e3754867b90d85a0939e8ba",
+  "revision": "be09c536a5b50f126fd179517b28637d4ea8bd78bfcf4a252cb26cc5faf8d370",
   "outcome": "keep",
   "reason": "Resume the preserved signed candidate with notarization-only inputs and finish accepted-ticket checks without refetching keys.\nTreat publication as a separate authorized operation.",
   "evidence": [

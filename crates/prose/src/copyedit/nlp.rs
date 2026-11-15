@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::path::Path;
 use std::process::Stdio;
 
 pub const SCHEMA: u32 = 1;
@@ -18,12 +19,115 @@ const LOCK: &str = "uv.lock";
 const REQUEST: &str = "request.json";
 const RESPONSE: &str = "response.json";
 
+enum EnvironmentSync {
+    Ready,
+    Unavailable(String),
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+
+    #[test]
+    fn a_valid_cached_graph_never_contacts_the_network() -> Result<()> {
+        prepare_with(|offline| {
+            assert!(offline, "a complete cache must not need the network");
+            Ok(EnvironmentSync::Ready)
+        })
+    }
+
+    #[test]
+    fn an_incomplete_cache_requires_successful_locked_online_preparation() -> Result<()> {
+        let mut requests = Vec::new();
+        prepare_with(|offline| {
+            requests.push(offline);
+            Ok(if offline {
+                EnvironmentSync::Unavailable("missing cached wheel".into())
+            } else {
+                EnvironmentSync::Ready
+            })
+        })?;
+        assert_eq!(requests, [true, false]);
+        let error = prepare_with(|offline| {
+            Ok(EnvironmentSync::Unavailable(
+                if offline {
+                    "missing cached wheel"
+                } else {
+                    "network unavailable"
+                }
+                .into(),
+            ))
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("missing cached wheel"));
+        assert!(error.to_string().contains("network unavailable"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_missing_sync_tool_stops_before_another_attempt() {
+        let mut calls = 0;
+        let error = prepare_with(|_| {
+            calls += 1;
+            anyhow::bail!("uv cannot start")
+        })
+        .unwrap_err();
+        assert_eq!(calls, 1);
+        assert!(error.to_string().contains("uv cannot start"));
+    }
+}
+
+fn prepare_with(mut sync: impl FnMut(bool) -> Result<EnvironmentSync>) -> Result<()> {
+    let cached = match sync(true)? {
+        EnvironmentSync::Ready => return Ok(()),
+        EnvironmentSync::Unavailable(diagnostic) => diagnostic,
+    };
+    match sync(false)? {
+        EnvironmentSync::Ready => Ok(()),
+        EnvironmentSync::Unavailable(diagnostic) => anyhow::bail!(
+            "locked annotation environment could not sync from cache or network:\ncache: {cached}\nnetwork: {diagnostic}"
+        ),
+    }
+}
+
+fn prepare_environment(
+    bundle: &Bundle,
+    package: &Path,
+    environment: &Path,
+    python: &str,
+    development: bool,
+) -> Result<()> {
+    prepare_with(|offline| {
+        let mut command = bundle.uv();
+        command
+            .current_dir(package)
+            .env("UV_PROJECT_ENVIRONMENT", environment)
+            .args(["sync", "--locked", "--python", python.trim()]);
+        if offline {
+            command.arg("--offline");
+        }
+        if !development {
+            command.arg("--no-dev");
+        }
+        let output = command
+            .stdin(Stdio::null())
+            .output()
+            .context("prepare the locked annotation environment")?;
+        Ok(if output.status.success() {
+            EnvironmentSync::Ready
+        } else {
+            EnvironmentSync::Unavailable(String::from_utf8_lossy(&output.stderr).into_owned())
+        })
+    })
+}
+
 pub(super) fn verify_adapter(bundle: &Bundle) -> Result<()> {
     let package = crate::canonical(&bundle.config.join(PACKAGE))?;
     let lock = fs::read(package.join(LOCK))?;
     let environment = crate::runtime_directory()?
         .join(format!("nlp-development-{}", hex(&Sha256::digest(&lock))));
     let python = fs::read_to_string(package.join(PYTHON))?;
+    prepare_environment(bundle, &package, &environment, &python, true)?;
     for arguments in [
         vec!["mypy"],
         vec!["ruff", "check", "."],
@@ -40,7 +144,7 @@ pub(super) fn verify_adapter(bundle: &Bundle) -> Result<()> {
             .env("OMP_NUM_THREADS", "1")
             .env("OPENBLAS_NUM_THREADS", "1")
             .env("VECLIB_MAXIMUM_THREADS", "1")
-            .args(["run", "--locked", "--python", python.trim()])
+            .args(["run", "--no-sync", "--python", python.trim()])
             .args(&arguments)
             .stdin(Stdio::null())
             .output()
@@ -312,6 +416,7 @@ pub fn analyze(bundle: &Bundle, language: Language, segments: &[Segment]) -> Res
     let digest = hex(&Sha256::digest(lock.as_bytes()));
     let environment = crate::runtime_directory()?.join(format!("nlp-{digest}"));
     let python = fs::read_to_string(package.join(PYTHON))?;
+    prepare_environment(bundle, &package, &environment, &python, false)?;
     let temporary = tempfile::tempdir()?;
     let request_path = temporary.path().join(REQUEST);
     let response_path = temporary.path().join(RESPONSE);
@@ -338,8 +443,7 @@ pub fn analyze(bundle: &Bundle, language: Language, segments: &[Segment]) -> Res
         .env("VECLIB_MAXIMUM_THREADS", "1")
         .args([
             "run",
-            "--locked",
-            "--no-dev",
+            "--no-sync",
             "--python",
             python.trim(),
             "python",

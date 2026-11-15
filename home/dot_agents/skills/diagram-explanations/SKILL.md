@@ -38,7 +38,7 @@ Name each element, its role, and the responsibility relevant to the question.
 Label each relationship with the action or information it carries and make its direction agree with that label.
 Explain the meaning of shapes, boundaries, line styles, and abbreviations in a key.
 State protocols and technologies where they determine an architectural relationship.
-These are informative recommendations adopted as owner policy for applicable diagrams, not requirements to use C4 for every subject.
+These are informative recommendations adopted as personal policy for applicable diagrams, not requirements to use C4 for every subject.
 
 Use names from the subject instead of generic boxes such as Input, Process, Validate, and Output when the actual objects matter.
 Include decision conditions, rejected paths, handoffs, and failure outcomes when they explain the change.

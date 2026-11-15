@@ -258,7 +258,7 @@ pub fn standard_applies(personal_owner: bool, fork: bool) -> bool {
     personal_owner && !fork
 }
 
-/// The owner a remote names: a personal or foreign GitHub owner, or an address that names no GitHub owner, such as a bare-repository hub.
+/// The repository owner a remote names: a personal or foreign GitHub owner, or an address that names no GitHub owner, such as a bare-repository hub.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Owner {
     Personal,

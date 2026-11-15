@@ -1,7 +1,7 @@
 {
-  "revision": "5e32a06c04840a1f776eddab75855b76e1fa8be0f956b923d651d915188f6fda",
+  "revision": "01c5863427a14acd228927463b28d91d88d856c0812a0664606a72d14515d202",
   "outcome": "implemented",
-  "reason": "Keep owner hosts optional and distinguish background credential access from desktop authentication before requesting account changes.",
+  "reason": "Require a controlled comparison before cache repair and compare replacements with the recorded target hash.",
   "evidence": [
     "home/dot_agents/skills/multi-machine/SKILL.md",
     "home/dot_agents/skills/multi-machine/references/credential-context.md",

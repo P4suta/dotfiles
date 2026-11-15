@@ -14,7 +14,7 @@ fn cleanup_refuses_noninteractive_use_before_inspecting_or_signalling_a_process(
         .stdin(Stdio::null())
         .output()?;
     assert!(!output.status.success());
-    assert!(String::from_utf8(output.stderr)?.contains("owner's interactive confirmation"));
+    assert!(String::from_utf8(output.stderr)?.contains("user's interactive confirmation"));
     Ok(())
 }
 

@@ -109,6 +109,9 @@ doppler-migrate *args: trust
 doppler-organize *args: trust
     mise x -- cargo xtask doppler-organize {{ args }}
 
+doppler-sync *args: trust
+    mise x -- cargo xtask doppler-sync {{ args }}
+
 gen: trust
     mise x -- cargo xtask gen
 
@@ -162,6 +165,9 @@ install-pr-workflow: trust
 
 install-pr-workflow-binary: trust
     mise x -- cargo xtask install-pr-workflow-binary
+
+install-git-guard: trust
+    mise x -- cargo xtask install-git-guard
 
 install-answer-prover: trust
     mise x -- cargo xtask install-answer-prover

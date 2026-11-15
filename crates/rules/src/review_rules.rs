@@ -32,7 +32,7 @@ pub fn within_limits(hourly: usize, daily: usize) -> bool {
     within_budget(HOURLY_CAPACITY, HOURLY_CAPACITY.saturating_sub(used)) && daily < DAILY_LIMIT
 }
 
-/// The `CodeRabbit` review pools an owner pause stops.
+/// The `CodeRabbit` review pools a user pause stops.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PauseScope {
     None,
@@ -74,7 +74,7 @@ pub const fn cli_reviews_paused(scope: PauseScope) -> bool {
     matches!(scope, PauseScope::Cli | PauseScope::All)
 }
 
-/// Admit a vendor call unless the owner paused CLI use.
+/// Admit a vendor call unless the user paused CLI use.
 /// The local status stays readable.
 #[must_use]
 pub fn service_access(scope: PauseScope, local_status: bool) -> bool {

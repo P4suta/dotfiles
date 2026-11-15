@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-15
 ---
 # Use Alacritty for the Windows terminal
@@ -31,4 +31,5 @@ Reconsider the terminal choice if Alacritty cannot support the required herdr in
 ## Confirmation
 
 The user explicitly selected Alacritty with herdr.
-Acceptance requires passing profile checks and confirming that the installed Alacritty loads its managed configuration and starts herdr before removing WezTerm.
+The installed Alacritty loads its managed configuration and starts herdr.
+The unused WezTerm installation and configuration were backed up before removal.

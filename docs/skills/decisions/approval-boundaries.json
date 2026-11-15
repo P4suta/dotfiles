@@ -1,7 +1,7 @@
 {
-  "revision": "a1d3564c059ccf51fa913a6beba23f58e4dc5b175692c00e1443f42a5d754736",
+  "revision": "ead5cd492fa669b9e3df51225a418411af2480819b76e417f0f91aad16cfdb46",
   "outcome": "keep",
-  "reason": "The revision drops the five-field approval record and the AI-assisted label, and asks for a one- or two-sentence comment in the owner's voice.",
+  "reason": "The revision drops the five-field approval record and the AI-assisted label, and asks for a one- or two-sentence comment in the user's voice.",
   "evidence": [
     "home/dot_agents/skills/approval-boundaries/SKILL.md"
   ],

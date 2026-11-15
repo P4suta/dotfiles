@@ -303,7 +303,7 @@ fn picking() -> Option<bool> {
     Some(!exists("MERGE_HEAD")? && exists("CHERRY_PICK_HEAD")?)
 }
 
-/// Refuses a commit that adds or changes a path of the owner's local workflow state, which belongs in no repository.
+/// Refuses a commit that adds or changes a path of the user's local workflow state, which belongs in no repository.
 /// A deletion passes, so a repository can drop an old copy.
 fn local_state() -> Option<i32> {
     let staged = real_git::capture(&[
@@ -328,7 +328,7 @@ fn local_state() -> Option<i32> {
         .fold(
             refusal::Refusal::new(
                 "commit.local-state",
-                "the commit adds local workflow state, which lives in the owner's state directory and belongs in no repository",
+                "the commit adds local workflow state, which lives in the user's state directory and belongs in no repository",
                 refusal::command(&unstage),
             ),
             |refused, path| refused.evidence(format!("staged: {path}")),

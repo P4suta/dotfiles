@@ -37,7 +37,7 @@ impl std::fmt::Display for MaintenancePending {
 impl std::error::Error for MaintenancePending {}
 
 #[derive(Parser)]
-#[command(about = "Load, observe, analyze, and verify the owner's shared skills locally")]
+#[command(about = "Load, observe, analyze, and verify the user's shared skills locally")]
 struct Cli {
     #[arg(long, env = "SKILL_OPS_TREE")]
     tree: Option<PathBuf>,

@@ -433,7 +433,7 @@ fn held_by_branch(root: &Path, branch: &str, commit: &str) -> Result<bool> {
     Ok(count(&String::from_utf8_lossy(&output.stdout))? == 0)
 }
 
-/// Whether the owner paused `CodeRabbit` PR reviews: the all-scope `paused` marker or the PR-scope `paused-pr` marker.
+/// Whether the user paused `CodeRabbit` PR reviews: the all-scope `paused` marker or the PR-scope `paused-pr` marker.
 pub(crate) fn pr_reviews_paused(home: &Path) -> Result<bool> {
     let state = home.join(".local/state/coderabbit-guard");
     for marker in ["paused", "paused-pr"] {
@@ -706,7 +706,7 @@ pub fn recommend(state: Observed) -> Recommendation {
         ),
         Step::AwaitPushResume => (
             format!(
-                "{} commits are unpushed, but push is paused on this machine; continue local work until the owner resumes pushing",
+                "{} commits are unpushed, but push is paused on this machine; continue local work until the user resumes pushing",
                 state.unpushed
             ),
             None,
@@ -748,7 +748,7 @@ pub fn recommend(state: Observed) -> Recommendation {
         ),
         Step::AwaitReviewResume => (
             format!(
-                "The required CodeRabbit route is paused by the owner on PR #{number}; continue independent work until that pool resumes"
+                "The required CodeRabbit route is paused by the user on PR #{number}; continue independent work until that pool resumes"
             ),
             None,
         ),

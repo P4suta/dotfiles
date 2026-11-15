@@ -11,7 +11,7 @@ Typed code that imports a dynamically typed dependency still needs trustworthy s
 
 For JavaScript or TypeScript, prefer typed code and turn on the current [strict compiler checks](https://www.typescriptlang.org/tsconfig/strict.html).
 For retained JavaScript, require checked JSDoc contracts and include the JavaScript files in the type-checking project.
-Strict inference never requires explicit public return annotations, so enforce the owner's annotation rule through a compatible semantic lint where needed.
+Strict inference never requires explicit public return annotations, so enforce the user's annotation rule through a compatible semantic lint where needed.
 Keep unchecked `any`, type assertions, non-null assertions, ignored diagnostics, and unvalidated input from bypassing the intended contract.
 
 For another dynamic language, choose its maintained annotation or signature system, checker, and annotation-presence rules from official sources.

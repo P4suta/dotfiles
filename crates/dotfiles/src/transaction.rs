@@ -185,7 +185,7 @@ pub(crate) fn capture(destination: &Path, backup: &Path, targets: &[PathBuf]) ->
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        // `rwx------`: the backup holds the owner's configuration, which can include secrets.
+        // `rwx------`: the backup holds the user's configuration, which can include secrets.
         const OWNER_ONLY: u32 = 0o700;
         fs::set_permissions(&backup, fs::Permissions::from_mode(OWNER_ONLY))?;
     }

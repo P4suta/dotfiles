@@ -14,13 +14,13 @@ Verify observable requirements with appropriate checks and rejecting examples.
 Keep the verification confirmation short and grounded in actual results.
 An unverified applicable criterion remains open.
 Update the criteria when the intended experience changes, and invalidate affected results.
-Don't describe advisory wording as normative when owner policy supplies the stronger adoption.
+Don't describe advisory wording as normative when personal policy supplies the stronger adoption.
 
 ## Standards and applicability
 
 Review every Level A and Level AA success criterion in the current [Web Content Accessibility Guidelines (WCAG) 2.2 Recommendation](https://www.w3.org/TR/WCAG22/).
 Determine which conditions exist in the affected artifact, including externally hosted steps needed for its task.
-Select other criteria and recommendations when the task or owner policy makes them applicable.
+Select other criteria and recommendations when the task or personal policy makes them applicable.
 Use [W3C Understanding documents](https://www.w3.org/WAI/WCAG22/Understanding/) to interpret conditions without replacing the normative specification.
 Check the [full-page and complete-process requirements](https://www.w3.org/TR/WCAG22/#conformance-reqs) before making a conformance claim.
 An automated scan, local proof, or tested landing page supplies no evidence for an unchecked external process.

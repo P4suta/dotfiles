@@ -43,7 +43,7 @@ pub fn verdict(arguments: &[&str]) -> Verdict {
 }
 
 pub const NEXT_ACTION: &str =
-    "ask the owner to run it; a tailscale command can open a sign-in window on the owner's desktop";
+    "ask the user to run it; a tailscale command can open a sign-in window on the user's desktop";
 
 #[cfg(any(test, kani))]
 mod proofs {
@@ -213,7 +213,7 @@ mod tests {
     fn refusal_explains_the_owner_action_and_desktop_sign_in() {
         assert_eq!(
             NEXT_ACTION,
-            "ask the owner to run it; a tailscale command can open a sign-in window on the owner's desktop"
+            "ask the user to run it; a tailscale command can open a sign-in window on the user's desktop"
         );
     }
 }

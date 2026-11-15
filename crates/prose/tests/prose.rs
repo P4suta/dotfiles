@@ -104,6 +104,111 @@ fn documents_report_the_rule_and_the_offending_sentence() -> Result<()> {
 }
 
 #[test]
+fn personal_address_rejects_user_roles() -> Result<()> {
+    let bundle = source()?;
+    for channel in [
+        Channel::Commit,
+        Channel::Document,
+        Channel::Pr,
+        Channel::Issue,
+    ] {
+        for sentence in [
+            "Owner approval is pending.",
+            "The owner confirmed the transfer.",
+            "Owner authorization is required.",
+            "OWNER ACCEPTANCE is pending.",
+            "You are the owner.",
+            "As the owner, you can approve this.",
+            "The owner opens the certificate.",
+            "The owner saves the certificate.",
+            "Only the owner clears a review pause.",
+            "The owner's voice guides the reply.",
+            "Repository owner approval is pending; you are the owner.",
+            "Ownerに確認します。",
+            "オーナーの承認を待ちます。",
+            "所有者様の確認を待ちます。",
+        ] {
+            let findings = prose::check(&bundle, channel, "message", sentence)?;
+            assert!(
+                rules(&findings).contains(&"Dotfiles.UserAddress"),
+                "{channel:?}: {sentence}: {findings:?}"
+            );
+        }
+        for sentence in [
+            "Approval is pending.",
+            "The file owner has write access.",
+            "The repository owner can update the ruleset.",
+            "Rust ownership controls when a value is dropped.",
+            "The owner map resolves repository origins.",
+            "The owner-local state directory holds the issue context.",
+            "`Owner` is an API identifier.",
+            "ファイルの所有者を確認します。",
+            "> Owner approval is pending.",
+            "```text\nOwner approval is pending.\n```",
+        ] {
+            let findings = prose::check(&bundle, channel, "message", sentence)?;
+            assert!(
+                !rules(&findings).contains(&"Dotfiles.UserAddress"),
+                "{channel:?}: {sentence}: {findings:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn personal_address_preserves_qualified_ownership() -> Result<()> {
+    let bundle = source()?;
+    for channel in [
+        Channel::Commit,
+        Channel::Document,
+        Channel::Pr,
+        Channel::Issue,
+    ] {
+        for sentence in [
+            "Repository owner approval is required.",
+            "File owner approval is required.",
+            "The file owner's approval is required.",
+            "The directory owner's permission controls access.",
+            "The owner of the file has write access.",
+            "The owner of the repository can update the ruleset.",
+            "You are the repository owner.",
+            "Rustのオーナーシップは値の有効期間を管理します。",
+            "ファイルの所有者の確認が必要です。",
+            "ファイル所有者の確認が必要です。",
+        ] {
+            let findings = prose::check(&bundle, channel, "message", sentence)?;
+            assert!(
+                !rules(&findings).contains(&"Dotfiles.UserAddress"),
+                "{channel:?}: {sentence}: {findings:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn personal_address_refuses_a_missing_or_weakened_rule() -> Result<()> {
+    let mut bundle = source()?;
+    let rule = "styles/Dotfiles/UserAddress.yml";
+    let original = fs::read_to_string(bundle.config.join(rule))?;
+    let copy = tempfile::tempdir()?;
+    bundle.config = copy.path().to_owned();
+    let missing = prose::check_user_address(&bundle, "reply.md", "Owner approval is pending.")
+        .expect_err("missing address rule");
+    assert!(format!("{missing:#}").contains("read the shared personal address rule"));
+    fs::create_dir_all(bundle.config.join("styles/Dotfiles"))?;
+    fs::write(
+        bundle.config.join(rule),
+        original.replace("owner", "project"),
+    )?;
+    let weakened = prose::check_user_address(&bundle, "reply.md", "Owner approval is pending.")
+        .expect_err("changed address rule");
+    assert!(format!("{weakened:#}").contains("differs from the compiled policy"));
+    Ok(())
+}
+
+#[test]
 fn repository_rules_cover_hedging_comparison_lines_and_language() -> Result<()> {
     let bundle = source()?;
     let document = |text: &str| prose::check(&bundle, Channel::Document, "guide.md", text);
@@ -383,6 +488,132 @@ fn comments_from_ocomment_map_findings_to_source_lines() -> Result<()> {
     );
     assert_eq!(prose::comment_prose("  /** Reads it. */"), "Reads it.");
     assert_eq!(prose::comment_prose("## - item"), "- item");
+    Ok(())
+}
+
+#[test]
+fn csharp_xml_documentation_keeps_prose_visible_to_sentence_checks() -> Result<()> {
+    for (path, kind, text) in [
+        (
+            "src/Library.cs",
+            "doc-line",
+            "/// <summary>Reads a value. Returns the value.</summary>",
+        ),
+        (
+            "src/Library.CS",
+            "doc-block",
+            "/** <summary>Reads a value. Returns the value.</summary> */",
+        ),
+    ] {
+        let scanned = json!({"path": path, "report": {"comments": [
+            {"line": 7, "column": 1, "end_line": 7, "kind": kind, "text": text}
+        ]}});
+        let inputs = prose::scanned_comments(&scanned.to_string())?;
+        let findings = prose::sentence_per_line(&inputs[0]);
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.rule == "Dotfiles.SentencePerLine" && finding.line == 7)
+        );
+    }
+    let scanned = json!({"path": "src/Library.cs", "report": {"comments": [
+        {"line": 7, "column": 1, "end_line": 7, "kind": "doc-line", "text": "/// <summary>Reads the value.</summary>"}
+    ]}});
+    let inputs = prose::scanned_comments(&scanned.to_string())?;
+    assert_eq!(prose::sentence_per_line(&inputs[0]), []);
+    Ok(())
+}
+
+#[test]
+fn upstream_markdown_respects_explicit_preserved_layout_and_checks_wording() -> Result<()> {
+    let root = tempfile::tempdir()?;
+    let original = b"Currently we have the [guide](before). More guides are coming up!\n";
+    let edited = b"Currently we have the [guide](after). More guides are coming up!\n";
+    let inputs = prose::upstream_prose_inputs(root.path(), "guide.md", original, edited)?;
+    assert_ne!(prose::sentence_per_line(&inputs[0]), [] as [Finding; 0]);
+
+    fs::write(
+        root.path().join(".ocomment.toml"),
+        "[style]\nwrap = 'preserve'\n",
+    )?;
+    let inputs = prose::upstream_prose_inputs(root.path(), "guide.md", original, edited)?;
+    assert_eq!(prose::check_inputs(&source()?, &inputs)?, []);
+    for candidate in [original.as_slice(), edited.as_slice()] {
+        let mut added = candidate.to_vec();
+        added.extend_from_slice(b"\nCurrently, the checks pass.\n");
+        let inputs = prose::upstream_prose_inputs(root.path(), "guide.md", original, &added)?;
+        assert!(
+            prose::check_inputs(&source()?, &inputs)?
+                .iter()
+                .any(|finding| finding.rule == "Google.Timeless" && finding.line == 3)
+        );
+    }
+    let duplicated =
+        String::from_utf8(edited.to_vec())?.replace("More guides", "Currently more guides");
+    let inputs =
+        prose::upstream_prose_inputs(root.path(), "guide.md", original, duplicated.as_bytes())?;
+    assert_eq!(
+        prose::check_inputs(&source()?, &inputs)?
+            .iter()
+            .filter(|finding| finding.rule == "Google.Timeless")
+            .count(),
+        1
+    );
+    let inputs = prose::upstream_prose_inputs(
+        root.path(),
+        "guide.md",
+        original,
+        "記録を保存します。\n".as_bytes(),
+    )?;
+    assert!(
+        prose::check_inputs(&source()?, &inputs)?
+            .iter()
+            .any(|finding| finding.rule == "Dotfiles.English")
+    );
+    fs::write(root.path().join(".ocomment.toml"), "invalid=[")?;
+    assert!(prose::upstream_prose_inputs(root.path(), "guide.md", original, edited).is_err());
+    Ok(())
+}
+
+#[test]
+fn editing_upstream_lists_and_tables_preserves_shape_and_rejects_growth() -> Result<()> {
+    for (original, edited, addition, rule) in [
+        (
+            "- Read the `before` value.\n- Keep the record.\n",
+            "- Read the `after` value.\n- Keep the record.\n",
+            "\n- Store the value.\n",
+            "House.List",
+        ),
+        (
+            "| Field | Value |\n| --- | --- |\n| Record | `before` |\n",
+            "| Field | Value |\n| --- | --- |\n| Record | `after` |\n",
+            "\n| Other | Value |\n| --- | --- |\n| Record | stored |\n",
+            "House.Table",
+        ),
+    ] {
+        let root = tempfile::tempdir()?;
+        let inputs = prose::upstream_prose_inputs(
+            root.path(),
+            "guide.md",
+            original.as_bytes(),
+            edited.as_bytes(),
+        )?;
+        assert_eq!(prose::check_inputs(&source()?, &inputs)?, []);
+        for candidate in [original, edited] {
+            let added = format!("{candidate}{addition}");
+            let inputs = prose::upstream_prose_inputs(
+                root.path(),
+                "guide.md",
+                original.as_bytes(),
+                added.as_bytes(),
+            )?;
+            assert!(
+                prose::check_inputs(&source()?, &inputs)?
+                    .iter()
+                    .any(|finding| finding.rule == rule)
+            );
+        }
+    }
     Ok(())
 }
 
@@ -735,7 +966,7 @@ fn hook_arguments(hook: &str, command: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-/// The directory holding a stand-in `ocomment`, compiled once, because CI hosts don't install the owner's tool.
+/// The directory holding a stand-in `ocomment`, compiled once, because CI hosts don't install the user's tool.
 fn ocomment_directory() -> Result<&'static Path> {
     static DIRECTORY: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     if let Some(directory) = DIRECTORY.get() {

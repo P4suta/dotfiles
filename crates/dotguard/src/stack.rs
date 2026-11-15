@@ -204,7 +204,7 @@ impl Repository for Checkout {
         if std::env::var_os(STRICT_TEMPORARY).is_some_and(|value| value == "1") {
             return Some(false);
         }
-        // A worktree under the temporary directory still shares the owner's repository, so the common directory decides.
+        // A worktree under the temporary directory still shares the user's repository, so the common directory decides.
         let common = git(globals, &["rev-parse", ABSOLUTE_PATH, "--git-common-dir"])?;
         let common = platform::paths::canonical(Path::new(&common)).ok()?;
         Some(

@@ -22,7 +22,7 @@ Preserve the user's language, product, scope, and authorization boundaries.
 Save the method, applicability conditions, decision criteria, failure cases, and verification that future work needs.
 Keep the supporting primary sources, reproducible observations, or explicit user preference that justify the lesson.
 Link external sources by exact URL and identify the supporting section.
-Distinguish source requirements, recommendations adopted as owner policy, project conventions, and unresolved interpretations.
+Distinguish source requirements, recommendations adopted as personal policy, project conventions, and unresolved interpretations.
 Keep task-specific paths, credentials, personal data, and operational state out of shared instructions.
 Generalize the reusable method without copying confidential source or customer context.
 Keep an observed fix, a causal hypothesis, and a general rule distinct, and state the conditions that support reuse.

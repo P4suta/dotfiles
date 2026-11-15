@@ -259,7 +259,7 @@ pub const fn admit(required: [bool; 3], evidence: [Evidence; 3]) -> Verdict {
 }
 
 /// The gate covers only a branch update on GitHub.
-/// It skips deletions, tags, and pushes to the hubs of the owner.
+/// It skips deletions, tags, and pushes to the hubs of the user.
 #[must_use]
 pub const fn gated(github: bool, branch: bool, deletion: bool) -> bool {
     github && branch && !deletion
@@ -279,7 +279,7 @@ pub enum Key {
     Changed,
 }
 
-/// A changed key replaces the pinned one only when the owner accepted that host.
+/// A changed key replaces the pinned one only when the user accepted that host.
 #[must_use]
 pub const fn pin(key: Key, accepted: bool) -> bool {
     match key {

@@ -40,7 +40,7 @@ pub enum Provision {
     Host,
     /// Installed by this setup step before any later step relies on it.
     Setup(Step),
-    /// A program the owner installs outside this repository, which callers probe for before use.
+    /// A program the user installs outside this repository, which callers probe for before use.
     Owner,
 }
 
@@ -580,13 +580,13 @@ impl Tool {
 /// The repository-local variables that `git rev-parse --local-env-vars` lists.
 pub use crate::process::GIT_LOCAL_ENVIRONMENT;
 
-/// A program chosen at run time rather than from the registry: a consumer command the owner passes through, or a verified vendor installer.
+/// A program chosen at run time rather than from the registry: a consumer command the user passes through, or a verified vendor installer.
 #[must_use]
 pub fn external(program: impl AsRef<std::ffi::OsStr>) -> Command {
     crate::process::command(program)
 }
 
-/// Resolves and checks the owner's shared gh-stack installation outside the target repository.
+/// Resolves and checks the user's shared gh-stack installation outside the target repository.
 ///
 /// # Errors
 /// Returns an error for a missing installation or an unexpected executable version.
@@ -594,7 +594,7 @@ pub fn owner_gh_stack() -> anyhow::Result<Command> {
     owner_shared_tool("github:github/gh-stack", "gh-stack", "gh stack version ")
 }
 
-/// Resolves and checks the owner's shared D2 installation outside the target repository.
+/// Resolves and checks the user's shared D2 installation outside the target repository.
 ///
 /// # Errors
 /// Returns an error for a missing installation or an unexpected executable version.

@@ -429,7 +429,7 @@ fn read_approval(path: &Path) -> Result<AdoptionApproval> {
 }
 
 /// # Errors
-/// Returns an error for newly dirty implementation without a prior context or owner approval.
+/// Returns an error for newly dirty implementation without a prior context or user approval.
 pub fn authorize_initial(root: &Path, context: &mut Context, adopt_existing: bool) -> Result<()> {
     let home = crate::home::home().context("issue-context owner home missing")?;
     let state = checkout_state_for(root, &home)?;

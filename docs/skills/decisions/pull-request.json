@@ -1,8 +1,18 @@
 {
-  "revision": "3eecaac00ea1cadd4a44aa0b2bf053fcc4b7b11bf475f8346ecf7f6612ba3dc6",
+  "revision": "b0ad4e357a8c3a35dfcdec280dae29a892fe9b3b703c1754bd07d6948a8cd2d4",
   "outcome": "implemented",
-  "reason": "Checked publication attaches images and retains source without storage branches. Diagrams explain applicable relationships proactively. Migration preserves files and history before guarded retirement. Scoped installation retains unrelated content and review records without experimental maintenance. The guard and policy companion deploy together, and installed dispatch verifies their source match.",
+  "reason": "Bind required upstream notices to exact repositories and preserve upstream prose through immutable Git baselines.\nKeep contribution requirements in the existing PR workflow and preserve technical ownership terms while addressing the user directly.\nUse the standing current-head PR quota exception without another confirmation for already authorized personal non-fork PR merges.\nPreserve required checks, reviews, supported findings, publication holds, and truthful review status.\nKeep the installed guidance for concise PR descriptions.",
   "evidence": [
+    "docs/adr/merge-after-coderabbit-review-limits.md",
+    "docs/adr/scope-contribution-exceptions-to-upstream-sources.md",
+    "crates/platform/src/contribution.rs",
+    "crates/platform/src/upstream.rs",
+    "crates/platform/tests/contribution_notices.rs",
+    "crates/platform/tests/upstream_git.rs",
+    "crates/prose/src/copyedit/nlp.rs",
+    "docs/adr/honor-explicit-merges-during-optional-review-pauses.md",
+    "docs/adr/use-automatic-coderabbit-reviews-without-command-generation.md",
+    "docs/adr/use-coderabbit-without-importance-opt-outs.md",
     "crates/rules/src/review_routing_rules.rs",
     "docs/adr/require-no-cli-review-for-high-prs.md",
     "crates/pr-workflow/src/figure.rs",
@@ -82,7 +92,7 @@
   "revisit": null,
   "size": {
     "outcome": "keep",
-    "reason": "Attachment and migration details live in a focused reference, and diagram design lives in its own reusable skill.",
+    "reason": "Keep contribution prerequisites in the entrypoint and registration details in the existing workflow reference.",
     "revisit": null
   }
 }

@@ -1,4 +1,4 @@
-//! Whether published prose says how its text came about, which the owner's own text never says.
+//! Whether published prose says how its text came about, which the user's own text never says.
 
 /// The phrases, in small letters, that describe the writing instead of the change.
 pub const PHRASES: [&str; 11] = [
@@ -31,7 +31,7 @@ pub const fn verdict(found: bool) -> Verdict {
     }
 }
 
-pub const NEXT_ACTION: &str = "Rewrite that sentence about the change itself, in the owner's own voice, and send the text again.";
+pub const NEXT_ACTION: &str = "Rewrite that sentence about the change itself, in the user's own voice, and send the text again.";
 
 /// The one-based line and the phrase of the first provenance phrase in prose.
 /// Fenced code blocks and inline code spans don't count, so a document can quote a phrase.

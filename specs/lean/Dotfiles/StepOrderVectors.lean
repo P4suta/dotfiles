@@ -9,7 +9,7 @@ namespace Dotfiles.StepOrder.Vectors
 
 open Dotfiles.StepOrder
 
-/-! The steps in declaration order: 0 mise, 1 runtime, 2 github, 3 scoop, 4 winget, 5 nix, 6 desktop, 7 tools, 8 herdr, 9 integrations, 10 python-stub, 11 keyboard, 12 sshd, 13 storage-scout, 14 fcitx5, 15 macos-defaults, 16 forge-keys, 17 claude, 18 ocaml, 19 haskell, 20 racket, 21 guard, 22 ocomment, 23 domyjob, 24 fleet, 25 retire-tmux, 26 upgrade, 27 chat, 28 adapters. -/
+/-! The steps in declaration order: 0 mise, 1 runtime, 2 github, 3 scoop, 4 winget, 5 nix, 6 desktop, 7 tools, 8 herdr, 9 integrations, 10 python-stub, 11 keyboard, 12 sshd, 13 storage-scout, 14 fcitx5, 15 macos-defaults, 16 forge-keys, 17 claude, 18 ocaml, 19 haskell, 20 racket, 21 guard, 22 ocomment, 23 domyjob, 24 fleet, 25 retire-tmux, 26 upgrade, 27 adapters. -/
 
 /-- Each unix step's prerequisites among the unix steps. -/
 def unixAfter : Deps
@@ -31,12 +31,11 @@ def unixAfter : Deps
   | 23 => [7, 1]
   | 24 => [7, 1]
   | 25 => [1]
-  | 27 => [23, 9, 17, 1]
-  | 28 => [0, 1, 2, 5, 6, 7, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27]
+  | 27 => [0, 1, 2, 5, 6, 7, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
   | _ => []
 
 /-- The unix launchers in run order. -/
-def unixOrder : List Nat := [0, 1, 2, 5, 6, 7, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28]
+def unixOrder : List Nat := [0, 1, 2, 5, 6, 7, 9, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27]
 
 theorem unix_respected : DirectlyRespected unixAfter unixOrder := by decide +kernel
 
@@ -60,12 +59,11 @@ def windowsAfter : Deps
   | 17 => [1]
   | 22 => [7, 1]
   | 23 => [7, 1]
-  | 27 => [23, 9, 17, 1]
-  | 28 => [0, 1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 17, 22, 23, 27]
+  | 27 => [0, 1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 17, 22, 23]
   | _ => []
 
 /-- The windows launchers in run order. -/
-def windowsOrder : List Nat := [0, 1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 17, 22, 23, 27, 28]
+def windowsOrder : List Nat := [0, 1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 17, 22, 23, 27]
 
 theorem windows_respected : DirectlyRespected windowsAfter windowsOrder := by decide +kernel
 

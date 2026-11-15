@@ -24,11 +24,11 @@ First confirm trusted-publisher availability for each package and its registrati
 Use `doppler` and its credential lifecycle reference for any stored bootstrap input and retirement.
 Treat an expired or revoked registry token as a retirement candidate instead of copying it into a new config.
 Remove obsolete token selection and fallback branches when the existing package uses trusted publishing.
-Leave an unpublished package or missing trusted-publisher registration unconfigured until the owner approves its setup.
+Leave an unpublished package or missing trusted-publisher registration unconfigured until the user approves its setup.
 A first publication may need its own authorized narrow bootstrap credential.
 Never run that bootstrap only to test setup.
 After its authorized first publication and verified trusted-publisher setup, retire the bootstrap input and its GitHub mirror.
-Keep bootstrap input owner-managed, short-lived, and out of logs and repository state.
+Keep bootstrap input user-managed, short-lived, and out of logs and repository state.
 
 Build and verify candidate `.crate` archives before registry authentication.
 Check the publishable workspace set, version, dependency order, package contents, locked dependencies, and source identity.

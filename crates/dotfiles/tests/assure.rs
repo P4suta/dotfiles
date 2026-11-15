@@ -76,6 +76,31 @@ fn adr_gates_preserve_untouched_history_and_refuse_an_oversize_change() -> Resul
 }
 
 #[test]
+fn inherited_merge_adrs_are_unchanged_at_commit_and_stop() -> Result<()> {
+    let fixture = Fixture::new()?;
+    let catalog = fixture.catalog()?;
+    fixture.git(&["switch", "--quiet", "-c", "incoming"])?;
+    let path = "docs/adr/bound-the-queue.md";
+    fixture.write(path, &"Historical detail.\n".repeat(201))?;
+    fixture.commit("historical decision")?;
+    fixture.git(&["switch", "--quiet", "main"])?;
+    fixture.write("README.md", "Topic documentation.\n")?;
+    fixture.commit("topic")?;
+    fixture.git(&["merge", "--no-commit", "--no-ff", "incoming"])?;
+    assert!(assure::commit(&fixture.root, &catalog).is_ok());
+    assert!(
+        assure::stop(&fixture.root, &catalog)?
+            .refusal(&catalog)
+            .is_none()
+    );
+    fixture.write(path, &"Edited historical detail.\n".repeat(201))?;
+    fixture.stage()?;
+    assert!(assure::commit(&fixture.root, &catalog).is_err());
+    assert!(assure::stop(&fixture.root, &catalog).is_err());
+    Ok(())
+}
+
+#[test]
 fn adr_stop_hook_returns_a_block_and_external_repositories_keep_their_rules() -> Result<()> {
     let fixture = Fixture::new()?;
     fixture.write("docs/adr/queue.md", &"Unnecessary detail.\n".repeat(201))?;
@@ -245,6 +270,10 @@ impl Fixture {
             .current_dir(&self.root)
             .env("HOME", home)
             .env("USERPROFILE", home)
+            .env(
+                "PROSE_CONFIG",
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../home/dot_config/prose"),
+            )
             .args(arguments)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -559,6 +588,11 @@ fn managed_requests_ignore_existing_work_and_still_refuse_changed_gaps() -> Resu
                 &["assure", "stop", "--reply-language", "Japanese"],
                 &input,
             )?;
+            ensure!(
+                output.status.success(),
+                "assure stop failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
             Ok(serde_json::from_slice(&output.stdout)?)
         };
         assert!(
@@ -868,7 +902,7 @@ fn ready_uses_the_explicit_commit_even_when_remote_tracking_refs_disagree() -> R
     fixture.git(&["update-ref", "refs/remotes/origin/main", &base])?;
     assert_eq!(first, refuse()?);
     assert_eq!(first.rule, "assure.added");
-    assert!(first.cause.contains("owner's local catalog"));
+    assert!(first.cause.contains("user's local catalog"));
     let evidence = first.evidence.join("\n");
     assert!(evidence.contains(&format!("base={base}")), "{evidence}");
     assert!(

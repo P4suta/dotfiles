@@ -34,7 +34,6 @@ pub enum Step {
     Fleet,
     RetireTmux,
     Upgrade,
-    Chat,
     Adapters,
 }
 
@@ -111,7 +110,7 @@ const EVERY: &[Profile] = &[Profile::Mac, Profile::Linux, Profile::Wsl, Profile:
 
 impl Step {
     /// Every step in declaration order, which breaks ties in the run order.
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 28] = [
         Self::Mise,
         Self::Runtime,
         Self::Github,
@@ -139,7 +138,6 @@ impl Step {
         Self::Fleet,
         Self::RetireTmux,
         Self::Upgrade,
-        Self::Chat,
         Self::Adapters,
     ];
 
@@ -174,7 +172,6 @@ impl Step {
             Self::Fleet => "fleet",
             Self::RetireTmux => "retire-tmux",
             Self::Upgrade => "upgrade",
-            Self::Chat => "chat",
             Self::Adapters => "adapters",
         }
     }
@@ -191,7 +188,6 @@ impl Step {
             | Self::Integrations
             | Self::Domyjob
             | Self::Ocomment
-            | Self::Chat
             | Self::Claude
             | Self::Adapters => EVERY,
             Self::Scoop
@@ -228,7 +224,6 @@ impl Step {
             Self::Desktop => &[Self::Nix],
             Self::Tools | Self::Upgrade => &[Self::Mise, Self::Nix, Self::Desktop, Self::Scoop],
             Self::Integrations => &[Self::Tools, Self::Herdr],
-            Self::Chat => &[Self::Domyjob, Self::Integrations, Self::Claude],
             Self::Ocomment | Self::Domyjob | Self::Fleet | Self::Ocaml | Self::Haskell => {
                 &[Self::Tools]
             }
@@ -277,12 +272,7 @@ impl Step {
     pub const fn condition(self, family: Family) -> Condition {
         match (self, family) {
             (
-                Self::Mise
-                | Self::Runtime
-                | Self::Integrations
-                | Self::Chat
-                | Self::Winget
-                | Self::Adapters,
+                Self::Mise | Self::Runtime | Self::Integrations | Self::Winget | Self::Adapters,
                 _,
             )
             | (Self::Ocomment, Family::Windows) => Condition::Always,
@@ -356,7 +346,6 @@ impl Step {
             (Self::Domyjob | Self::Fleet, _)
             | (Self::Ocomment, Profile::Mac | Profile::Linux | Profile::Wsl) => &[Tool::Lefthook],
             (Self::Integrations, Profile::Windows) => &[Tool::Starship, Tool::Zoxide],
-            (Self::Chat, _) => &[Tool::Domyjob],
             _ => &[],
         }
     }
@@ -372,10 +361,10 @@ impl Step {
     }
 }
 
-const ALL_BUT_ADAPTERS: [Step; 28] = {
-    let mut steps = [Step::Mise; 28];
+const ALL_BUT_ADAPTERS: [Step; 27] = {
+    let mut steps = [Step::Mise; 27];
     let mut index = 0;
-    while index < 28 {
+    while index < 27 {
         steps[index] = Step::ALL[index];
         index += 1;
     }
