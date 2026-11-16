@@ -1,0 +1,40 @@
+vars: {
+  d2-config: {
+    layout-engine: elk
+    pad: 40
+    theme-overrides: {
+      N1: "#000000"
+      N2: "#000000"
+      N3: "#000000"
+      N4: "#FFFFFF"
+      N5: "#FFFFFF"
+      N6: "#FFFFFF"
+      N7: "#FFFFFF"
+      B1: "#000000"
+      B2: "#000000"
+      B3: "#FFFFFF"
+      B4: "#FFFFFF"
+      B5: "#FFFFFF"
+      B6: "#FFFFFF"
+      AA2: "#000000"
+      AA4: "#FFFFFF"
+      AA5: "#FFFFFF"
+      AB4: "#FFFFFF"
+      AB5: "#FFFFFF"
+    }
+  }
+}
+
+direction: right
+
+pin: "dotfiles pin\nmise.toml, mise.lock"
+old: "OComment 552c8d0"
+new: "OComment 363859d"
+hook: "Staged prose hook\nocomment fix --tidy --staged"
+gleam: "Gleam module\nwith an HTML string"
+
+pin -> old: "today" {style.stroke-dash: 3}
+pin -> new: "after this change"
+old -> gleam: "reads as HTML,\nrefuses the commit" {style.stroke-dash: 3}
+new -> gleam: "reads with the\ngleam profile"
+hook -> pin: "runs the pinned binary"
