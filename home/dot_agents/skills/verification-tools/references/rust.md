@@ -4,6 +4,12 @@ Decide what must run from the actual crate features, test targets, toolchain, an
 Keep ordinary formatting, compiler checks, and strict Clippy checks in the fast authoritative gate.
 Use `formal-assurance` for implementation proofs, and never treat a dynamic check as a soundness proof.
 
+A gate that forbids `Box` or `dyn` through Clippy's [`disallowed_types`](https://clippy.rust-lang.org/stable/index.html#disallowed_types) or a resolved-type lint also applies to the types that standard-library code returns or expands to.
+[`ScopedJoinHandle::join`](https://doc.rust-lang.org/std/thread/struct.ScopedJoinHandle.html#method.join) returns [`std::thread::Result`](https://doc.rust-lang.org/std/thread/type.Result.html), whose error type is `Box<dyn Any + Send + 'static>`, so such a lint refuses the call.
+Sending each thread's result through [`std::sync::mpsc`](https://doc.rust-lang.org/std/sync/mpsc/index.html) avoids that type, and [`std::thread::scope`](https://doc.rust-lang.org/std/thread/fn.scope.html) still joins the threads and panics if one of them panicked.
+With Rust 1.100.0 on 2026-11-16, `vec![a, b]` expanded through `Box` and tripped a `disallowed-types` entry for `Box`, while `[a, b].to_vec()` passed.
+The standard library doesn't document that expansion, so recheck it after a toolchain update before a gate decision depends on it.
+
 For undefined behavior and unsafe contracts, add a pinned compatible nightly with [Miri](https://github.com/rust-lang/miri) and run the applicable production tests through it.
 Include safe wrappers around unsafe dependencies when the project exercises their contract.
 Require the identified tests to run, because a filter that drops every relevant test establishes no coverage.

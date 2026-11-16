@@ -1,12 +1,13 @@
 {
-  "revision": "ea6e376a5170b101603e9abe1b7945b4536ea9ffed014e2e1342348606a823b7",
+  "revision": "2bf153ce27bf6cbcf7f57fe638869e42edccded7e556cda4999e4cbbee21adb0",
   "outcome": "implemented",
-  "reason": "Keep required coverage and actual project check results without separate verification inventories or task declarations, while preserving CI and release timing.",
+  "reason": "Name the standard-library constructs that trip a type-ban gate and the alternatives that pass, and tie the macro expansion to the toolchain version that showed it.",
   "evidence": [
     "home/dot_agents/skills/verification-tools/SKILL.md",
+    "home/dot_agents/skills/verification-tools/references/rust.md",
     "home/dot_agents/skills/development-assurance/references/verification-contract.md",
     "crates/dotfiles/src/verification/mod.rs",
     "docs/adr/keep-project-checks-authoritative-in-agent-sessions.md"
   ],
-  "revisit": null
+  "revisit": "Recheck the vec! expansion after a Rust toolchain update, and remove the note when the macro no longer expands through Box."
 }

@@ -1,12 +1,13 @@
 {
-  "revision": "b67d26b2b5efde5f2dbef26a568422b145001d31e5ca265cbb51520577bd8598",
+  "revision": "ff1b2e7fd52f792e7dddb2134ff687fc4d10a27d8e707a291a4a9ec66a2ca685",
   "outcome": "implemented",
-  "reason": "Use pinned verification inputs, project runners, and deterministic adapters while keeping timeouts and unavailable live observations inconclusive.",
+  "reason": "Separate host packet filtering from remote device behavior, and keep the macOS firewall comparison as a dated observation with its untested rebuild question.",
   "evidence": [
     "home/dot_agents/skills/reliability/SKILL.md",
     "home/dot_agents/skills/reliability/references/time-and-randomness.md",
     "home/dot_agents/skills/reliability/references/boundaries-and-environment.md",
+    "home/dot_agents/skills/reliability/references/macos-application-firewall.md",
     "home/dot_agents/skills/reliability/references/tests-and-diagnostics.md"
   ],
-  "revisit": null
+  "revisit": "Repeat the macOS firewall comparison after a macOS release changes the firewall, or when a rebuild test shows whether a binary's firewall decision persists."
 }
