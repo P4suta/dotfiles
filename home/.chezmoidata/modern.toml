@@ -197,7 +197,7 @@ legacy = ["time"]
 preferred = "hyperfine"
 tool = "hyperfine"
 # renovate: datasource=github-releases depName=sharkdp/hyperfine extractVersion=^v(?<version>.+)$
-version = "1.21.0"
+version = "2.0.0"
 reason = "It repeats runs and reports statistics, so a comparison survives noise."
 keep = "Timing one run whose output you also need."
 next = "hyperfine '{args}'"
