@@ -2574,54 +2574,63 @@ url = "https://github.com/astral-sh/python-build-standalone/releases/download/20
 provenance = "github-attestations"
 
 [[tools.qsv]]
-version = "24.0.0"
+version = "28.0.0"
 backend = "aqua:dathere/qsv"
-specifiers = ["24.0.0"]
+specifiers = ["28.0.0"]
 
 [tools.qsv."platforms.linux-arm64"]
-checksum = "sha256:04b490de8938576b5e56675b70b3147b78a071a0fd3905346059af3019040862"
-url = "https://github.com/dathere/qsv/releases/download/24.0.0/qsv-24.0.0-aarch64-unknown-linux-gnu.zip"
-url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/611506752"
+checksum = "sha256:e14a54775ce2cc12be75d425133831535dace0987687d7eb75c31eb04d3620b9"
+checksum_source = "mise-versions"
+url = "https://github.com/dathere/qsv/releases/download/28.0.0/qsv-28.0.0-aarch64-unknown-linux-gnu.zip"
+url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/700532141"
 
 [tools.qsv."platforms.linux-arm64-musl"]
-checksum = "sha256:04b490de8938576b5e56675b70b3147b78a071a0fd3905346059af3019040862"
-url = "https://github.com/dathere/qsv/releases/download/24.0.0/qsv-24.0.0-aarch64-unknown-linux-gnu.zip"
-url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/611506752"
+checksum = "sha256:e14a54775ce2cc12be75d425133831535dace0987687d7eb75c31eb04d3620b9"
+checksum_source = "mise-versions"
+url = "https://github.com/dathere/qsv/releases/download/28.0.0/qsv-28.0.0-aarch64-unknown-linux-gnu.zip"
+url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/700532141"
 
 [tools.qsv."platforms.linux-x64"]
-checksum = "sha256:7d863841300bb3ae22d8c7146ab048f7419a2d3a4400d31f8b4165034cc18d93"
-url = "https://github.com/dathere/qsv/releases/download/24.0.0/qsv-24.0.0-x86_64-unknown-linux-gnu.zip"
-url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/612472797"
+checksum = "sha256:53f5792a780dc99553dc6af420447c5e7e34872f3ba74a148d901e305475d94f"
+checksum_source = "mise-versions"
+url = "https://github.com/dathere/qsv/releases/download/28.0.0/qsv-28.0.0-x86_64-unknown-linux-gnu.zip"
+url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/701047134"
 
 [tools.qsv."platforms.linux-x64-baseline"]
-checksum = "sha256:7d863841300bb3ae22d8c7146ab048f7419a2d3a4400d31f8b4165034cc18d93"
-url = "https://github.com/dathere/qsv/releases/download/24.0.0/qsv-24.0.0-x86_64-unknown-linux-gnu.zip"
-url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/612472797"
+checksum = "sha256:53f5792a780dc99553dc6af420447c5e7e34872f3ba74a148d901e305475d94f"
+checksum_source = "mise-versions"
+url = "https://github.com/dathere/qsv/releases/download/28.0.0/qsv-28.0.0-x86_64-unknown-linux-gnu.zip"
+url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/701047134"
 
 [tools.qsv."platforms.linux-x64-musl"]
-checksum = "sha256:0079acb8542af8b243fa861259746a6a88cef1aefc07214aaaf0f0a1b0593738"
-url = "https://github.com/dathere/qsv/releases/download/24.0.0/qsv-24.0.0-x86_64-unknown-linux-musl.zip"
-url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/611523906"
+checksum = "sha256:66619384e9bf9585a4cac7b800690ebfd006ae3ae4f515c4f7c326fb4dab0c43"
+checksum_source = "mise-versions"
+url = "https://github.com/dathere/qsv/releases/download/28.0.0/qsv-28.0.0-x86_64-unknown-linux-musl.zip"
+url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/700542161"
 
 [tools.qsv."platforms.linux-x64-musl-baseline"]
-checksum = "sha256:0079acb8542af8b243fa861259746a6a88cef1aefc07214aaaf0f0a1b0593738"
-url = "https://github.com/dathere/qsv/releases/download/24.0.0/qsv-24.0.0-x86_64-unknown-linux-musl.zip"
-url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/611523906"
+checksum = "sha256:66619384e9bf9585a4cac7b800690ebfd006ae3ae4f515c4f7c326fb4dab0c43"
+checksum_source = "mise-versions"
+url = "https://github.com/dathere/qsv/releases/download/28.0.0/qsv-28.0.0-x86_64-unknown-linux-musl.zip"
+url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/700542161"
 
 [tools.qsv."platforms.macos-arm64"]
-checksum = "sha256:7889eb0657cc36f6789c6e80e77fb5474d4910079aaa184a3ed062a7e09914b7"
-url = "https://github.com/dathere/qsv/releases/download/24.0.0/qsv-24.0.0-aarch64-apple-darwin.zip"
-url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/614342334"
+checksum = "sha256:ada81a996092b14a5087b16a97baa6d14e0e0a1219a44c4759c5b7320eb73dfa"
+checksum_source = "mise-versions"
+url = "https://github.com/dathere/qsv/releases/download/28.0.0/qsv-28.0.0-aarch64-apple-darwin.zip"
+url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/700718785"
 
 [tools.qsv."platforms.windows-x64"]
-checksum = "sha256:737b6b040fe484f5f9767181f7f4bdebb3eda75e4d1ecbd427b9250aa0bd5483"
-url = "https://github.com/dathere/qsv/releases/download/24.0.0/qsv-24.0.0-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/612556658"
+checksum = "sha256:f93d9cdfb769cb86ffb620808845586425c18a6b55bc902a74366628b9398216"
+checksum_source = "mise-versions"
+url = "https://github.com/dathere/qsv/releases/download/28.0.0/qsv-28.0.0-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/701011394"
 
 [tools.qsv."platforms.windows-x64-baseline"]
-checksum = "sha256:737b6b040fe484f5f9767181f7f4bdebb3eda75e4d1ecbd427b9250aa0bd5483"
-url = "https://github.com/dathere/qsv/releases/download/24.0.0/qsv-24.0.0-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/612556658"
+checksum = "sha256:f93d9cdfb769cb86ffb620808845586425c18a6b55bc902a74366628b9398216"
+checksum_source = "mise-versions"
+url = "https://github.com/dathere/qsv/releases/download/28.0.0/qsv-28.0.0-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/dathere/qsv/releases/assets/701011394"
 
 [[tools.rg]]
 version = "15.2.0"
