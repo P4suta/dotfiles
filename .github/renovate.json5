@@ -54,6 +54,17 @@
   ],
   packageRules: [
     {
+      // Match the proof image's Bookworm repositories for pinned apt packages.
+      matchManagers: ['dockerfile'],
+      matchDatasources: ['deb'],
+      matchFileNames: ['xtask/proofs/Dockerfile'],
+      registryUrls: [
+        'https://deb.debian.org/debian?suite=bookworm&components=main&binaryArch=amd64',
+        'https://deb.debian.org/debian?suite=bookworm-updates&components=main&binaryArch=amd64',
+        'https://deb.debian.org/debian-security?suite=bookworm-security&components=main&binaryArch=amd64',
+      ],
+    },
+    {
       // Lift this constraint after the native lint distributions pass the checks in issue #163.
       matchManagers: ['mise'],
       matchDepNames: ['python'],
