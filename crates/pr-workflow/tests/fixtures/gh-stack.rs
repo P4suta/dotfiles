@@ -6,7 +6,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args == ["--version"] {
         println!(
             "gh stack version {}",
-            std::env::var("GH_STACK_FIXTURE_VERSION").unwrap_or_else(|_| "0.2.1".into())
+            std::env::var("GH_STACK_FIXTURE_VERSION").unwrap_or_else(|_| "0.3.0".into())
         );
         return Ok(());
     }

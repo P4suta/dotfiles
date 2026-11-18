@@ -1,5 +1,7 @@
 # Linux verification host for `xtask proofs` where Kani has no native build.
-FROM docker.io/library/rust:1.99.1-bookworm@sha256:e6f2cff35d0f309acf8433b4f05878ed77092602c5065cc81801177da0bb3a9c
+FROM docker.io/library/rust:1.100.0-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN cargo install --locked kani-verifier --version 0.68.0 \
     && cargo kani setup \
@@ -9,7 +11,7 @@ RUN cargo install --locked kani-verifier --version 0.68.0 \
 
 # The gungraun benchmarks of the budget gate count instructions and heap peaks with Valgrind, which no other host of this repository runs.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends valgrind \
+    && apt-get install -y --no-install-recommends valgrind=1:3.19.0-1 \
     && rm -rf /var/lib/apt/lists/* \
     && cargo install --locked gungraun-runner --version 0.20.0 \
     && rm -rf /usr/local/cargo/registry
@@ -31,13 +33,13 @@ RUN curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/m
 
 # The image saves the analyzer release that the native gate pins.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libicu72 zsh \
+    && apt-get install -y --no-install-recommends libicu72=72.1-3+deb12u1 zsh=5.9-4+b15 \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/powershell \
     && curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" -o /tmp/powershell.tar.gz \
     && echo "${POWERSHELL_SHA256}  /tmp/powershell.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/powershell.tar.gz -C /opt/powershell \
     && chmod +x /opt/powershell/pwsh \
-    && ln -s /opt/powershell/pwsh /usr/local/bin/pwsh \
-    && pwsh -NoLogo -NoProfile -NonInteractive -Command '$ErrorActionPreference = "Stop"; Save-Module -Name PSScriptAnalyzer -RequiredVersion $env:ANALYZER_VERSION -Path /root/.cache/dotfiles/psscriptanalyzer -Repository PSGallery -Force; $assembly = "/root/.cache/dotfiles/psscriptanalyzer/PSScriptAnalyzer/$env:ANALYZER_VERSION/PSv7/Microsoft.Windows.PowerShell.ScriptAnalyzer.dll"; if ((Get-FileHash -LiteralPath $assembly -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:ANALYZER_SHA256) { throw "Analyzer checksum mismatch" }' \
-    && rm /tmp/powershell.tar.gz
+    && ln -s /opt/powershell/pwsh /usr/local/bin/pwsh
+
+RUN ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference = \"Stop\"; Save-Module -Name PSScriptAnalyzer -RequiredVersion $env:ANALYZER_VERSION -Path /root/.cache/dotfiles/psscriptanalyzer -Repository PSGallery -Force; $assembly = \"/root/.cache/dotfiles/psscriptanalyzer/PSScriptAnalyzer/$env:ANALYZER_VERSION/PSv7/Microsoft.Windows.PowerShell.ScriptAnalyzer.dll\"; if ((Get-FileHash -LiteralPath $assembly -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:ANALYZER_SHA256) { throw \"Analyzer checksum mismatch\" }; Remove-Item -LiteralPath /tmp/powershell.tar.gz"]

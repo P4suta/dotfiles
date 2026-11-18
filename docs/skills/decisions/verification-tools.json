@@ -1,7 +1,7 @@
 {
-  "revision": "ea6e376a5170b101603e9abe1b7945b4536ea9ffed014e2e1342348606a823b7",
+  "revision": "b6d992f6b53c077acbf0881cd69c237cf8ddec764def5131f4584791446cb9d1",
   "outcome": "implemented",
-  "reason": "Keep required coverage and actual project check results without separate verification inventories or task declarations, while preserving CI and release timing.",
+  "reason": "Bind Docker CLI 29.10.0 to the existing verification workflow.\nThe pinned client inspects the existing daemon and the Rust base image.\nCoverage requirements and container limits remain unchanged.",
   "evidence": [
     "home/dot_agents/skills/verification-tools/SKILL.md",
     "home/dot_agents/skills/development-assurance/references/verification-contract.md",

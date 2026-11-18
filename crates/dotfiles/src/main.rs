@@ -105,7 +105,7 @@ enum Commands {
     Assure {
         point: dotfiles::assure::AgentPoint,
         /// Check Stop reply prose in this owner-selected language.
-        #[arg(long = "reply-language")]
+        #[arg(long = "reply-language", ignore_case = true)]
         language: Option<dotfiles::assure::ReplyLanguage>,
     },
     /// Preserve verified publisher sources while checking authored changes.

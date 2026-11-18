@@ -21,10 +21,10 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            mise_sha256: be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d
+            mise_sha256: b603a4f48563fc379a794d9ea2cf9f709ed276c9141068604cb0c59fa3e674a9
           - os: windows-latest
             # mise-action checks the extracted mise.exe, not the zip whose digest versions.toml records for the host installer.
-            mise_sha256: 847d85d94808a77e998388d25f33537ff0f197ae74f1cd5d5cf65e4ba0e7af4e
+            mise_sha256: a448e986baedc177173b5f63c81343269eef6fef8e3e916b6151580a80e115aa
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -34,7 +34,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde
         with:
-          version: v2026.10.24
+          version: v2026.11.10
           sha256: ${{ matrix.mise_sha256 }}
           install_args: rust just chezmoi
           cache: false

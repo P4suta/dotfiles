@@ -5,14 +5,14 @@
 		"check": "tsc --noEmit"
 	},
 	"devDependencies": {
-		"@opencode-ai/plugin": "1.19.5",
-		"@opencode-ai/sdk": "1.19.5",
-		"@opencode/plugin": "2.2.5",
+		"@opencode-ai/plugin": "1.19.6",
+		"@opencode-ai/sdk": "1.19.6",
+		"@opencode/plugin": "2.3.2",
 		"@types/bun": "1.4.4",
 		"@types/json-schema": "7.0.15",
 		"typescript": "7.0.2"
 	},
 	"patchedDependencies": {
-		"@opencode/ai@2.2.5": "xtask/patches/opencode-ai-exact-optional-properties.patch"
+		"@opencode/ai@2.3.2": "xtask/patches/opencode-ai-exact-optional-properties.patch"
 	}
 }

@@ -1,6 +1,6 @@
 [tools]
 "dotfiles" = "latest"
 "dotguard" = "latest"
-"chezmoi" = "2.73.3|latest"
-"ansible-core" = "2.21.5"
+"chezmoi" = "2.74.1|latest"
+"ansible-core" = "2.22.0"
 "zsh" = "5.9.2"

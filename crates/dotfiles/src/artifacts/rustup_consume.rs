@@ -2184,7 +2184,7 @@ mod tests {
         "DYLD_FALLBACK_LIBRARY_PATH",
     ];
     const KANI_VERSION: &str = "0.68.0";
-    const RUST_VERSION: &str = "1.99.1";
+    const RUST_VERSION: &str = "1.100.0";
     const BUNDLE_CHANNEL: &str = "nightly-2026-08-21";
     const BUNDLE_RUSTC: &str = "rustc 1.100.0-nightly (8925ea358 2026-08-20)";
     const UNIX_TARGETS: [Target; 4] = [
@@ -2272,7 +2272,11 @@ mod tests {
         let catalog = NativeRustCatalog::parse(&toml::to_string(&policy)?)?;
         let mut components: Vec<_> = CORE_COMPONENTS.into_iter().map(str::to_owned).collect();
         components.extend(["clippy".into(), "rustfmt".into()]);
-        let stable = preflight_manifest("2026-10-15", "1.99.1 (58cf8f9c3 2026-10-13)", &components);
+        let stable = preflight_manifest(
+            "2026-11-12",
+            &format!("{RUST_VERSION} (0ef1bc386 2026-11-09)"),
+            &components,
+        );
         let nightly_components: Vec<_> = CORE_COMPONENTS
             .into_iter()
             .chain(NIGHTLY_COMPONENTS)

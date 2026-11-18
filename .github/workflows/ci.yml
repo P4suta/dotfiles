@@ -3,8 +3,8 @@ on:
   pull_request:
   merge_group:
 permissions:
-  contents: read
-  issues: read
+  contents: read # Checkout reads the repository source.
+  issues: read # The dependency gate reads the linked issue.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -45,8 +45,8 @@ jobs:
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
         with:
-          version: v2026.10.24
-          sha256: be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d
+          version: v2026.11.10
+          sha256: b603a4f48563fc379a794d9ea2cf9f709ed276c9141068604cb0c59fa3e674a9
           install_args: rust just
           cache: false
       - name: Check tool locks for every host OS
