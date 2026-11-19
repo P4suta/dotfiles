@@ -3,7 +3,7 @@
   // The shared preset holds the schedule, grouping, digest pins, and automerge policy.
   // An automatic merge waits for the `required` status, which includes the dependency gate in ci.yml.
   extends: ['github>P4suta/renovate-config'],
-  // A release waits three days before Renovate proposes it, so a pulled release never reaches a host.
+  // Timestamped releases wait three days before Renovate proposes them.
   minimumReleaseAge: '3 days',
   // Version changes arrive only through these managers, as pull requests that pass the required checks.
   enabledManagers: ['github-actions', 'mise', 'cargo', 'bun', 'npm', 'dockerfile', 'custom.regex'],
@@ -58,6 +58,10 @@
       matchManagers: ['dockerfile'],
       matchDatasources: ['deb'],
       matchFileNames: ['xtask/proofs/Dockerfile'],
+      minimumReleaseAgeBehaviour: 'timestamp-optional',
+      automerge: false,
+      groupName: 'proof image Debian packages',
+      prBodyNotes: ['Advance `DEBIAN_SNAPSHOT` to a snapshot that contains every pin and satisfies the configured release age.'],
       registryUrls: [
         'https://deb.debian.org/debian?suite=bookworm&components=main&binaryArch=amd64',
         'https://deb.debian.org/debian?suite=bookworm-updates&components=main&binaryArch=amd64',

@@ -9,8 +9,16 @@ RUN cargo install --locked kani-verifier --version 0.68.0 \
     && cargo install --locked cargo-fuzz --version 0.13.2 \
     && rm -rf /usr/local/cargo/registry
 
+ARG DEBIAN_SNAPSHOT=20261116T000000Z
+
 # The gungraun benchmarks of the budget gate count instructions and heap peaks with Valgrind, which no other host of this repository runs.
-RUN apt-get update \
+# Keep apt pins available after the live indexes replace a package build.
+RUN sed -i \
+      -e "s|http://deb.debian.org/debian-security|https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}/|g" \
+      -e "s|http://deb.debian.org/debian|https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/|g" \
+      -e '/^Signed-By:/a Check-Valid-Until: no' \
+      /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends valgrind=1:3.19.0-1 \
     && rm -rf /var/lib/apt/lists/* \
     && cargo install --locked gungraun-runner --version 0.20.0 \
