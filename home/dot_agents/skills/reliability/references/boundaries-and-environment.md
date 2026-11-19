@@ -38,3 +38,14 @@ Probe the condition the user needs, such as a ready endpoint, not only process e
 Treat resource limits, cache eviction, disk exhaustion, file-descriptor limits, and subprocess output backpressure as external failure inputs.
 Control their limits in tests and keep the primary cause.
 When the contract includes platform behavior, use the project's documented hosted platform runners or pinned container.
+
+## Separate host filtering from remote behavior
+
+When a discovery request gets no reply, check the host's own packet filtering before concluding that the remote device ignored it.
+A per-app firewall can drop one binary's inbound replies while another binary on the same host receives them.
+Compare the failing request from a platform-signed tool and the binary under test, keeping its target, interface, and payload fixed.
+When discovery uses broadcast, compare broadcast replies from both binaries.
+A successful unicast control shows that the device answers, without establishing that broadcast replies can pass the firewall.
+When the device ignores a broadcast ping, connect to its documented TCP port instead.
+Record each binary's firewall decision beside the evidence, and recheck it after a rebuild.
+On macOS, read [firewall observations](macos-application-firewall.md) for the commands and a dated comparison.

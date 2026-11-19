@@ -1,12 +1,13 @@
 {
-  "revision": "b67d26b2b5efde5f2dbef26a568422b145001d31e5ca265cbb51520577bd8598",
+  "revision": "c12ba91af963eb1f028e0d18c3db4f0e3bbf896190dc244a9b4737ac1eb985f8",
   "outcome": "implemented",
-  "reason": "Use pinned verification inputs, project runners, and deterministic adapters while keeping timeouts and unavailable live observations inconclusive.",
+  "reason": "Compare the failing discovery request under the same target, interface, and payload, and keep unicast reachability separate from broadcast filtering.",
   "evidence": [
     "home/dot_agents/skills/reliability/SKILL.md",
     "home/dot_agents/skills/reliability/references/time-and-randomness.md",
     "home/dot_agents/skills/reliability/references/boundaries-and-environment.md",
+    "home/dot_agents/skills/reliability/references/macos-application-firewall.md",
     "home/dot_agents/skills/reliability/references/tests-and-diagnostics.md"
   ],
-  "revisit": null
+  "revisit": "Repeat the macOS firewall comparison after a macOS release changes the firewall, or when a rebuild test shows whether a binary's firewall decision persists."
 }

@@ -1,12 +1,13 @@
 {
-  "revision": "b6d992f6b53c077acbf0881cd69c237cf8ddec764def5131f4584791446cb9d1",
+  "revision": "7b73a284bf4eb6000c55cacf2d2ae227d0cad66a10d7aaad34990efc1f4775af",
   "outcome": "implemented",
-  "reason": "Bind Docker CLI 29.10.0 to the existing verification workflow.\nThe pinned client inspects the existing daemon and the Rust base image.\nCoverage requirements and container limits remain unchanged.",
+  "reason": "Keep the Rust observation tied to its immutable toolchain pin and preserve the verified conversions.\nBind Docker CLI 29.10.0 to the existing bounded workflow.",
   "evidence": [
     "home/dot_agents/skills/verification-tools/SKILL.md",
+    "home/dot_agents/skills/verification-tools/references/rust.md",
     "home/dot_agents/skills/development-assurance/references/verification-contract.md",
     "crates/dotfiles/src/verification/mod.rs",
     "docs/adr/keep-project-checks-authoritative-in-agent-sessions.md"
   ],
-  "revisit": null
+  "revisit": "Recheck the vec! expansion after a Rust toolchain update, and remove the note when the macro no longer expands through Box."
 }
