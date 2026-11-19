@@ -4,10 +4,14 @@ Decide what must run from the actual crate features, test targets, toolchain, an
 Keep ordinary formatting, compiler checks, and strict Clippy checks in the fast authoritative gate.
 Use `formal-assurance` for implementation proofs, and never treat a dynamic check as a soundness proof.
 
-A gate that forbids `Box` or `dyn` through Clippy's [`disallowed_types`](https://clippy.rust-lang.org/stable/index.html#disallowed_types) or a resolved-type lint also applies to the types that standard-library code returns or expands to.
-[`ScopedJoinHandle::join`](https://doc.rust-lang.org/std/thread/struct.ScopedJoinHandle.html#method.join) returns [`std::thread::Result`](https://doc.rust-lang.org/std/thread/type.Result.html), whose error type is `Box<dyn Any + Send + 'static>`, so such a lint refuses the call.
+Clippy's [`disallowed_types`](https://clippy.rust-lang.org/stable/index.html#disallowed_types) checks configured type paths, including paths in macro expansions.
+It doesn't reject a call merely because its inferred return type contains `Box` or `dyn`.
+[`ScopedJoinHandle::join`](https://doc.rust-lang.org/std/thread/struct.ScopedJoinHandle.html#method.join) returns [`std::thread::Result`](https://doc.rust-lang.org/std/thread/type.Result.html), whose error type is `Box<dyn Any + Send + 'static>`.
+A resolved-type lint that inspects the return type can refuse that call.
 Sending each thread's result through [`std::sync::mpsc`](https://doc.rust-lang.org/std/sync/mpsc/index.html) avoids that type, and [`std::thread::scope`](https://doc.rust-lang.org/std/thread/fn.scope.html) still joins the threads and panics if one of them panicked.
-With Rust 1.100.0 on 2026-11-16, `vec![a, b]` expanded through `Box` and tripped a `disallowed-types` entry for `Box`, while `[a, b].to_vec()` passed.
+With Rust 1.100.0 on 2026-11-19, [`vec![a, b]`](https://doc.rust-lang.org/std/macro.vec.html) expanded through `Box` and tripped a `disallowed-types` entry for `Box`, while [`[a, b].to_vec()`](https://doc.rust-lang.org/std/primitive.slice.html#method.to_vec) passed.
+The slice conversion requires [`Clone`](https://doc.rust-lang.org/std/clone/trait.Clone.html).
+[`Vec::from([a, b])`](https://doc.rust-lang.org/std/vec/struct.Vec.html#impl-From%3C%5BT;+N%5D%3E-for-Vec%3CT%3E) moves non-`Clone` elements and passed the same Clippy configuration on that date.
 The standard library doesn't document that expansion, so recheck it after a toolchain update before a gate decision depends on it.
 
 For undefined behavior and unsafe contracts, add a pinned compatible nightly with [Miri](https://github.com/rust-lang/miri) and run the applicable production tests through it.

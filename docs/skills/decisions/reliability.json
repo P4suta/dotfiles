@@ -1,7 +1,7 @@
 {
-  "revision": "ff1b2e7fd52f792e7dddb2134ff687fc4d10a27d8e707a291a4a9ec66a2ca685",
+  "revision": "c12ba91af963eb1f028e0d18c3db4f0e3bbf896190dc244a9b4737ac1eb985f8",
   "outcome": "implemented",
-  "reason": "Separate host packet filtering from remote device behavior, and keep the macOS firewall comparison as a dated observation with its untested rebuild question.",
+  "reason": "Compare the failing discovery request under the same target, interface, and payload, and keep unicast reachability separate from broadcast filtering.",
   "evidence": [
     "home/dot_agents/skills/reliability/SKILL.md",
     "home/dot_agents/skills/reliability/references/time-and-randomness.md",

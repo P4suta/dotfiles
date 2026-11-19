@@ -1,7 +1,7 @@
 {
-  "revision": "2bf153ce27bf6cbcf7f57fe638869e42edccded7e556cda4999e4cbbee21adb0",
+  "revision": "5e02e3c6d618f0683c0d5f00b322bedae7b70deda9552fe1233ba5a738c5ed98",
   "outcome": "implemented",
-  "reason": "Name the standard-library constructs that trip a type-ban gate and the alternatives that pass, and tie the macro expansion to the toolchain version that showed it.",
+  "reason": "Distinguish Clippy type paths from resolved return types, link the standard-library contracts, and preserve non-Clone values with the verified array conversion.",
   "evidence": [
     "home/dot_agents/skills/verification-tools/SKILL.md",
     "home/dot_agents/skills/verification-tools/references/rust.md",

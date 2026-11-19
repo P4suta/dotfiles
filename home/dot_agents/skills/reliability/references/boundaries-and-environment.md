@@ -43,7 +43,9 @@ When the contract includes platform behavior, use the project's documented hoste
 
 When a discovery request gets no reply, check the host's own packet filtering before concluding that the remote device ignored it.
 A per-app firewall can drop one binary's inbound replies while another binary on the same host receives them.
-Send the same unicast request from a platform-signed tool and from the binary under test.
+Compare the failing request from a platform-signed tool and the binary under test, keeping its target, interface, and payload fixed.
+When discovery uses broadcast, compare broadcast replies from both binaries.
+A successful unicast control shows that the device answers, without establishing that broadcast replies can pass the firewall.
 When the device ignores a broadcast ping, connect to its documented TCP port instead.
 Record each binary's firewall decision beside the evidence, and recheck it after a rebuild.
 On macOS, read [firewall observations](macos-application-firewall.md) for the commands and a dated comparison.
