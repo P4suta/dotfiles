@@ -1,12 +1,13 @@
 {
-  "revision": "ea6e376a5170b101603e9abe1b7945b4536ea9ffed014e2e1342348606a823b7",
+  "revision": "5e02e3c6d618f0683c0d5f00b322bedae7b70deda9552fe1233ba5a738c5ed98",
   "outcome": "implemented",
-  "reason": "Keep required coverage and actual project check results without separate verification inventories or task declarations, while preserving CI and release timing.",
+  "reason": "Distinguish Clippy type paths from resolved return types, link the standard-library contracts, and preserve non-Clone values with the verified array conversion.",
   "evidence": [
     "home/dot_agents/skills/verification-tools/SKILL.md",
+    "home/dot_agents/skills/verification-tools/references/rust.md",
     "home/dot_agents/skills/development-assurance/references/verification-contract.md",
     "crates/dotfiles/src/verification/mod.rs",
     "docs/adr/keep-project-checks-authoritative-in-agent-sessions.md"
   ],
-  "revisit": null
+  "revisit": "Recheck the vec! expansion after a Rust toolchain update, and remove the note when the macro no longer expands through Box."
 }
