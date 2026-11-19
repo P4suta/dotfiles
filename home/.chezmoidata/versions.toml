@@ -7,30 +7,30 @@
 # A version update takes every checksum from the release's SHASUMS256.txt.
 [mise]
 # renovate: datasource=github-releases depName=jdx/mise extractVersion=^v(?<version>.+)$
-version = "2026.10.24"
+version = "2026.11.10"
 
 [mise.sha256]
-linux-arm64 = "ae1151a87d70146119f68f7378001a12f09d2a38853087ed6139b7527a55f148"
-linux-x64 = "be97dbac1c0b1fe08bd8c0cf01690f4273ea9aa02ad766b98d4e20c43eb9059d"
-macos-arm64 = "ac0ee145cb145affe3ea60623a4abdb253e5ad1f938def299e633e816c0b8523"
-macos-x64 = "399e46f059f8ffa3f5a4321513996f13100f2bc2513e5464ba666ed4c117039a"
-windows-x64 = "cfffec40ded67f1d04039eb388827ad8de0a0089d5c9d9abc57c6c85c0aedc71"
+linux-arm64 = "86ef275d541c5243cd20b1c0fcd16810e5f3601113d8db09278d0608617a3833"
+linux-x64 = "b603a4f48563fc379a794d9ea2cf9f709ed276c9141068604cb0c59fa3e674a9"
+macos-arm64 = "3f4ba9d21c6f2170048d0870fd98ab287e04730b76a6fc8e83964d59c80eb704"
+macos-x64 = "7eab8054d301b75dcbd93440ff184bee6864d95799cfdc4a00ce858313b68783"
+windows-x64 = "9dc997718aa70280c344dd197b6d8e2315eef71604a94c24e5e07c2d09489693"
 
 # The versions of the shared tools on every profile, unless a profile's own `tool_versions` names another.
 [shared_tools.versions]
 shellcheck = "0.11.0"
 shfmt = "3.14.1"
-ruff = "0.17.1"
-biome = "2.6.2"
+ruff = "0.17.5"
+biome = "2.6.8"
 actionlint = "1.7.12"
-zizmor = "1.31.1"
+zizmor = "1.32.0"
 taplo = "0.10.0"
 hadolint = "2.15.1"
 just = "1.59.0"
 java = "temurin-25"
 rust = "stable"
 # renovate: datasource=github-releases depName=github/gh-stack
-"github:github/gh-stack" = "v0.2.1"
+"github:github/gh-stack" = "v0.3.0"
 # renovate: datasource=github-releases depName=terrastruct/d2 extractVersion=^v(?<version>.+)$
 "aqua:terrastruct/d2" = "0.9.0"
 # renovate: datasource=github-releases depName=charmbracelet/freeze extractVersion=^v(?<version>.+)$

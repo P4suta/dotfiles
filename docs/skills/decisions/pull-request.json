@@ -1,7 +1,7 @@
 {
-  "revision": "b0ad4e357a8c3a35dfcdec280dae29a892fe9b3b703c1754bd07d6948a8cd2d4",
+  "revision": "4ff369cbd103f84864a86c54d4b132a0a97aea93e1f20a2718b1219c6ddacf47",
   "outcome": "implemented",
-  "reason": "Bind required upstream notices to exact repositories and preserve upstream prose through immutable Git baselines.\nKeep contribution requirements in the existing PR workflow and preserve technical ownership terms while addressing the user directly.\nUse the standing current-head PR quota exception without another confirmation for already authorized personal non-fork PR merges.\nPreserve required checks, reviews, supported findings, publication holds, and truthful review status.\nKeep the installed guidance for concise PR descriptions.",
+  "reason": "Bind the existing PR workflow to GitHub CLI 2.105.0.\nLive repository and issue checks pass with the pinned client.\nThe existing entrypoint retains the conditional authoring references and review requirements.",
   "evidence": [
     "docs/adr/merge-after-coderabbit-review-limits.md",
     "docs/adr/scope-contribution-exceptions-to-upstream-sources.md",
@@ -92,7 +92,7 @@
   "revisit": null,
   "size": {
     "outcome": "keep",
-    "reason": "Keep contribution prerequisites in the entrypoint and registration details in the existing workflow reference.",
+    "reason": "Keep destination, authorization, issue, and integration rules together because every PR operation depends on them.\nConditional workflow examples and attachment procedures already live in references.",
     "revisit": null
   }
 }

@@ -2889,12 +2889,12 @@ mod job_tests {
             include_bytes!("../../../.mise/locks/yamllint/1.38.0/uv.lock"),
         ),
         (
-            ".mise/locks/pypi-ansible-core/2.21.5/pyproject.toml",
-            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.5/pyproject.toml"),
+            ".mise/locks/pypi-ansible-core/2.22.0/pyproject.toml",
+            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.22.0/pyproject.toml"),
         ),
         (
-            ".mise/locks/pypi-ansible-core/2.21.5/uv.lock",
-            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.21.5/uv.lock"),
+            ".mise/locks/pypi-ansible-core/2.22.0/uv.lock",
+            include_bytes!("../../../.mise/locks/pypi-ansible-core/2.22.0/uv.lock"),
         ),
     ];
 

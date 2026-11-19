@@ -1280,7 +1280,7 @@ mod tests {
         );
         assert_eq!(
             installation(Tool::Ruff).unwrap(),
-            "mise install ruff@0.17.1"
+            "mise install ruff@0.17.5"
         );
     }
 

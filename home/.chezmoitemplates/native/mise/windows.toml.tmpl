@@ -3,7 +3,7 @@
 {{- range (includeTemplate "partials/mise_tools" (dict "platform" .platforms.windows "shared" .shared_tools "profile" .profile "role" .role) | fromJson) }}
 {{- $tool := index . 0 }}
 {{- if not (hasKey $pins $tool) }}
-{{ $tool | quote }} = {{ index . 1 | quote }}
+{{ $tool | quote }} = {{ includeTemplate "partials/mise-tool-spec" . }}
 {{- end }}
 {{- end }}
 {{- range $tool, $version := $pins }}

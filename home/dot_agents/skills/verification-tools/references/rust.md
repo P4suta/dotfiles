@@ -9,7 +9,7 @@ It doesn't reject a call merely because its inferred return type contains `Box` 
 [`ScopedJoinHandle::join`](https://doc.rust-lang.org/std/thread/struct.ScopedJoinHandle.html#method.join) returns [`std::thread::Result`](https://doc.rust-lang.org/std/thread/type.Result.html), whose error type is `Box<dyn Any + Send + 'static>`.
 A resolved-type lint that inspects the return type can refuse that call.
 Sending each thread's result through [`std::sync::mpsc`](https://doc.rust-lang.org/std/sync/mpsc/index.html) avoids that type, and [`std::thread::scope`](https://doc.rust-lang.org/std/thread/fn.scope.html) still joins the threads and panics if one of them panicked.
-With Rust 1.100.0 on 2026-11-19, [`vec![a, b]`](https://doc.rust-lang.org/std/macro.vec.html) expanded through `Box` and tripped a `disallowed-types` entry for `Box`, while [`[a, b].to_vec()`](https://doc.rust-lang.org/std/primitive.slice.html#method.to_vec) passed.
+With the [Rust toolchain pinned for the 2026-11-19 check](https://github.com/P4suta/dotfiles/blob/f5aee8b7aa1b35797196b6fa8c038d9956f78a58/mise.toml#L2), [`vec![a, b]`](https://doc.rust-lang.org/std/macro.vec.html) expanded through `Box` and tripped a `disallowed-types` entry for `Box`, while [`[a, b].to_vec()`](https://doc.rust-lang.org/std/primitive.slice.html#method.to_vec) passed.
 The slice conversion requires [`Clone`](https://doc.rust-lang.org/std/clone/trait.Clone.html).
 [`Vec::from([a, b])`](https://doc.rust-lang.org/std/vec/struct.Vec.html#impl-From%3C%5BT;+N%5D%3E-for-Vec%3CT%3E) moves non-`Clone` elements and passed the same Clippy configuration on that date.
 The standard library doesn't document that expansion, so recheck it after a toolchain update before a gate decision depends on it.

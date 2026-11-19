@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             != [
                 "which",
                 "--tool",
-                "github:github/gh-stack@v0.2.1",
+                "github:github/gh-stack@v0.3.0",
                 "gh-stack",
             ]
         {

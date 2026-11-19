@@ -1,7 +1,7 @@
 {
-  "revision": "5e02e3c6d618f0683c0d5f00b322bedae7b70deda9552fe1233ba5a738c5ed98",
+  "revision": "7b73a284bf4eb6000c55cacf2d2ae227d0cad66a10d7aaad34990efc1f4775af",
   "outcome": "implemented",
-  "reason": "Distinguish Clippy type paths from resolved return types, link the standard-library contracts, and preserve non-Clone values with the verified array conversion.",
+  "reason": "Keep the Rust observation tied to its immutable toolchain pin and preserve the verified conversions.\nBind Docker CLI 29.10.0 to the existing bounded workflow.",
   "evidence": [
     "home/dot_agents/skills/verification-tools/SKILL.md",
     "home/dot_agents/skills/verification-tools/references/rust.md",

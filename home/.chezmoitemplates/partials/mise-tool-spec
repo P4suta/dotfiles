@@ -1,0 +1,5 @@
+{{- if eq (index . 0) "github:github/gh-stack" -}}
+{ version = {{ index . 1 | quote }}, bin = "gh-stack" }
+{{- else -}}
+{{ index . 1 | quote }}
+{{- end -}}

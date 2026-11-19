@@ -1,7 +1,7 @@
 {
-  "revision": "6ddbbe5bc09191b8c515e37022e62a9233f40e3d91dab9d86f49f87bc506f6f6",
+  "revision": "6ad205226a29e5dbb663463b3f68f12115a41bae9ec22ba19f6d022fb85ae6d5",
   "outcome": "implemented",
-  "reason": "The skill tool inventory now pins mise 2026.10.24. Trust, execution, bootstrap checksum handling, and verification behavior remain unchanged. This release reports a tool requested by a v-prefixed tag under its version without the prefix, and the code environment admits that form. Native bootstrap verification is still pending.",
+  "reason": "The skill now binds mise 2026.11.10 and distinguishes archive digests from executable digests.\nWindows and Mac commands report the pinned release after checksum verification.\nThe existing workflow still owns trust, version selection, and native rollout.",
   "evidence": [
     "home/dot_agents/skills/mise/SKILL.md",
     "home/dot_agents/skills/mise/tools.toml",

@@ -81,6 +81,29 @@ fn answer(output: &Output) -> Result<Value> {
 }
 
 #[test]
+fn lowercase_language_names_reach_the_reply_gate() -> Result<()> {
+    let home = tempfile::tempdir()?;
+    for point in ["stop", "reply"] {
+        for (language, reply) in [
+            ("japanese", "The requested checks passed."),
+            ("english", "The checks passed. The change is ready."),
+        ] {
+            let blocked = answer(&reply_gate(
+                home.path(),
+                point,
+                language,
+                &input("codex", json!(reply), false),
+            )?)?;
+            assert_eq!(
+                blocked["decision"], "block",
+                "{point}: {language}: {blocked}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn both_clients_block_english_then_admit_a_japanese_rewrite() -> Result<()> {
     let home = tempfile::tempdir()?;
     for client in ["claude", "codex"] {

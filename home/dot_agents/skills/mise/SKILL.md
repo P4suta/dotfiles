@@ -21,6 +21,8 @@ See the [official documentation](https://mise.jdx.dev/).
 
 Keep development and CI on the same declared toolchain, and invoke tasks without interactive shell activation.
 Pin mise and its CI action where reproducibility requires it, and follow the repository's SHA-pinning policy.
+Match each checksum to the downloaded asset.
+Record separate digests when an installer verifies an archive and CI verifies the extracted executable.
 Store secrets through `doppler`.
 
 Use `renovate` for tested updates, and leave versions alone during an unrelated fix.

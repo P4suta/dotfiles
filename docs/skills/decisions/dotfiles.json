@@ -1,7 +1,7 @@
 {
-  "revision": "129c98b24211cec194d40c164221ede1bf2fe97cf2fc09c9969aa09efbcfafd1",
+  "revision": "9fd9f26114c8dbd15a30d3e192deabfcf59eb87682227a82bfc67eb010815ea9",
   "outcome": "implemented",
-  "reason": "Preserve scoped native rollout and add reviewed-checkout execution, recursive previews, and native export hash checks after stale policy and incomplete directory previews exposed gaps.",
+  "reason": "Bind the existing rollout workflow to chezmoi 2.74.1 and ansible-core 2.22.0.\nThe release review preserves native profiles, scoped previews, and local authentication.\nThe portable Ansible lock includes the complete dependency set.",
   "evidence": [
     "home/dot_agents/skills/dotfiles/SKILL.md",
     "home/dot_agents/skills/dotfiles/tools.toml",
