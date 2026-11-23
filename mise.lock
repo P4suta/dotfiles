@@ -341,6 +341,10 @@ provenance = "github-attestations"
 version = "0.14.12"
 backend = "aqua:dalance/procs"
 specifiers = ["0.14.12"]
+unsupported_platforms = [
+    "linux-arm64",
+    "linux-arm64-musl",
+]
 
 [tools."aqua:dalance/procs"."platforms.linux-x64"]
 checksum = "sha256:81964faf9d5cd0e9f399d5d0954fb6fe4d4d9f7d3cbec4507633df5a45b11713"
@@ -542,6 +546,10 @@ url_api = "https://api.github.com/repos/ast-grep/ast-grep/releases/assets/753401
 version = "18.24.8"
 backend = "aqua:atuinsh/atuin"
 specifiers = ["18.24.8"]
+unsupported_platforms = [
+    "macos-x64",
+    "macos-x64-baseline",
+]
 
 [tools.atuin.options]
 libc = "musl"
@@ -1025,6 +1033,10 @@ provenance = "cosign"
 version = "1.3.7"
 backend = "aqua:theryangeary/choose"
 specifiers = ["1.3.7"]
+unsupported_platforms = [
+    "macos-x64",
+    "macos-x64-baseline",
+]
 
 [tools.choose."platforms.linux-arm64"]
 checksum = "sha256:0db1d789ededcedd2c56222eb28f45d5e5e1c56717c0ba5d26c780696bbe3420"
@@ -1194,6 +1206,10 @@ conda_deps = [
 version = "0.20.1"
 backend = "aqua:dandavison/delta"
 specifiers = ["0.20.1"]
+unsupported_platforms = [
+    "macos-x64",
+    "macos-x64-baseline",
+]
 
 [tools.delta."platforms.linux-arm64"]
 checksum = "sha256:da7f4338f593572ff426ae153e0870e2fdc72729416eff551b40cdeb67940db8"
@@ -2627,6 +2643,10 @@ provenance = "github-attestations"
 version = "29.0.0"
 backend = "aqua:dathere/qsv"
 specifiers = ["29.0.0"]
+unsupported_platforms = [
+    "macos-x64",
+    "macos-x64-baseline",
+]
 
 [tools.qsv."platforms.linux-arm64"]
 checksum = "sha256:d84b933fcff5a338b3afa32d652a617f15afbde25cb19934db776601099248e0"
