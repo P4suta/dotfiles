@@ -45,8 +45,8 @@ jobs:
       - uses: jdx/mise-action@fc42bcc7ddbf51124c30f95a877a0c5168a3bfde
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
         with:
-          version: v2026.11.10
-          sha256: b603a4f48563fc379a794d9ea2cf9f709ed276c9141068604cb0c59fa3e674a9
+          version: v2026.11.14
+          sha256: 6fa596291e9758106f761fea4f8e7fac6c3e7ff4714d5c0b9a76e16068db14f6
           install_args: rust just
           cache: false
       - name: Check tool locks for every host OS

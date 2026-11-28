@@ -95,7 +95,7 @@ legacy = ["du"]
 preferred = "dust"
 tool = "dust"
 # renovate: datasource=github-releases depName=bootandy/dust extractVersion=^v(?<version>.+)$
-version = "1.2.7"
+version = "1.2.8"
 reason = "It bounds its output and walks in parallel, and storage-scout plans scans and cleanup."
 keep = "None."
 next = "`storage-scout scan <path>` for disk usage and `storage-scout clean` to reclaim space, since the hook refuses every recursive size walk, including dust"
@@ -135,7 +135,7 @@ legacy = ["colordiff"]
 preferred = "delta"
 tool = "delta"
 # renovate: datasource=github-releases depName=dandavison/delta
-version = "0.20.1"
+version = "0.22.0"
 reason = "It pages Git's diffs with syntax highlighting."
 keep = "None."
 next = "delta {args}"
@@ -145,7 +145,7 @@ legacy = ["jq"]
 preferred = "jaq"
 tool = "jaq"
 # renovate: datasource=github-releases depName=01mf02/jaq extractVersion=^v(?<version>.+)$
-version = "3.1.2"
+version = "3.2.0"
 reason = "It runs faster and refuses ambiguous filters that jq accepts."
 keep = "A filter that relies on a jq builtin jaq lacks."
 next = "jaq {args}"
@@ -228,7 +228,7 @@ legacy = []
 preferred = "delta"
 tool = "delta"
 # renovate: datasource=github-releases depName=dandavison/delta
-version = "0.20.1"
+version = "0.22.0"
 reason = "It renders structural Git diffs as the pager on every host."
 keep = "Git produces its own patch bytes before the pager runs."
 next = "delta {args}"
