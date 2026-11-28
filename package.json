@@ -7,8 +7,8 @@
 	"devDependencies": {
 		"@opencode-ai/plugin": "1.19.6",
 		"@opencode-ai/sdk": "1.19.6",
-		"@opencode/plugin": "2.3.2",
-		"@types/bun": "1.4.4",
+		"@opencode/plugin": "2.4.1",
+		"@types/bun": "1.4.5",
 		"@types/json-schema": "7.0.15",
 		"typescript": "7.0.2"
 	},
